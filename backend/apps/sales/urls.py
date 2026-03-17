@@ -1,0 +1,20 @@
+from django.urls import path
+from apps.sales import views
+
+urlpatterns = [
+    path('orders', views.OrdersCreateView.as_view()),
+    path('orders/open', views.OrdersOpenView.as_view()),
+    path('orders/closed', views.OrdersClosedView.as_view()),
+    path('orders/canceled', views.OrdersCanceledView.as_view()),
+    path('orders/<uuid:id>/items', views.OrderItemsView.as_view()),
+    path('orders/<uuid:id>/items/<int:item_id>', views.OrderItemDeleteView.as_view()),
+    path('orders/<uuid:id>/send-kitchen', views.OrderSendKitchenView.as_view()),
+    path('orders/<uuid:id>/close', views.OrderCloseView.as_view()),
+    path('orders/<uuid:id>/cancel', views.OrderCancelView.as_view()),
+    path('orders/<uuid:id>', views.OrderDeleteView.as_view()),
+    path('cash/open', views.CashOpenView.as_view()),
+    path('cash/move', views.CashMoveView.as_view()),
+    path('cash/close', views.CashCloseView.as_view()),
+    path('cash/status', views.CashStatusView.as_view()),
+    path('config', views.ConfigView.as_view()),
+]

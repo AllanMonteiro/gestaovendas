@@ -1,0 +1,13 @@
+{
+  "apps": [
+    {
+      "name": "sorveteria-pos-agent",
+      "script": "python",
+      "args": "app.py",
+      "cwd": "agent",
+      "env": {
+        "AGENT_PORT": "9876"
+      }
+    }
+  ]
+}

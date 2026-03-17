@@ -1,0 +1,25 @@
+http://{$API_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy backend:8000
+}
+
+http://{$APP_DOMAIN} {
+  encode zstd gzip
+  reverse_proxy frontend:80
+}
+
+:80 {
+  @local host 127.0.0.1 localhost
+  handle @local {
+    encode zstd gzip
+    handle /api/* {
+      reverse_proxy backend:8000
+    }
+    handle /health {
+      reverse_proxy backend:8000
+    }
+    handle {
+      reverse_proxy frontend:80
+    }
+  }
+}

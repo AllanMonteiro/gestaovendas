@@ -1,0 +1,143 @@
+services:
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sorveteria_pos
+      POSTGRES_USER: sorveteria
+      POSTGRES_PASSWORD: sorveteria
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sorveteria -d sorveteria_pos"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.production
+    environment:
+      DJANGO_LOG_LEVEL: INFO
+      RUN_SEED: ${RUN_SEED:-0}
+      RUN_COLLECTSTATIC: ${RUN_COLLECTSTATIC:-0}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8001}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2.8-alpine
+    restart: unless-stopped
+    environment:
+      API_DOMAIN: ${API_DOMAIN:-api.seudominio.com}
+      APP_DOMAIN: ${APP_DOMAIN:-app.seudominio.com}
+    ports:
+      - "8000:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - frontend
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  backups:
+    image: postgres:17
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env.production
+    environment:
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - db_backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -u
+        while true; do
+          ts=$$(date +%Y%m%d_%H%M%S)
+          echo "Starting backup $${ts}"
+          if pg_dump --no-owner --no-privileges "$${DATABASE_URL}" > "/backups/sorveteria_pos_$${ts}.sql"; then
+            echo "Backup finished: /backups/sorveteria_pos_$${ts}.sql"
+          else
+            echo "Backup failed for $${ts}; retrying on next cycle."
+            rm -f "/backups/sorveteria_pos_$${ts}.sql" || true
+          fi
+          find /backups -type f -mtime +$${BACKUP_RETENTION_DAYS} -delete || true
+          sleep $$((BACKUP_INTERVAL_HOURS*3600))
+        done
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+  db_backups:

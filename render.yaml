@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: sorveteria-pos-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: chmod +x render-build.sh render-start.sh && ./render-build.sh
+    startCommand: ./render-start.sh
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: DEBUG
+        value: "0"
+      - key: REQUIRE_AUTH
+        value: "1"
+      - key: SECURE_SSL_REDIRECT
+        value: "1"
+      - key: WEB_CONCURRENCY
+        value: "2"
