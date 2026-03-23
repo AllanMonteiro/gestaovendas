@@ -2,15 +2,14 @@ services:
   # 1. Backend: Web Service do Django
   - type: web
     name: gestaovendas-backend
-    runtime: python
+    env: python
     rootDir: backend
-    plan: free
-    buildCommand: chmod +x render-build.sh render-start.sh && ./render-build.sh
-    startCommand: ./render-start.sh
+    buildCommand: "./render-build.sh"
+    startCommand: "./render-start.sh"
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
-        value: postgresql://postgres:Sorveteria2026@db.ihvnpkdtgcvkcskjkmmh.supabase.co:5432/postgres
+        value: "postgresql://postgres:Sorveteria2026@db.ihvnpkdtgcvkcskjkmmh.supabase.co:5432/postgres"
       - key: DEBUG
         value: "0"
       - key: DJANGO_SECRET_KEY
@@ -24,21 +23,21 @@ services:
       - key: WEB_CONCURRENCY
         value: "2"
       - key: PYTHON_VERSION
-        value: 3.11.11
+        value: "3.11.11"
       - key: REQUIRE_AUTH
         value: "1"
 
-  # 2. Frontend: Static Site do Vite/React
+  # 2. Frontend: site stático do Vite/React
   - type: web
     name: gestaovendas-frontend
     env: static
     rootDir: frontend
-    buildCommand: npm install && npm run build
+    buildCommand: "npm install && npm run build"
     publishDir: dist
     envVars:
       - key: VITE_API_URL
         value: "https://gestaovendas-backend.onrender.com"
     routes:
       - type: rewrite
-        source: /*
-        destination: /index.html
+        source: "/*"
+        destination: "/index.html"
