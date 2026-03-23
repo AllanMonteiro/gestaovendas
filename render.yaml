@@ -3,6 +3,7 @@ services:
   - type: web
     name: gestaovendas-backend
     env: python
+    plan: free
     rootDir: backend
     buildCommand: "chmod +x render-build.sh render-start.sh && ./render-build.sh"
     startCommand: "./render-start.sh"
