@@ -4,7 +4,7 @@ services:
     name: gestaovendas-backend
     env: python
     rootDir: backend
-    buildCommand: "./render-build.sh"
+    buildCommand: "chmod +x render-build.sh render-start.sh && ./render-build.sh"
     startCommand: "./render-start.sh"
     healthCheckPath: /health
     envVars:
@@ -18,6 +18,8 @@ services:
         value: ".onrender.com"
       - key: CORS_ALLOWED_ORIGINS
         value: "https://gestaovendas-frontend.onrender.com"
+      - key: CSRF_TRUSTED_ORIGINS
+        value: "https://gestaovendas-frontend.onrender.com"
       - key: SECURE_SSL_REDIRECT
         value: "1"
       - key: WEB_CONCURRENCY
@@ -27,16 +29,17 @@ services:
       - key: REQUIRE_AUTH
         value: "1"
 
-  # 2. Frontend: site stático do Vite/React
-  - type: web
+  # 2. Frontend: Site Estático
+  - type: static
     name: gestaovendas-frontend
-    env: static
     rootDir: frontend
     buildCommand: "npm install && npm run build"
     publishDir: dist
     envVars:
       - key: VITE_API_URL
         value: "https://gestaovendas-backend.onrender.com"
+      - key: VITE_WS_URL
+        value: "wss://gestaovendas-backend.onrender.com"
     routes:
       - type: rewrite
         source: "/*"
