@@ -1,6 +1,6 @@
 services:
   # 1. Backend: Web Service do Django
-  - type: web
+  - type: web_service
     name: gestaovendas-backend
     runtime: python
     rootDir: backend
@@ -29,9 +29,8 @@ services:
         value: "1"
 
   # 2. Frontend: Static Site do Vite/React
-  - type: web
+  - type: static_site
     name: gestaovendas-frontend
-    env: static
     rootDir: frontend
     buildCommand: npm install && npm run build
     publishDir: dist
