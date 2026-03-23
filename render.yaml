@@ -29,8 +29,9 @@ services:
         value: "1"
 
   # 2. Frontend: Static Site do Vite/React
-  - type: static
+  - type: web
     name: gestaovendas-frontend
+    env: static
     rootDir: frontend
     buildCommand: npm install && npm run build
     publishDir: dist
