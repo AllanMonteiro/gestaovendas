@@ -31,11 +31,12 @@ services:
         value: "1"
 
   # 2. Frontend: Site Estático
-  - type: static
+  - type: web
     name: gestaovendas-frontend
+    env: static
     rootDir: frontend
     buildCommand: "npm install && npm run build"
-    publishDir: dist
+    staticPublishPath: dist
     envVars:
       - key: VITE_API_URL
         value: "https://gestaovendas-backend.onrender.com"
