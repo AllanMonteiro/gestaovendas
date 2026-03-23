@@ -374,6 +374,39 @@ class CashStatusView(APIView):
         })
 
 
+class CashHistoryView(APIView):
+    def get(self, request):
+        from_date = request.query_params.get('from')
+        to_date = request.query_params.get('to')
+        qs = CashSession.objects.filter(status=CashSession.STATUS_CLOSED).order_by('-closed_at')
+        
+        local_tz = timezone.get_current_timezone()
+        if from_date:
+            parsed_from_date = parse_date(from_date)
+            parsed_from_datetime = parse_datetime(from_date)
+            if parsed_from_date and _is_date_only(from_date):
+                start_local = timezone.make_aware(datetime.combine(parsed_from_date, time.min), local_tz)
+                qs = qs.filter(closed_at__gte=start_local)
+            else:
+                if parsed_from_datetime and timezone.is_naive(parsed_from_datetime):
+                    parsed_from_datetime = timezone.make_aware(parsed_from_datetime, local_tz)
+                if parsed_from_datetime:
+                    qs = qs.filter(closed_at__gte=parsed_from_datetime)
+        if to_date:
+            parsed_to_date = parse_date(to_date)
+            parsed_to_datetime = parse_datetime(to_date)
+            if parsed_to_date and _is_date_only(to_date):
+                next_day_local = timezone.make_aware(datetime.combine(parsed_to_date + timedelta(days=1), time.min), local_tz)
+                qs = qs.filter(closed_at__lt=next_day_local)
+            else:
+                if parsed_to_datetime and timezone.is_naive(parsed_to_datetime):
+                    parsed_to_datetime = timezone.make_aware(parsed_to_datetime, local_tz)
+                if parsed_to_datetime:
+                    qs = qs.filter(closed_at__lte=parsed_to_datetime)
+                    
+        return Response(CashSessionSerializer(qs, many=True).data)
+
+
 class ConfigView(APIView):
     def get(self, request):
         config = services.get_store_config()

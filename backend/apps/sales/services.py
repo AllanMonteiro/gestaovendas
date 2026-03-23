@@ -324,8 +324,13 @@ def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_car
         raise ValueError('Existem pedidos em aberto. Feche/cancele todos antes de fechar o caixa.')
     session.status = CashSession.STATUS_CLOSED
     session.closed_at = timezone.now()
-    session.save(update_fields=['status', 'closed_at'])
-    totals = Payment.objects.filter(order__status=Order.STATUS_PAID).aggregate(
+    session.closed_by = effective_user
+    session.save(update_fields=['status', 'closed_at', 'closed_by'])
+    totals = Payment.objects.filter(
+        order__status=Order.STATUS_PAID,
+        order__closed_at__gte=session.opened_at,
+        order__closed_at__lte=session.closed_at
+    ).aggregate(
         cash=models.Sum('amount', filter=models.Q(method=Payment.METHOD_CASH)),
         pix=models.Sum('amount', filter=models.Q(method=Payment.METHOD_PIX)),
         card=models.Sum(
@@ -341,6 +346,27 @@ def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_car
         'pix': q2(Decimal(counted_pix) - expected_pix),
         'card': q2(Decimal(counted_card) - expected_card),
     }
+
+    reconciliation_data = {
+        'expected': {
+            'cash': float(expected_cash),
+            'pix': float(expected_pix),
+            'card': float(expected_card),
+        },
+        'counted': {
+            'cash': float(counted_cash),
+            'pix': float(counted_pix),
+            'card': float(counted_card),
+        },
+        'divergence': {
+            'cash': float(divergence['cash']),
+            'pix': float(divergence['pix']),
+            'card': float(divergence['card']),
+        },
+    }
+    session.reconciliation_data = reconciliation_data
+    session.save(update_fields=['reconciliation_data'])
+
     log_audit(
         user=effective_user,
         action='cash.close',
@@ -348,16 +374,4 @@ def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_car
         entity_id=session.id,
         after={'divergence': {key: str(value) for key, value in divergence.items()}},
     )
-    return {
-        'expected': {
-            'cash': expected_cash,
-            'pix': expected_pix,
-            'card': expected_card,
-        },
-        'counted': {
-            'cash': counted_cash,
-            'pix': counted_pix,
-            'card': counted_card,
-        },
-        'divergence': divergence,
-    }
+    return reconciliation_data

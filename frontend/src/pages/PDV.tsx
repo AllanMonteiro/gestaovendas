@@ -169,6 +169,10 @@ const PDV: React.FC = () => {
   const [autoPrintReceipt, setAutoPrintReceipt] = useState(true)
   const [autoPrintKitchen, setAutoPrintKitchen] = useState(false)
   const [lastReceiptPayload, setLastReceiptPayload] = useState<ThermalReceiptPayload | null>(null)
+  const [showScaleModal, setShowScaleModal] = useState(false)
+  const [scaleProduct, setScaleProduct] = useState<Product | null>(null)
+  const [scaleWeight, setScaleWeight] = useState<number | null>(null)
+  const [scaleLoading, setScaleLoading] = useState(false)
 
   const selectedOrder = useMemo(
     () => openOrders.find((order) => order.id === selectedOrderId) ?? null,
@@ -181,18 +185,20 @@ const PDV: React.FC = () => {
     return map
   }, [products])
 
-  const visibleProducts = useMemo(() => {
+  const searchResultProducts = useMemo(() => {
     const normalizedSearch = productSearchTerm.trim().toLowerCase()
-    const categoryFiltered =
-      selectedCategoryId === null
-        ? products
-        : products.filter((product) => product.category === selectedCategoryId)
-
     if (!normalizedSearch) {
-      return categoryFiltered
+      return []
     }
-    return categoryFiltered.filter((product) => product.name.toLowerCase().includes(normalizedSearch))
-  }, [products, selectedCategoryId, productSearchTerm])
+    return products.filter((product) => product.name.toLowerCase().includes(normalizedSearch))
+  }, [products, productSearchTerm])
+
+  const visibleProducts = useMemo(() => {
+    if (selectedCategoryId === null) {
+      return products
+    }
+    return products.filter((product) => product.category === selectedCategoryId)
+  }, [products, selectedCategoryId])
 
   const rawPointsRequested = useMemo(() => {
     const parsed = Number(pointsToRedeem.replace(',', '.'))
@@ -451,12 +457,63 @@ const PDV: React.FC = () => {
       return
     }
     if (product.sold_by_weight) {
-      setFeedback({ type: 'error', text: 'Produto por peso: leitura da balanca sera o proximo ajuste.' })
+      setScaleProduct(product)
+      setScaleWeight(null)
+      setShowScaleModal(true)
       return
     }
     setQtyProduct(product)
     setQtyInput('1')
     setShowQtyModal(true)
+  }
+
+  const fetchScaleWeight = async () => {
+    if (!agentUrl) {
+      setFeedback({ type: 'error', text: 'URL do Agent nao configurada.' })
+      return
+    }
+    setScaleLoading(true)
+    try {
+      const normalizedAgentUrl = agentUrl.trim().replace(/\/$/, '')
+      const response = await fetch(`${normalizedAgentUrl}/scale/weight`)
+      if (!response.ok) throw new Error()
+      const data = await response.json()
+      setScaleWeight(data.grams ?? 0)
+    } catch {
+      setFeedback({ type: 'error', text: 'Falha ao ler balanca. Confira se o Agent esta rodando.' })
+    } finally {
+      setScaleLoading(false)
+    }
+  }
+
+  const handleConfirmScaleProduct = async () => {
+    if (!scaleProduct || scaleWeight === null) {
+      return
+    }
+    if (!(await ensureCashOpen())) {
+      return
+    }
+
+    try {
+      const orderId = selectedOrderId
+      if (!orderId) {
+        setFeedback({ type: 'error', text: 'Crie/selecione um pedido antes de adicionar itens.' })
+        return
+      }
+
+      await api.post(`/api/orders/${orderId}/items`, {
+        product_id: scaleProduct.id,
+        qty: round2(scaleWeight / 1000),
+        weight_grams: scaleWeight
+      })
+      await fetchOpenOrders(orderId)
+      setFeedback({ type: 'ok', text: 'Item adicionado ao pedido.' })
+      setShowScaleModal(false)
+      setScaleProduct(null)
+      setScaleWeight(null)
+    } catch (error: unknown) {
+      setFeedback({ type: 'error', text: getApiErrorText(error, 'Nao foi possivel adicionar o item no pedido.') })
+    }
   }
 
   const handleSendKitchen = async () => {
@@ -936,6 +993,7 @@ const PDV: React.FC = () => {
             products={visibleProducts}
             allProducts={products}
             searchTerm={productSearchTerm}
+            searchResultProducts={searchResultProducts}
             categoryImages={categoryImages}
             onSelectCategory={setSelectedCategoryId}
             onSearchTermChange={setProductSearchTerm}
@@ -1070,6 +1128,56 @@ const PDV: React.FC = () => {
               </button>
               <button onClick={() => void handleConfirmAddProduct()} className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white">
                 Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showScaleModal && scaleProduct ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 px-4 pb-4 sm:items-center sm:pb-0">
+          <div className="mobile-sheet w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+            <h3 className="text-lg font-semibold">Produto por Peso</h3>
+            <p className="mt-1 text-sm text-slate-500">{scaleProduct.name}</p>
+            
+            <div className="mt-6 flex flex-col items-center justify-center rounded-2xl bg-slate-50 py-8 border-2 border-dashed border-slate-200">
+              {scaleWeight !== null ? (
+                <div className="text-center">
+                  <span className="text-4xl font-bold text-brand-700">{scaleWeight}g</span>
+                  <p className="mt-1 text-sm font-medium text-slate-500">{(scaleWeight / 1000).toFixed(3)} kg</p>
+                </div>
+              ) : (
+                <div className="text-center text-slate-400">
+                  <span className="text-lg">Aguardando leitura...</span>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={() => void fetchScaleWeight()}
+              disabled={scaleLoading}
+              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-brand-200 bg-brand-50 py-3 text-sm font-semibold text-brand-700 hover:bg-brand-100 disabled:opacity-50"
+            >
+              {scaleLoading ? 'Lendo...' : 'Obter peso da balanca'}
+            </button>
+
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                onClick={() => {
+                  setShowScaleModal(false)
+                  setScaleProduct(null)
+                  setScaleWeight(null)
+                }}
+                className="rounded-xl border border-slate-300 px-4 py-2 text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => void handleConfirmScaleProduct()}
+                disabled={scaleWeight === null || scaleWeight <= 0}
+                className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                Confirmar e Adicionar
               </button>
             </div>
           </div>

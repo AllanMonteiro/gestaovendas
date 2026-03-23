@@ -49,7 +49,7 @@ class PaymentSerializer(serializers.ModelSerializer):
 class CashSessionSerializer(serializers.ModelSerializer):
     class Meta:
         model = CashSession
-        fields = ['id', 'opened_at', 'closed_at', 'initial_float', 'status', 'opened_by']
+        fields = ['id', 'opened_at', 'closed_at', 'initial_float', 'status', 'opened_by', 'closed_by', 'reconciliation_data']
 
 
 class CashMoveSerializer(serializers.ModelSerializer):

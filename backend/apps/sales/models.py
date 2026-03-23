@@ -105,6 +105,8 @@ class CashSession(models.Model):
     initial_float = models.DecimalField(max_digits=10, decimal_places=2)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_OPEN)
     opened_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    closed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+', null=True, blank=True)
+    reconciliation_data = models.JSONField(null=True, blank=True)
 
     class Meta:
         indexes = [

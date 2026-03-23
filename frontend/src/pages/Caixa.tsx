@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import { openThermalReceiptPdf, type ThermalReceiptPayload } from '../app/thermalReceipt'
 
@@ -44,6 +44,15 @@ type CashMove = {
   amount: string
   reason: string
   created_at: string
+}
+
+type CashHistoryEntry = {
+  id: number
+  opened_at: string
+  closed_at: string
+  status: string
+  initial_float: string
+  reconciliation_data?: Reconciliation
 }
 
 type FlowEntry = {
@@ -105,6 +114,7 @@ const Caixa: React.FC = () => {
   const [cashStatus, setCashStatus] = useState<CashStatusResponse>({ open: false })
   const [orders, setOrders] = useState<Order[]>([])
   const [cashMoves, setCashMoves] = useState<CashMove[]>([])
+  const [cashHistory, setCashHistory] = useState<CashHistoryEntry[]>([])
   const [paymentsAgg, setPaymentsAgg] = useState<PaymentAgg[]>([])
   const [fromDate, setFromDate] = useState(todayISO())
   const [toDate, setToDate] = useState(todayISO())
@@ -122,14 +132,15 @@ const Caixa: React.FC = () => {
   const [storeAddress, setStoreAddress] = useState('')
 
   const loadData = useCallback(async () => {
-    const [statusResp, closedResp, moveResp, paymentResp, dailySummaryResp, openOrdersResp, configResp] = await Promise.allSettled([
+    const [statusResp, closedResp, moveResp, paymentResp, dailySummaryResp, openOrdersResp, configResp, historyResp] = await Promise.allSettled([
       api.get<CashStatusResponse>('/api/cash/status'),
       api.get<Order[]>(`/api/orders/closed?from=${fromDate}&to=${toDate}`),
       api.get<CashMove[]>(`/api/cash/move?from=${fromDate}&to=${toDate}`),
       api.get<PaymentAgg[]>(`/api/reports/by_payment?from=${fromDate}&to=${toDate}`),
       api.get<Summary>(`/api/reports/summary?from=${todayISO()}&to=${todayISO()}`),
       api.get<Order[]>('/api/orders/open'),
-      api.get<StoreConfigResponse>('/api/config')
+      api.get<StoreConfigResponse>('/api/config'),
+      api.get<CashHistoryEntry[]>(`/api/cash/history?from=${fromDate}&to=${toDate}`)
     ])
 
     if (statusResp.status === 'fulfilled') {
@@ -140,6 +151,9 @@ const Caixa: React.FC = () => {
     }
     if (moveResp.status === 'fulfilled') {
       setCashMoves(moveResp.value.data)
+    }
+    if (historyResp.status === 'fulfilled') {
+      setCashHistory(historyResp.value.data)
     }
     if (paymentResp.status === 'fulfilled') {
       setPaymentsAgg(paymentResp.value.data)
@@ -616,6 +630,57 @@ const Caixa: React.FC = () => {
                 <tr className="border-t border-brand-100">
                   <td colSpan={4} className="py-3 text-center text-slate-500">
                     Nenhum movimento de fluxo no periodo.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel p-5">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">Historico de Caixa Fechado</h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="responsive-table w-full text-sm">
+            <thead>
+              <tr className="text-left text-slate-500">
+                <th className="pb-2">Abertura</th>
+                <th className="pb-2">Fechamento</th>
+                <th className="pb-2">Fundo Inicial</th>
+                <th className="pb-2">Divergencia (Dinheiro / PIX / Cartao)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cashHistory.map((session) => (
+                <tr key={session.id} className="border-t border-brand-100">
+                  <td className="py-2">{new Date(session.opened_at).toLocaleString('pt-BR')}</td>
+                  <td className="py-2">{new Date(session.closed_at).toLocaleString('pt-BR')}</td>
+                  <td className="py-2 font-medium">{formatBRL(session.initial_float)}</td>
+                  <td className="py-2">
+                    {session.reconciliation_data ? (
+                      <div className="flex gap-2 text-xs">
+                        <span className={Number(session.reconciliation_data.divergence.cash) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
+                          Din: {formatSignedBRL(session.reconciliation_data.divergence.cash)}
+                        </span>
+                        <span className={Number(session.reconciliation_data.divergence.pix) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
+                          PIX: {formatSignedBRL(session.reconciliation_data.divergence.pix)}
+                        </span>
+                        <span className={Number(session.reconciliation_data.divergence.card) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
+                          Car: {formatSignedBRL(session.reconciliation_data.divergence.card)}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-slate-400">Sem dados</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {cashHistory.length === 0 ? (
+                <tr className="border-t border-brand-100">
+                  <td colSpan={4} className="py-3 text-center text-slate-500">
+                    Nenhum caixa fechado no periodo.
                   </td>
                 </tr>
               ) : null}

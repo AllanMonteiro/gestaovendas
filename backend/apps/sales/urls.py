@@ -16,5 +16,6 @@ urlpatterns = [
     path('cash/move', views.CashMoveView.as_view()),
     path('cash/close', views.CashCloseView.as_view()),
     path('cash/status', views.CashStatusView.as_view()),
+    path('cash/history', views.CashHistoryView.as_view()),
     path('config', views.ConfigView.as_view()),
 ]

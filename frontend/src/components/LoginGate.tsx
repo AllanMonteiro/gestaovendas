@@ -6,13 +6,13 @@ type LoginGateProps = {
   children: React.ReactNode
 }
 
-const emptyBootstrap = { name: '', email: '', password: '' }
+const emptyBootstrap = { name: 'Administrador', email: 'admin@admin.com', password: 'admin123' }
 
 export const LoginGate: React.FC<LoginGateProps> = ({ children }) => {
   const [loading, setLoading] = useState(true)
   const [session, setSession] = useState<AuthSession | null>(null)
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [email, setEmail] = useState('admin@admin.com')
+  const [password, setPassword] = useState('admin123')
   const [bootstrap, setBootstrap] = useState(emptyBootstrap)
   const [feedback, setFeedback] = useState('')
   const [busy, setBusy] = useState(false)

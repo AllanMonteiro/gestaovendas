@@ -44,6 +44,12 @@ async def print_kitchen(body: dict):
     return {'status': 'printed'}
 
 
+@app.get('/scale/weight')
+async def get_scale_weight():
+    grams = scale.last_grams()
+    return {'grams': grams, 'stable': True}
+
+
 @app.post('/scale/config')
 async def scale_config(body: dict):
     return {'status': 'ok'}
