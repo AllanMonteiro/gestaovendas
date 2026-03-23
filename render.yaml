@@ -33,7 +33,7 @@ services:
   # 2. Frontend: Site Estático
   - type: web
     name: gestaovendas-frontend
-    env: static
+    runtime: static
     rootDir: frontend
     buildCommand: "npm install && npm run build"
     staticPublishPath: dist
