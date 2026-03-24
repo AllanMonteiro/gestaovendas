@@ -10,7 +10,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
-        value: "postgresql://postgres:Sorveteria2026@db.ihvnpkdtgcvkcskjkmmh.supabase.co:5432/postgres"
+        value: "postgresql://postgres.ihvnpkdtgcvkcskjkmmh:Sorveteria240520@aws-1-sa-east-1.pooler.supabase.com:5432/postgres?sslmode=require"
       - key: DEBUG
         value: "0"
       - key: DJANGO_SECRET_KEY
@@ -35,7 +35,7 @@ services:
     name: gestaovendas-frontend
     runtime: static
     rootDir: frontend
-    buildCommand: "npm install && npm run build"
+    buildCommand: "npm ci && npm run build"
     staticPublishPath: dist
     envVars:
       - key: VITE_API_URL
