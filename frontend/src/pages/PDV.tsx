@@ -3,7 +3,7 @@ import { api } from '../api/client'
 import { openThermalReceiptPdf, type ThermalReceiptPayload } from '../app/thermalReceipt'
 import { ProductGrid } from '../components/ProductGrid'
 import { OrderPanel } from '../components/OrderPanel'
-import { PaymentModal, type PaymentMethod } from '../components/PaymentModal'
+import { PaymentModal, type PaymentEntry, type PaymentMethod } from '../components/PaymentModal'
 
 type Category = {
   id: number
@@ -87,12 +87,6 @@ const formatBRL = (value: string | number) => {
 
 const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100
 
-const paymentMethodLabel = (method: PaymentMethod) => {
-  if (method === 'CARD_CREDIT') return 'Cartao credito'
-  if (method === 'CARD_DEBIT') return 'Cartao debito'
-  if (method === 'PIX') return 'PIX'
-  return 'Dinheiro'
-}
 
 const receiptPaymentLabel = (method: string, meta?: Record<string, string> | null) => {
   if (method === 'CARD') {
@@ -147,7 +141,6 @@ const PDV: React.FC = () => {
   const [lastName, setLastName] = useState('')
   const [neighborhood, setNeighborhood] = useState('')
   const [loadingCreateOrder, setLoadingCreateOrder] = useState(false)
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH')
   const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [closingSale, setClosingSale] = useState(false)
   const [feedback, setFeedback] = useState<Feedback | null>(null)
@@ -699,7 +692,7 @@ const PDV: React.FC = () => {
     [companyName, postToAgent, productsById, storeAddress, storeLabel]
   )
 
-  const handleCloseSale = async () => {
+  const handleCloseSale = async (entries: PaymentEntry[]) => {
     if (!selectedOrder) {
       setFeedback({ type: 'error', text: 'Selecione um pedido.' })
       setShowPaymentModal(false)
@@ -716,14 +709,13 @@ const PDV: React.FC = () => {
         return
       }
 
-      const paymentPayload =
-        paymentMethod === 'CARD_CREDIT'
-          ? { method: 'CARD', meta: { card_type: 'CREDIT' } }
-          : paymentMethod === 'CARD_DEBIT'
-            ? { method: 'CARD', meta: { card_type: 'DEBIT' } }
-            : { method: paymentMethod, meta: null }
+      // Converte PaymentEntry[] para o formato do backend
+      const payments = entries.map((entry) => {
+        if (entry.method === 'CARD_CREDIT') return { method: 'CARD', meta: { card_type: 'CREDIT' }, amount: entry.amount }
+        if (entry.method === 'CARD_DEBIT') return { method: 'CARD', meta: { card_type: 'DEBIT' }, amount: entry.amount }
+        return { method: entry.method, meta: null, amount: entry.amount }
+      })
 
-      const payments = payableTotal > 0 ? [{ ...paymentPayload, amount: payableTotal.toFixed(2) }] : []
       await api.post(`/api/orders/${selectedOrder.id}/close`, {
         discount: '0',
         payments,
@@ -1083,8 +1075,6 @@ const PDV: React.FC = () => {
         total={selectedOrder?.total ?? '0'}
         orderLabel={selectedOrder ? `#${getOrderDisplayNumber(selectedOrder)}` : undefined}
         customerLabel={selectedOrder?.customer_name ?? selectedOrder?.customer_phone ?? undefined}
-        method={paymentMethod}
-        onChangeMethod={setPaymentMethod}
         canUsePoints={Boolean(selectedOrder?.customer || selectedOrder?.customer_phone)}
         pointsBalance={loyaltyBalance}
         pointValueReal={pointValueReal}
@@ -1095,7 +1085,7 @@ const PDV: React.FC = () => {
         discountByPoints={pointsDiscount}
         payableTotal={payableTotal}
         onCancel={() => setShowPaymentModal(false)}
-        onConfirm={() => void handleCloseSale()}
+        onConfirm={(entries) => void handleCloseSale(entries)}
         loading={closingSale}
       />
 
