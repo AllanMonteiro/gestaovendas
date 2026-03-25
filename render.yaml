@@ -29,6 +29,8 @@ services:
         value: "3.11.11"
       - key: REQUIRE_AUTH
         value: "1"
+      - key: DB_CONN_MAX_AGE
+        value: "0"
 
   # 2. Frontend: Site Estático
   - type: web
