@@ -1,12 +1,11 @@
 import os
+from django.conf import settings
 from rest_framework.permissions import BasePermission
 from apps.accounts.models import RolePermission, UserRole
 
 
 def auth_is_required() -> bool:
-    debug_enabled = os.environ.get('DJANGO_DEBUG', '1') == '1'
-    default_value = '0' if debug_enabled else '1'
-    return os.environ.get('DJANGO_REQUIRE_AUTH', default_value) == '1'
+    return getattr(settings, 'REQUIRE_AUTH', True)
 
 
 def user_has_permission(user, code: str) -> bool:
