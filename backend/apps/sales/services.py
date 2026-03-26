@@ -381,3 +381,27 @@ def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_car
         after={'divergence': {key: str(value) for key, value in divergence.items()}},
     )
     return reconciliation_data
+
+
+@transaction.atomic
+def reset_sales(*, user):
+    from apps.loyalty.models import LoyaltyMove, LoyaltyAccount
+    from apps.kitchen.models import KitchenTicket
+    from apps.audit.models import AuditLog
+
+    # Deleting Order triggers CASCADE for OrderItem, Payment, KitchenTicket
+    Order.objects.all().delete()
+    CashMove.objects.all().delete()
+    CashSession.objects.all().delete()
+    LoyaltyMove.objects.all().delete()
+    LoyaltyAccount.objects.all().update(points_balance=0)
+    AuditLog.objects.all().delete()
+
+    log_audit(
+        user=resolve_effective_user(user),
+        action='system.reset_sales',
+        entity='system',
+        entity_id='1',
+        after={'status': 'cleared'}
+    )
+    return True

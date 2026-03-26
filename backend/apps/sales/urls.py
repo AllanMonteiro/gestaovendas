@@ -18,4 +18,5 @@ urlpatterns = [
     path('cash/status', views.CashStatusView.as_view()),
     path('cash/history', views.CashHistoryView.as_view()),
     path('config', views.ConfigView.as_view()),
+    path('maintenance/reset-sales', views.ResetSalesView.as_view()),
 ]

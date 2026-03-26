@@ -338,6 +338,30 @@ const Configuracoes: React.FC = () => {
     }
   }
 
+  const handleResetSales = async () => {
+    const password = window.prompt(
+      'ATENÇÃO: Isso irá apagar todo o histórico de vendas, caixas e pontos de fidelidade. ' +
+      'Os produtos e categorias serão mantidos. ' +
+      'Digite sua SENHA DE ACESSO para confirmar:'
+    )
+    
+    if (!password) return
+
+    if (!window.confirm('TEM CERTEZA? Esta ação não pode ser desfeita.')) return
+
+    try {
+      setLoading(true)
+      const resp = await api.post('/api/maintenance/reset-sales', { password })
+      setFeedback(resp.data.message || 'Banco de vendas resetado com sucesso.')
+      alert('Sistema resetado com sucesso!')
+      window.location.reload()
+    } catch (error: any) {
+      setFeedback(error.response?.data?.detail || 'Falha ao resetar banco de vendas.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   if (loading) {
     return <p className="text-sm text-slate-500">Carregando configuracoes...</p>
   }
@@ -612,7 +636,19 @@ const Configuracoes: React.FC = () => {
       ) : null}
 
       <div className="panel space-y-3 p-4">
-        <h2 className="font-semibold">Acoes</h2>
+        <h2 className="font-semibold text-rose-700">Area de Perigo</h2>
+        <p className="text-xs text-slate-500">Cuidado: As acoes abaixo sao irreversiveis.</p>
+        <button
+          onClick={() => void handleResetSales()}
+          disabled={loading}
+          className="w-full rounded-lg border border-rose-300 bg-white px-3 py-2 font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+        >
+          {loading ? 'Processando...' : 'Zerar Banco de Vendas'}
+        </button>
+      </div>
+
+      <div className="panel space-y-3 p-4">
+        <h2 className="font-semibold">Acoes do Sistema</h2>
         <button onClick={() => void handleSave()} className="w-full rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-white">
           Salvar configuracoes
         </button>
