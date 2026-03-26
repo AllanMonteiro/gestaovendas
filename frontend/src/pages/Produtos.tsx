@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 
 type Category = {
@@ -135,17 +135,46 @@ const Produtos: React.FC = () => {
   const formatInputBRL = (value: number) =>
     value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
+  const applyCategoryDefaults = (categoryId: number) => {
+    const referenceProduct = products.find(p => p.category === categoryId)
+    if (referenceProduct && priceMap[referenceProduct.id]) {
+      const pInfo = priceMap[referenceProduct.id]
+      setCreateCost(formatInputBRL(Number(pInfo.cost || 0)))
+      setCreateFreight(formatInputBRL(Number(pInfo.freight || 0)))
+      setCreateOther(formatInputBRL(Number(pInfo.other || 0)))
+      setCreateTaxPct(formatInputBRL(Number(pInfo.tax_pct || 0)))
+      setCreateOverheadPct(formatInputBRL(Number(pInfo.overhead_pct || 0)))
+      setCreateMarginPct(formatInputBRL(Number(pInfo.margin_pct || 0)))
+      setCreatePrice(formatInputBRL(Number(pInfo.price || 0)))
+      setCreateSoldByWeight(referenceProduct.sold_by_weight)
+    } else {
+      setCreateCost('0,00')
+      setCreateFreight('0,00')
+      setCreateOther('0,00')
+      setCreateTaxPct('0,00')
+      setCreateOverheadPct('0,00')
+      setCreatePrice('0,00')
+      setCreateMarginPct('30,00')
+      setCreateSoldByWeight(false)
+    }
+  }
+
   const resetCreateForm = () => {
-    setCreateCategory(String(categories[0]?.id ?? ''))
+    const firstCatId = categories[0]?.id ?? ''
+    setCreateCategory(String(firstCatId))
     setCreateName('')
-    setCreateCost('0,00')
-    setCreateFreight('0,00')
-    setCreateOther('0,00')
-    setCreateTaxPct('0,00')
-    setCreateOverheadPct('0,00')
-    setCreatePrice('0,00')
-    setCreateMarginPct('30,00')
-    setCreateSoldByWeight(false)
+    if (firstCatId) {
+      applyCategoryDefaults(Number(firstCatId))
+    } else {
+      setCreateCost('0,00')
+      setCreateFreight('0,00')
+      setCreateOther('0,00')
+      setCreateTaxPct('0,00')
+      setCreateOverheadPct('0,00')
+      setCreatePrice('0,00')
+      setCreateMarginPct('30,00')
+      setCreateSoldByWeight(false)
+    }
     setCreateActive(true)
   }
 
@@ -547,7 +576,13 @@ const Produtos: React.FC = () => {
                 <label className="text-xs text-slate-600">Categoria</label>
                 <select
                   value={createCategory}
-                  onChange={(event) => setCreateCategory(event.target.value)}
+                  onChange={(event) => {
+                    const val = event.target.value
+                    setCreateCategory(val)
+                    if (val) {
+                      applyCategoryDefaults(Number(val))
+                    }
+                  }}
                   className="mt-1 w-full rounded-lg border border-brand-100 px-3 py-2 text-sm bg-white"
                 >
                   {categories.map((category) => (

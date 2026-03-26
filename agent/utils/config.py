@@ -9,7 +9,9 @@ class Settings:
     port = int(os.getenv('AGENT_PORT', '9876'))
     printer_mode = os.getenv('PRINTER_MODE', 'escpos')
     printer_vendor = os.getenv('PRINTER_VENDOR', 'generic')
-    printer_conn = os.getenv('PRINTER_CONN', 'usb')
+    printer_conn = os.getenv('PRINTER_CONN', 'win32') # Can be 'usb', 'net', 'win32', or 'com'
+    printer_name = os.getenv('PRINTER_NAME', 'auto') # Name of the shared/installed printer for win32 (or 'auto')
+    printer_com_port = os.getenv('PRINTER_COM_PORT', 'COM4') # COM port for serial printer
     printer_net_host = os.getenv('PRINTER_NET_HOST', '192.168.0.50')
     printer_net_port = int(os.getenv('PRINTER_NET_PORT', '9100'))
     receipt_width_mm = int(os.getenv('RECEIPT_WIDTH_MM', '80'))

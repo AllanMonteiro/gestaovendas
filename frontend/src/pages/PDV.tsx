@@ -799,8 +799,8 @@ const PDV: React.FC = () => {
 
   return (
     <>
-      <div className="grid grid-cols-1 gap-4 md:gap-5 lg:grid-cols-[minmax(0,1fr)_340px] 2xl:grid-cols-[280px_minmax(0,1fr)_360px]">
-        <aside className="order-2 space-y-4 rounded-2xl 2xl:order-1">
+      <div className="grid grid-cols-1 gap-4 md:gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_260px] xl:grid-cols-[280px_minmax(0,1fr)_minmax(0,1.2fr)]">
+        <aside className="order-3 space-y-4 rounded-2xl lg:order-3 xl:order-1">
           <div className="panel p-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Comandas abertas</h2>
@@ -876,7 +876,7 @@ const PDV: React.FC = () => {
           </div>
         </aside>
 
-        <section className="order-1 min-w-0 space-y-4 2xl:order-2">
+        <section className="order-1 min-w-0 space-y-4 lg:order-1 xl:order-2">
           <div className="panel p-4 md:p-5">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-lg font-semibold">Pedido atual</h2>
@@ -968,7 +968,7 @@ const PDV: React.FC = () => {
 
         </section>
 
-        <aside className="order-3 min-w-0 lg:col-span-2 2xl:col-span-1 2xl:order-3">
+        <aside className="order-2 min-w-0 lg:order-2 xl:order-3">
           <div className="panel p-4 md:p-5">
           <div className="mb-3 flex items-center justify-between gap-2">
             <h2 className="text-base font-semibold">Categorias</h2>
