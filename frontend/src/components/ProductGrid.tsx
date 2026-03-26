@@ -11,6 +11,7 @@ type Product = {
   category: number
   sold_by_weight?: boolean
   active?: boolean
+  stock?: string | number
 }
 
 type ProductGridProps = {
@@ -76,7 +77,12 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
                 }}
                 className="w-full border-b border-slate-100 px-4 py-3 text-left hover:bg-brand-50 last:border-0"
               >
-                <div className="text-sm font-semibold text-slate-800">{product.name}</div>
+                <div className="flex justify-between items-center">
+                  <div className="text-sm font-semibold text-slate-800">{product.name}</div>
+                  <div className="text-xs font-medium text-brand-600 bg-brand-50 px-2 py-0.5 rounded-full">
+                    Estoque: {String(product.stock ?? 0)}
+                  </div>
+                </div>
               </button>
             ))}
           </div>
@@ -129,7 +135,9 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
                   <p className={`truncate text-sm font-semibold ${selectedCategoryId === category.id ? 'text-brand-700' : 'text-slate-700'}`}>
                     {category.name}
                   </p>
-                  <p className="truncate text-xs text-slate-500">{categoryProductLabel(category.id)}</p>
+                  <p className="truncate text-xs text-slate-500">
+                    Estoque: {allProducts.find(p => p.category === category.id && p.active !== false)?.stock ?? 0}
+                  </p>
                 </div>
               </div>
             </button>
