@@ -12,6 +12,7 @@ type Product = {
   name: string
   active: boolean
   sold_by_weight: boolean
+  stock: string | number
 }
 
 type ProductPrice = {
@@ -59,6 +60,7 @@ const Produtos: React.FC = () => {
   const [createMarginPct, setCreateMarginPct] = useState('30,00')
   const [createSoldByWeight, setCreateSoldByWeight] = useState(false)
   const [createActive, setCreateActive] = useState(true)
+  const [createStock, setCreateStock] = useState('0,000')
   const [createCategoryName, setCreateCategoryName] = useState('')
   const [createCategorySortOrder, setCreateCategorySortOrder] = useState('0')
   const [createCategoryActive, setCreateCategoryActive] = useState(true)
@@ -75,6 +77,7 @@ const Produtos: React.FC = () => {
   const [editOverheadPct, setEditOverheadPct] = useState('0,00')
   const [editPrice, setEditPrice] = useState('0,00')
   const [editMarginPct, setEditMarginPct] = useState('30,00')
+  const [editStock, setEditStock] = useState('0,000')
   const [savingEdit, setSavingEdit] = useState(false)
 
   const categoryById = useMemo(() => {
@@ -157,6 +160,7 @@ const Produtos: React.FC = () => {
       setCreateMarginPct('30,00')
       setCreateSoldByWeight(false)
     }
+    setCreateStock('0,000') // Default new product stock to 0
   }
 
   const resetCreateForm = () => {
@@ -174,6 +178,7 @@ const Produtos: React.FC = () => {
       setCreatePrice('0,00')
       setCreateMarginPct('30,00')
       setCreateSoldByWeight(false)
+      setCreateStock('0,000')
     }
     setCreateActive(true)
   }
@@ -255,7 +260,8 @@ const Produtos: React.FC = () => {
         category: categoryId,
         name: createName.trim(),
         active: createActive,
-        sold_by_weight: createSoldByWeight
+        sold_by_weight: createSoldByWeight,
+        stock: toDecimal(createStock || '0')
       })
 
       await api.put(`/api/products/${createResp.data.id}/price`, {
@@ -321,7 +327,8 @@ const Produtos: React.FC = () => {
         category: product.category,
         name: product.name,
         active: !product.active,
-        sold_by_weight: product.sold_by_weight
+        sold_by_weight: product.sold_by_weight,
+        stock: product.stock
       })
       setFeedback('Status do produto atualizado.')
       await loadData()
@@ -336,6 +343,7 @@ const Produtos: React.FC = () => {
     setEditName(product.name)
     setEditCategory(String(product.category))
     setEditSoldByWeight(product.sold_by_weight)
+    setEditStock(String(product.stock || '0'))
     setEditCost(formatInputBRL(Number(pricing?.cost || '0')))
     setEditFreight(formatInputBRL(Number(pricing?.freight || '0')))
     setEditOther(formatInputBRL(Number(pricing?.other || '0')))
@@ -365,7 +373,8 @@ const Produtos: React.FC = () => {
         category: categoryId,
         name: editName.trim(),
         active: editingProduct.active,
-        sold_by_weight: editSoldByWeight
+        sold_by_weight: editSoldByWeight,
+        stock: toDecimal(editStock || '0')
       }
       await api.put(`/api/products/${editingProduct.id}`, payload)
       await api.put(`/api/products/${editingProduct.id}/price`, {
@@ -423,6 +432,7 @@ const Produtos: React.FC = () => {
             <tr className="text-left text-slate-500">
               <th className="pb-2">Produto</th>
               <th className="pb-2">Categoria</th>
+              <th className="pb-2 text-right">Estoque</th>
               <th className="pb-2">Preco</th>
               <th className="pb-2">Ideal</th>
               <th className="pb-2">Lucro</th>
@@ -437,6 +447,7 @@ const Produtos: React.FC = () => {
                 <tr key={product.id} className="border-t border-brand-100">
                   <td className="py-2">{product.name}</td>
                   <td className="py-2">{categoryById.get(product.category) || product.category}</td>
+                  <td className="py-2 text-right">{String(product.stock || '0')}</td>
                   <td className="py-2">{formatBRL(pricing?.price || '0')}</td>
                   <td className="py-2">{formatBRL(pricing?.ideal_price || '0')}</td>
                   <td className="py-2">{formatBRL(pricing?.profit || '0')}</td>
@@ -491,6 +502,10 @@ const Produtos: React.FC = () => {
                   className="mt-1 w-full border border-brand-100 rounded-lg px-3 py-2 text-sm"
                   placeholder="Nome do produto"
                 />
+              </div>
+              <div>
+                <label className="text-xs text-slate-600">Estoque Atual</label>
+                <input value={editStock} onChange={(event) => setEditStock(event.target.value)} className="mt-1 w-full rounded-lg border border-brand-100 px-3 py-2 text-sm" />
               </div>
               <div>
                 <label className="text-xs text-slate-600">Custo</label>
@@ -600,6 +615,10 @@ const Produtos: React.FC = () => {
                   placeholder="Ex: Acai 500ml"
                   className="mt-1 w-full rounded-lg border border-brand-100 px-3 py-2 text-sm"
                 />
+              </div>
+              <div>
+                <label className="text-xs text-slate-600">Estoque Inicial</label>
+                <input value={createStock} onChange={(event) => setCreateStock(event.target.value)} className="mt-1 w-full rounded-lg border border-brand-100 px-3 py-2 text-sm" />
               </div>
               <div>
                 <label className="text-xs text-slate-600">Custo</label>

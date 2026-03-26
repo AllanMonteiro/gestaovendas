@@ -215,6 +215,12 @@ def close_order(
         if amount <= 0:
             continue
         Payment.objects.create(order=order, method=pay['method'], amount=amount, meta=pay.get('meta'))
+        
+    for item in order.items.select_related('product'):
+        if hasattr(item.product, 'stock') and item.product.stock is not None:
+            item.product.stock -= Decimal(str(item.qty))
+            item.product.save(update_fields=['stock'])
+
     log_audit(user=user, action='order.close', entity='order', entity_id=order.id, after={'total': str(order.total)})
 
     if loyalty_points_used > 0 and loyalty_account is not None:

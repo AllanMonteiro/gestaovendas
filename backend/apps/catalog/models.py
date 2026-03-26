@@ -21,6 +21,7 @@ class Product(models.Model):
     active = models.BooleanField(default=True)
     sold_by_weight = models.BooleanField(default=False)
     image_url = models.URLField(null=True, blank=True)
+    stock = models.DecimalField(max_digits=12, decimal_places=3, default=0)
 
     class Meta:
         indexes = [
