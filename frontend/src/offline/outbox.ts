@@ -20,3 +20,7 @@ export async function markOutboxError(id: number, error: string) {
 export async function removeOutbox(id: number) {
   await db.outbox.delete(id)
 }
+
+export async function getOutboxCount() {
+  return db.outbox.count()
+}

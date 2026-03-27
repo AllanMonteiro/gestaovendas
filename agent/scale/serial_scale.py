@@ -38,8 +38,9 @@ class SerialScale:
                     if grams is not None:
                         with self._lock:
                             self._last_grams = grams
-        except Exception:
-            time.sleep(1)
+        except Exception as e:
+            print(f"Serial Error on {self.port}: {e}")
+            time.sleep(2)
 
     def _parse_grams(self, line: str) -> Optional[int]:
         match = re.search(r'(\d+(?:\.\d+)?)', line)

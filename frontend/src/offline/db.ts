@@ -24,9 +24,12 @@ class PosDB extends Dexie {
 
   constructor() {
     super('sorveteria-pos')
-    this.version(1).stores({
+    this.version(2).stores({
       outbox: '++id, created_at, attempts, client_request_id',
-      local_orders: 'id, status'
+      local_orders: 'id, status',
+      products: 'id, name, category, active',
+      categories: 'id, name',
+      config: 'key'
     })
   }
 }

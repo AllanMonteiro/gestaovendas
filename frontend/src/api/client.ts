@@ -74,6 +74,7 @@ api.interceptors.response.use(
         headers: config.headers || {},
         client_request_id: clientRequestId
       })
+      error.enqueued = true
     }
     return Promise.reject(error)
   }
