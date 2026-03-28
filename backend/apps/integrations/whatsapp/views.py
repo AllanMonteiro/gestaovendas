@@ -13,17 +13,17 @@ from .client import WhatsAppClient
 
 logger = logging.getLogger(__name__)
 
-# Verification Token from Settings
-VERIFY_TOKEN = getattr(settings, "WHATSAPP_VERIFY_TOKEN", "seu_token")
-
 @csrf_exempt
 def webhook(request):
+    # Lookup token on each request to ensure fresh settings
+    verify_token = getattr(settings, "WHATSAPP_VERIFY_TOKEN", "seu_token_secreto")
+
     if request.method == "GET":
         mode = request.GET.get("hub.mode")
         token = request.GET.get("hub.verify_token")
         challenge = request.GET.get("hub.challenge")
 
-        if mode == "subscribe" and token == VERIFY_TOKEN:
+        if mode == "subscribe" and token == verify_token:
             logger.info("WhatsApp webhook verified successfully.")
             return HttpResponse(challenge)
         return HttpResponse("Verification failed", status=403)
@@ -32,7 +32,9 @@ def webhook(request):
         return HttpResponse("Method not allowed", status=405)
 
     try:
-        body = json.loads(request.body.decode("utf-8"))
+        raw_body = request.body.decode("utf-8")
+        logger.info(f"Incoming WhatsApp Webhook Payload: {raw_body}")
+        body = json.loads(raw_body)
         
         # Meta Cloud API Payload Structure
         entry = body.get("entry", [])[0]
