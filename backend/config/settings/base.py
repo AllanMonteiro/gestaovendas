@@ -221,6 +221,11 @@ APP_CONFIG = {
     'STORE_NAME': get_env('STORE_NAME', default='Sorveteria POS'),
 }
 
+# 📲 WhatsApp Cloud API Settings
+WHATSAPP_TOKEN = get_env('WHATSAPP_TOKEN')
+WHATSAPP_PHONE_ID = get_env('WHATSAPP_PHONE_ID')
+WHATSAPP_VERIFY_TOKEN = get_env('WHATSAPP_VERIFY_TOKEN', default='seu_token_secreto')
+
 CORS_ALLOW_CREDENTIALS = True
 
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
