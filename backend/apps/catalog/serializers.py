@@ -5,7 +5,7 @@ from apps.catalog.models import Category, Product, ProductPrice
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
-        fields = ['id', 'name', 'image_url', 'sort_order', 'active']
+        fields = ['id', 'name', 'image_url', 'sort_order', 'active', 'price']
 
 
 class ProductSerializer(serializers.ModelSerializer):

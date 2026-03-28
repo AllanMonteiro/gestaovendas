@@ -7,6 +7,7 @@ class Category(models.Model):
     image_url = models.URLField(null=True, blank=True)
     sort_order = models.IntegerField(default=0)
     active = models.BooleanField(default=True)
+    price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
     class Meta:
         indexes = [

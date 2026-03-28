@@ -83,9 +83,15 @@ def add_item(*, order: Order, product_id: int, qty: Decimal, weight_grams: int |
     if order.status in [Order.STATUS_PAID, Order.STATUS_CANCELED]:
         raise ValueError('Order is already finalized')
     price = ProductPrice.objects.filter(product_id=product_id).first()
-    if not price:
-        raise ValueError('Price not found')
-    unit_price = price.price
+    if price:
+        unit_price = price.price
+    else:
+        from apps.catalog.models import Product
+        product = Product.objects.select_related('category').get(id=product_id)
+        if product.category.price:
+            unit_price = product.category.price
+        else:
+            raise ValueError('Preço não encontrado para este produto ou sua categoria.')
     total = q2(Decimal(qty) * unit_price)
     item = OrderItem.objects.create(
         order=order,

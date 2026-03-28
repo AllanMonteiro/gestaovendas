@@ -33,6 +33,7 @@ type StoreConfig = {
 type Category = {
   id: number
   name: string
+  price?: string | null
 }
 
 type Role = {
@@ -65,6 +66,7 @@ const Configuracoes: React.FC = () => {
   const [categoryImages, setCategoryImages] = useState<Record<string, string>>({})
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('')
   const [selectedCategoryImage, setSelectedCategoryImage] = useState<string>('')
+  const [selectedCategoryPrice, setSelectedCategoryPrice] = useState<string>('')
 
   const [storeName, setStoreName] = useState('')
   const [companyName, setCompanyName] = useState('')
@@ -138,11 +140,14 @@ const Configuracoes: React.FC = () => {
       const firstCategoryId = categoriesResponse.data[0]?.id
       if (firstCategoryId) {
         const key = String(firstCategoryId)
+        const cat = categoriesResponse.data[0]
         setSelectedCategoryId(key)
         setSelectedCategoryImage((cfg.category_images ?? {})[key] ?? '')
+        setSelectedCategoryPrice(cat.price || '')
       } else {
         setSelectedCategoryId('')
         setSelectedCategoryImage('')
+        setSelectedCategoryPrice('')
       }
       const permissionCodes = sessionResponse.data?.user?.permission_codes ?? []
       setCanManageUsers(permissionCodes.includes('system.users.manage'))
@@ -180,6 +185,8 @@ const Configuracoes: React.FC = () => {
   const handleSelectCategory = (value: string) => {
     setSelectedCategoryId(value)
     setSelectedCategoryImage(categoryImages[value] ?? '')
+    const cat = categories.find(c => String(c.id) === value)
+    setSelectedCategoryPrice(cat?.price || '')
   }
 
   const handlePickCategoryImage = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -206,6 +213,17 @@ const Configuracoes: React.FC = () => {
       delete next[selectedCategoryId]
       return next
     })
+  const handleSaveCategoryPrice = async () => {
+    if (!selectedCategoryId) return
+    try {
+      await api.put(`/api/categories/${selectedCategoryId}`, {
+        price: selectedCategoryPrice.replace(',', '.') || null
+      })
+      setCategories(prev => prev.map(c => String(c.id) === selectedCategoryId ? { ...c, price: selectedCategoryPrice } : c))
+      setFeedback('Preço da categoria salvo com sucesso.')
+    } catch {
+      setFeedback('Falha ao salvar preço da categoria.')
+    }
   }
 
   const handleSave = async () => {
@@ -514,7 +532,7 @@ const Configuracoes: React.FC = () => {
       <div className="panel space-y-3 p-4 lg:col-span-2">
         <h2 className="font-semibold">Imagens das categorias (PDV)</h2>
         <p className="text-sm text-slate-500">Selecione a categoria e escolha uma imagem do computador.</p>
-        <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-[240px_1fr_auto]">
+        <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-[240px_1fr_180px_auto]">
           <div className="space-y-1">
             <label className="text-sm font-medium text-slate-700">Categoria</label>
             <select
@@ -524,7 +542,7 @@ const Configuracoes: React.FC = () => {
             >
               {categories.map((category) => (
                 <option key={category.id} value={String(category.id)}>
-                  {category.name}
+                  {category.name} {category.price ? `(R$ ${category.price})` : ''}
                 </option>
               ))}
             </select>
@@ -541,13 +559,32 @@ const Configuracoes: React.FC = () => {
             />
           </div>
 
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-slate-700">Preço da Categoria</label>
+            <div className="flex gap-1">
+              <input
+                value={selectedCategoryPrice}
+                onChange={(e) => setSelectedCategoryPrice(e.target.value)}
+                placeholder="R$ 0,00"
+                className="w-full rounded-lg border border-brand-100 px-3 py-2 text-sm"
+              />
+              <button
+                type="button"
+                onClick={() => void handleSaveCategoryPrice()}
+                className="rounded-lg bg-brand-100 px-3 py-2 text-xs font-bold text-brand-700"
+              >
+                Salvar
+              </button>
+            </div>
+          </div>
+
           <button
             type="button"
             onClick={handleClearCategoryImage}
             disabled={!selectedCategoryId || !selectedCategoryImage}
             className="h-10 rounded-lg border border-rose-300 px-3 text-rose-700 disabled:opacity-50"
           >
-            Remover
+            Remover Imagem
           </button>
         </div>
 
