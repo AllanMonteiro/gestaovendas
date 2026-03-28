@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 @csrf_exempt
 def webhook(request):
-    # Lookup token on each request to ensure fresh settings
+    # Lookup token on each request to ensure fresh settings from Render env
     verify_token = getattr(settings, "WHATSAPP_VERIFY_TOKEN", "seu_token_secreto")
 
     if request.method == "GET":
@@ -37,13 +37,22 @@ def webhook(request):
         body = json.loads(raw_body)
         
         # Meta Cloud API Payload Structure
-        entry = body.get("entry", [])[0]
-        changes = entry.get("changes", [])[0]
-        value = changes.get("value", {})
+        entries = body.get("entry", [])
+        if not entries:
+            return JsonResponse({"ok": True, "msg": "no entries"})
+
+        entry = entries[0]
+        changes = entry.get("changes", [])
+        if not changes:
+            return JsonResponse({"ok": True, "msg": "no changes"})
+
+        value = changes[0].get("value", {})
         messages = value.get("messages", [])
 
         if not messages:
             return JsonResponse({"ok": True, "msg": "no messages"})
+
+        whatsapp = WhatsAppClient()
 
         for msg in messages:
             phone = msg.get("from")
@@ -52,72 +61,68 @@ def webhook(request):
             if not text:
                 continue
 
-            # 1. Conversation State Management
-            session, _ = WhatsAppSession.objects.get_or_create(phone=phone)
-            
-            # 2. Hybrid Analysis: Use AI in Conversational Mode
-            ai = AIClient()
-            result = ai.converse_order(text, session.context or {})
-            
-            if not result or result.get("status") == "invalid":
-                # Fallback to standard hybrid parsing if AI fails or returns invalid
-                parsed = parse_order_hybrid(text)
-                if not parsed.get("items"):
-                    return JsonResponse({"ok": True, "msg": "standard message ignored"})
+            try:
+                # 1. Conversation State Management
+                session, _ = WhatsAppSession.objects.get_or_create(phone=phone)
                 
-                # If hybrid found items, mock a 'complete' result
-                result = {
-                    "status": "complete",
-                    "updated_order": parsed,
-                    "response_text": "Certo! Estou processando seu pedido profissionalmente."
-                }
-
-            status = result.get("status")
-            updated_order = result.get("updated_order", {})
-            response_text = result.get("response_text", "")
-
-            whatsapp = WhatsAppClient()
-
-            if status == "incomplete":
-                # Save state and ask question
-                session.context = updated_order
-                session.save()
-                if whatsapp.is_configured():
-                    whatsapp.send_message(phone, response_text)
-                return JsonResponse({"ok": True, "status": "incomplete"})
-
-            if status == "complete":
-                # Creation with PIX, Catalog matching, and Logistics
-                order = create_delivery_order_from_parsed(phone=phone, parsed=updated_order)
-                logger.info(f"Conversational Order {order.id} created from WhatsApp {phone}")
-
-                # Automated Confirmation Response
-                if whatsapp.is_configured():
-                    whatsapp.send_order_confirmation(order)
+                # 2. Hybrid Analysis: Use AI in Conversational Mode
+                ai = AIClient()
+                result = ai.converse_order(text, session.context or {})
                 
-                # 3. Cleanup: Keeping it lightweight by deleting the session after completion
-                session.delete()
+                if not result or result.get("status") == "invalid":
+                    # Fallback to standard hybrid parsing if AI fails or returns invalid
+                    parsed = parse_order_hybrid(text)
+                    if not parsed.get("items"):
+                        # If nothing found, just ignore or ask for clarification
+                        if whatsapp.is_configured():
+                            whatsapp.send_message(phone, "Desculpe, não entendi. Pode repetir seu pedido ou perguntar algo específico? 🍧")
+                        continue
+                    
+                    # If hybrid found items, mock a 'complete' result
+                    result = {
+                        "status": "complete",
+                        "updated_order": parsed,
+                        "response_text": "Certo! Estou processando seu pedido profissionalmente."
+                    }
 
-                # Real-time Broadcast to Dashboard
-                broadcast_delivery_event('order_created', {
-                    'id': order.id,
-                    'customer_name': order.customer_name,
-                    'total': str(order.total),
-                    'status': order.status
-                })
+                status = result.get("status")
+                updated_order = result.get("updated_order", {})
+                response_text = result.get("response_text", "")
 
-                return JsonResponse({
-                    "ok": True, 
-                    "order_id": order.id,
-                    "status": "complete"
-                })
+                if status == "incomplete":
+                    # Save state and ask question
+                    session.context = updated_order
+                    session.save()
+                    if whatsapp.is_configured():
+                        whatsapp.send_message(phone, response_text)
+                
+                elif status == "complete":
+                    # Creation with PIX, Catalog matching, and Logistics
+                    order = create_delivery_order_from_parsed(phone=phone, parsed=updated_order)
+                    logger.info(f"Conversational Order {order.id} created from WhatsApp {phone}")
+
+                    # Automated Confirmation Response
+                    if whatsapp.is_configured():
+                        whatsapp.send_order_confirmation(order)
+                    
+                    # 3. Cleanup: Delete session after completion
+                    session.delete()
+
+                    # Real-time Broadcast to Dashboard
+                    broadcast_delivery_event('order_created', {
+                        'id': order.id,
+                        'customer_name': order.customer_name,
+                        'total': str(order.total),
+                        'status': order.status
+                    })
+
+            except Exception as ai_err:
+                logger.error(f"Error processing message for {phone}: {ai_err}")
+                if whatsapp.is_configured():
+                    whatsapp.send_message(phone, "Recebi sua mensagem mas tive um pequeno tropeço técnico. Meu atendente humano já vai falar com você! 🍨")
 
         return JsonResponse({"ok": True})
 
     except Exception as e:
-        logger.exception("Error in Professional WhatsApp Webhook")
-        return JsonResponse({"error": str(e)}, status=400)
-
-    except Exception as e:
-        logger.exception("Error in Professional WhatsApp Webhook")
-        return JsonResponse({"error": str(e)}, status=400)
+        logger.exception("Fatal error in Professional WhatsApp Webhook")
+        return JsonResponse({"error": str(e)}, status=500)

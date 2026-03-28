@@ -9,10 +9,13 @@ logger = logging.getLogger(__name__)
 
 class AIClient:
     def __init__(self):
-        self.provider = os.getenv("AI_PROVIDER", "openai").lower()
+        self.provider = os.getenv("AI_PROVIDER", "gemini").lower()
         self.api_key = os.getenv("AI_API_KEY")
         self.base_url = os.getenv("AI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-        self.model_name = os.getenv("AI_MODEL", "gpt-3.5-turbo")
+        self.model_name = os.getenv("AI_MODEL", "gemini-1.5-flash")
+
+    def is_configured(self):
+        return bool(self.api_key)
 
     def converse_order(self, text: str, current_state: dict) -> dict:
         """
