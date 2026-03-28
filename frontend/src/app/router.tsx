@@ -3,6 +3,7 @@ import { createBrowserRouter, NavLink, Outlet } from 'react-router-dom'
 import { useOutboxSync } from './useSync'
 import { api } from '../api/client'
 import { type AuthSession } from './auth'
+import { LoginGate } from '../components/LoginGate'
 
 // Lazy loading das paginas para reduzir o bundle inicial
 const PDV = lazy(() => import('../pages/PDV'))
@@ -157,7 +158,7 @@ const Layout: React.FC = () => {
 export const router = createBrowserRouter([
   {
     path: '/',
-    element: <Layout />,
+    element: <LoginGate><Layout /></LoginGate>,
     children: [
       { index: true, element: <Caixa /> },
       { path: 'pdv', element: <PDV /> },

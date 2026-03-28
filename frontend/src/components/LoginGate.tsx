@@ -24,7 +24,7 @@ export const LoginGate: React.FC<LoginGateProps> = ({ children }) => {
       setSession(response.data)
       setFeedback('')
     } catch {
-      setSession({ require_auth: false, authenticated: false, bootstrap_required: false })
+      setFeedback('Erro ao carregar sessão. Verifique se o servidor está rodando.')
     } finally {
       setLoading(false)
     }

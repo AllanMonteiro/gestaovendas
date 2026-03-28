@@ -13,7 +13,8 @@ export const api = axios.create({
 
 api.interceptors.request.use((config) => {
   const token = getAccessToken()
-  if (token) {
+  const isRefresh = config.url?.includes('/api/auth/refresh')
+  if (token && !isRefresh) {
     config.headers = config.headers || {}
     config.headers.Authorization = `Bearer ${token}`
   }

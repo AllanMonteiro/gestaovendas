@@ -31,7 +31,7 @@ def get_list_env(*names: str) -> list[str]:
 
 SECRET_KEY = get_env('SECRET_KEY', 'DJANGO_SECRET_KEY', default='dev-secret')
 DEBUG = get_bool_env('DEBUG', 'DJANGO_DEBUG', default=True)
-REQUIRE_AUTH = True
+REQUIRE_AUTH = get_bool_env('REQUIRE_AUTH', default=True)
 
 ALLOWED_HOSTS = get_list_env('ALLOWED_HOSTS', 'DJANGO_ALLOWED_HOSTS')
 if not ALLOWED_HOSTS:

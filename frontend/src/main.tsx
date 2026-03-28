@@ -9,9 +9,7 @@ const root = document.getElementById('root')!
 
 ReactDOM.createRoot(root).render(
   <React.StrictMode>
-    <LoginGate>
-      <RouterProvider router={router} />
-    </LoginGate>
+    <RouterProvider router={router} />
   </React.StrictMode>
 )
 
