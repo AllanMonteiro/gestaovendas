@@ -1,15 +1,19 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, Suspense, lazy } from 'react'
 import { createBrowserRouter, NavLink, Outlet } from 'react-router-dom'
 import { useOutboxSync } from './useSync'
 import { api } from '../api/client'
 import { type AuthSession } from './auth'
-import PDV from '../pages/PDV'
-import Caixa from '../pages/Caixa'
-import Cozinha from '../pages/Cozinha'
-import Produtos from '../pages/Produtos'
-import Configuracoes from '../pages/Configuracoes'
-import Fidelidade from '../pages/Fidelidade'
-import Relatorios from '../pages/Relatorios'
+
+// Lazy loading das paginas para reduzir o bundle inicial
+const PDV = lazy(() => import('../pages/PDV'))
+const Caixa = lazy(() => import('../pages/Caixa'))
+const Cozinha = lazy(() => import('../pages/Cozinha'))
+const Produtos = lazy(() => import('../pages/Produtos'))
+const Configuracoes = lazy(() => import('../pages/Configuracoes'))
+const Fidelidade = lazy(() => import('../pages/Fidelidade'))
+const Relatorios = lazy(() => import('../pages/Relatorios'))
+const PublicMenu = lazy(() => import('../pages/PublicMenu'))
+const PedidosDelivery = lazy(() => import('../pages/PedidosDelivery'))
 
 type StoreHeaderConfig = {
   store_name?: string
@@ -22,6 +26,12 @@ const normalizeTheme = (value?: string | null) => {
   if (value === 'green' || value === 'blue' || value === 'cream') return value
   return 'cream'
 }
+
+const NavLoading: React.FC = () => (
+  <div className="flex h-32 w-full animate-pulse items-center justify-center rounded-2xl bg-slate-50 border border-slate-100">
+    <div className="text-sm font-medium text-slate-400">Carregando modulo...</div>
+  </div>
+)
 
 const Layout: React.FC = () => {
   useOutboxSync()
@@ -38,7 +48,8 @@ const Layout: React.FC = () => {
     { to: '/produtos', label: 'Produtos' },
     { to: '/configuracoes', label: 'Configuracoes' },
     { to: '/fidelidade', label: 'Fidelidade' },
-    { to: '/relatorios', label: 'Relatorios' }
+    { to: '/relatorios', label: 'Relatorios' },
+    { to: '/delivery', label: 'Delivery' }
   ]
 
   useEffect(() => {
@@ -135,7 +146,9 @@ const Layout: React.FC = () => {
         </div>
       </header>
       <main className="mx-auto max-w-[1500px] px-3 py-4 sm:px-4 md:px-6 md:py-6 lg:py-8">
-        <Outlet />
+        <Suspense fallback={<NavLoading />}>
+          <Outlet />
+        </Suspense>
       </main>
     </div>
   )
@@ -153,7 +166,12 @@ export const router = createBrowserRouter([
       { path: 'produtos', element: <Produtos /> },
       { path: 'configuracoes', element: <Configuracoes /> },
       { path: 'fidelidade', element: <Fidelidade /> },
-      { path: 'relatorios', element: <Relatorios /> }
+      { path: 'relatorios', element: <Relatorios /> },
+      { path: 'delivery', element: <PedidosDelivery /> }
     ]
+  },
+  {
+    path: '/cardapio',
+    element: <Suspense fallback={<div className="p-10 text-center">Carregando cardapio...</div>}><PublicMenu /></Suspense>
   }
 ])

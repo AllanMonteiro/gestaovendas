@@ -30,7 +30,17 @@ def broadcast_pdv_event(event_type: str, payload: dict):
     async_to_sync(channel_layer.group_send)(
         'pdv',
         {
-            'type': 'pdv.event',
+            'type': 'pdv_event',
             'payload': {'event': event_type, **payload},
+        },
+    )
+
+def broadcast_delivery_event(event_type: str, payload: dict):
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        'pdv',
+        {
+            'type': 'pdv_event',
+            'payload': {'event': event_type, 'source': 'delivery', **payload},
         },
     )

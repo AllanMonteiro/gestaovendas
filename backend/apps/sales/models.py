@@ -151,6 +151,7 @@ class StoreConfig(models.Model):
     category_images = models.JSONField(default=dict)
     receipt_header_lines = models.JSONField(default=list)
     receipt_footer_lines = models.JSONField(default=list)
+    pix_key = models.CharField(max_length=100, null=True, blank=True)
 
     class Meta:
         verbose_name = 'Store Config'

@@ -72,6 +72,7 @@ type StoreConfigResponse = {
   printer?: {
     provider?: string
     agent_url?: string
+    printer_name?: string
     width_mm?: number
     auto_print_receipt?: boolean
     auto_print_kitchen?: boolean
@@ -163,6 +164,7 @@ const PDV: React.FC = () => {
   const [receiptFooterLines, setReceiptFooterLines] = useState<string[]>([])
   const [autoPrintReceipt, setAutoPrintReceipt] = useState(true)
   const [autoPrintKitchen, setAutoPrintKitchen] = useState(false)
+  const [printerName, setPrinterName] = useState('auto')
   const [lastReceiptPayload, setLastReceiptPayload] = useState<ThermalReceiptPayload | null>(null)
   const [showScaleModal, setShowScaleModal] = useState(false)
   const [scaleProduct, setScaleProduct] = useState<Product | null>(null)
@@ -250,6 +252,7 @@ const PDV: React.FC = () => {
       setReceiptFooterLines(conf.receipt_footer_lines ?? [])
       setAutoPrintReceipt(Boolean(conf.printer?.auto_print_receipt ?? true))
       setAutoPrintKitchen(Boolean(conf.printer?.auto_print_kitchen ?? false))
+      setPrinterName(conf.printer?.printer_name || 'auto')
 
       void saveCategories(cats)
       void saveProducts(prods)
@@ -279,6 +282,7 @@ const PDV: React.FC = () => {
           setReceiptFooterLines(conf.receipt_footer_lines ?? [])
           setAutoPrintReceipt(Boolean(conf.printer?.auto_print_receipt ?? true))
           setAutoPrintKitchen(Boolean(conf.printer?.auto_print_kitchen ?? false))
+          setPrinterName(conf.printer?.printer_name || 'auto')
         }
         setFeedback({ type: 'ok', text: 'Modo offline: usando dados locais.' })
       }
@@ -488,6 +492,8 @@ const PDV: React.FC = () => {
       setFeedback({ type: 'ok', text: 'Pedido criado sem telefone.' })
     }
   }
+
+
 
   const handleCreateFirstOrder = async () => {
     if (!firstName.trim() || !lastName.trim() || !neighborhood.trim()) {
@@ -778,7 +784,7 @@ const PDV: React.FC = () => {
       const response = await fetch(`${normalizedAgentUrl}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ ...payload, printer_name: printerName })
       })
       return response.ok
     },
@@ -948,6 +954,7 @@ const PDV: React.FC = () => {
     <>
       <div className="grid grid-cols-1 gap-4 md:gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_260px] xl:grid-cols-[280px_minmax(0,1fr)_minmax(0,1.2fr)]">
         <aside className="order-3 space-y-4 rounded-2xl lg:order-3 xl:order-1">
+
           <div className="panel p-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Comandas abertas</h2>

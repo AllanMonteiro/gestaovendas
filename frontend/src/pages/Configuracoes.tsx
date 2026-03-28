@@ -15,6 +15,7 @@ type StoreConfig = {
   printer?: {
     provider?: string
     agent_url?: string
+    printer_name?: string
     width_mm?: number
     auto_print_receipt?: boolean
     auto_print_kitchen?: boolean
@@ -26,6 +27,7 @@ type StoreConfig = {
     timeout_ms?: number
   }
   category_images?: Record<string, string>
+  pix_key?: string
 }
 
 type Category = {
@@ -69,6 +71,7 @@ const Configuracoes: React.FC = () => {
   const [logoUrl, setLogoUrl] = useState('')
   const [cnpj, setCnpj] = useState('')
   const [address, setAddress] = useState('')
+  const [pixKey, setPixKey] = useState('')
   const [theme, setTheme] = useState('cream')
 
   const [agentUrl, setAgentUrl] = useState('http://127.0.0.1:9876')
@@ -118,6 +121,7 @@ const Configuracoes: React.FC = () => {
       setLogoUrl(cfg.logo_url || '')
       setCnpj(cfg.cnpj || '')
       setAddress(cfg.address || '')
+      setPixKey(cfg.pix_key || '')
       setTheme(normalizeTheme(cfg.theme))
       setPointsPerReal(String(cfg.points_per_real ?? 1))
       setPointValueReal(String(cfg.point_value_real ?? '0.10'))
@@ -125,6 +129,7 @@ const Configuracoes: React.FC = () => {
       setAgentUrl(cfg.printer?.agent_url || 'http://127.0.0.1:9876')
       setAutoPrintReceipt(Boolean(cfg.printer?.auto_print_receipt ?? true))
       setAutoPrintKitchen(Boolean(cfg.printer?.auto_print_kitchen ?? false))
+      setSelectedPrinter(cfg.printer?.printer_name || 'auto')
       setComPort(cfg.scale?.com_port || 'COM3')
       setBaud(String(cfg.scale?.baud ?? 9600))
       setScaleEnabled(Boolean(cfg.scale?.enabled ?? true))
@@ -219,6 +224,7 @@ const Configuracoes: React.FC = () => {
         logo_url: logoUrl.trim() || null,
         cnpj,
         address,
+        pix_key: pixKey,
         theme: normalizeTheme(theme),
         points_per_real: Number(pointsPerReal) || 1,
         point_value_real: pointValueReal.replace(',', '.'),
@@ -226,6 +232,7 @@ const Configuracoes: React.FC = () => {
         printer: {
           provider: 'AGENT',
           agent_url: agentUrl,
+          printer_name: selectedPrinter,
           width_mm: 80,
           auto_print_receipt: autoPrintReceipt,
           auto_print_kitchen: autoPrintKitchen
@@ -258,19 +265,53 @@ const Configuracoes: React.FC = () => {
     reader.readAsDataURL(file)
   }
 
+  const [printers, setPrinters] = useState<{ name: string, id: string }[]>([])
+  const [selectedPrinter, setSelectedPrinter] = useState('auto')
+
+  const handleFetchPrinters = async () => {
+    if (!agentUrl.trim()) {
+      setFeedback('Informe o Agent URL.')
+      return
+    }
+    try {
+      const url = `${agentUrl.replace(/\/$/, '')}/printers`
+      const response = await fetch(url)
+      const data = await response.json()
+      if (Array.isArray(data)) {
+        setPrinters(data)
+        setFeedback(`${data.length} impressoras encontradas.`)
+      } else {
+        setFeedback('Erro ao buscar impressoras.')
+      }
+    } catch {
+      setFeedback('Nao foi possivel conectar ao Agent URL para buscar impressoras.')
+    }
+  }
+
   const handleTestScale = async () => {
     if (!agentUrl.trim()) {
       setFeedback('Informe o Agent URL.')
       return
     }
     try {
-      const url = `${agentUrl.replace(/\/$/, '')}/health`
-      const response = await fetch(url)
+      const baseUrl = agentUrl.replace(/\/$/, '')
+      const response = await fetch(`${baseUrl}/scale/weight`)
       if (!response.ok) {
         setFeedback('Agent respondeu com erro no teste de balanca.')
         return
       }
-      setFeedback('Agent online. Balanca pode ser testada no PDV por produto por peso.')
+      const data = await response.json()
+      if (data.grams === null) {
+          // Se nao tiver peso real, vamos simular um para o teste ser funcional
+          await fetch(`${baseUrl}/scale/config`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ simulate: true, grams: 500 })
+          })
+          setFeedback('Balanca simulada em 500g para teste. Verifique no PDV.')
+      } else {
+          setFeedback(`Balanca online: ${data.grams}g detectados.`)
+      }
     } catch {
       setFeedback('Nao foi possivel conectar ao Agent URL informado.')
     }
@@ -411,7 +452,29 @@ const Configuracoes: React.FC = () => {
 
       <div className="panel space-y-3 p-4">
         <h2 className="font-semibold">Impressora e Balanca</h2>
-        <input value={agentUrl} onChange={(event) => setAgentUrl(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Agent URL" />
+        <div className="flex gap-2">
+          <input value={agentUrl} onChange={(event) => setAgentUrl(event.target.value)} className="flex-1 rounded-lg border border-brand-100 px-3 py-2" placeholder="Agent URL (ex: http://localhost:9876)" />
+          <button onClick={() => void handleFetchPrinters()} className="rounded-lg bg-brand-100 px-3 py-2 text-sm font-medium text-brand-700 hover:bg-brand-200">
+            Buscar Impressoras
+          </button>
+        </div>
+
+        {printers.length > 0 && (
+          <div className="space-y-1">
+            <label className="text-xs font-bold uppercase tracking-wider text-slate-400">Impressora Instalada</label>
+            <select 
+              value={selectedPrinter} 
+              onChange={(e) => setSelectedPrinter(e.target.value)}
+              className="w-full rounded-lg border border-brand-100 bg-white px-3 py-2"
+            >
+              <option value="auto">Selecao Automatica</option>
+              {printers.map(p => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <label className="inline-flex items-center gap-2 text-sm">
           <input type="checkbox" checked={autoPrintReceipt} onChange={(event) => setAutoPrintReceipt(event.target.checked)} />
           Imprimir comanda automaticamente apos a venda
@@ -420,17 +483,25 @@ const Configuracoes: React.FC = () => {
           <input type="checkbox" checked={autoPrintKitchen} onChange={(event) => setAutoPrintKitchen(event.target.checked)} />
           Imprimir pedido automaticamente na cozinha
         </label>
-        <div className="flex gap-2">
-          <input value={comPort} onChange={(event) => setComPort(event.target.value)} className="flex-1 rounded-lg border border-brand-100 px-3 py-2" placeholder="COM3" />
-          <input value={baud} onChange={(event) => setBaud(event.target.value)} className="w-28 rounded-lg border border-brand-100 px-3 py-2" placeholder="9600" />
+        
+        <div className="pt-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Configuracao de Balanca</h3>
+            <div className="flex gap-2">
+              <input value={comPort} onChange={(event) => setComPort(event.target.value)} className="flex-1 rounded-lg border border-brand-100 px-3 py-2" placeholder="COM3" />
+              <input value={baud} onChange={(event) => setBaud(event.target.value)} className="w-28 rounded-lg border border-brand-100 px-3 py-2" placeholder="9600" />
+            </div>
         </div>
+
         <label className="inline-flex items-center gap-2 text-sm">
           <input type="checkbox" checked={scaleEnabled} onChange={(event) => setScaleEnabled(event.target.checked)} />
           Balanca habilitada
         </label>
-        <button onClick={() => void handleTestScale()} className="rounded-lg bg-brand-600 px-3 py-2 text-white">
-          Testar balanca
-        </button>
+        
+        <div className="flex gap-2">
+            <button onClick={() => void handleTestScale()} className="flex-1 rounded-lg bg-brand-600 px-3 py-2 text-white font-semibold shadow-sm hover:bg-brand-700">
+              Testar Conexao / Simular Peso
+            </button>
+        </div>
       </div>
 
       <div className="panel space-y-3 p-4">
@@ -629,6 +700,16 @@ const Configuracoes: React.FC = () => {
                     Limpar
                   </button>
                 </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-bold text-slate-700">Chave PIX (para automação Delivery)</label>
+                <input
+                  type="text"
+                  value={pixKey}
+                  onChange={(e) => setPixKey(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 p-3"
+                  placeholder="Seu CPF, CNPJ, E-mail ou Telefone"
+                />
               </div>
             </div>
           </div>

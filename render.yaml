@@ -31,6 +31,20 @@ services:
         value: "1"
       - key: DB_CONN_MAX_AGE
         value: "0"
+      
+      # 🤖 New AI & WhatsApp Features
+      - key: AI_PROVIDER
+        value: "gemini" # ou "openai"
+      - key: AI_MODEL
+        value: "gemini-1.5-flash"
+      - key: AI_API_KEY
+        sync: false
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_ID
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
 
   # 2. Frontend: Site Estático
   - type: web

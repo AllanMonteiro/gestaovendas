@@ -17,12 +17,12 @@ def auto_discover_printer() -> str:
     return ""
 
 
-def print_escpos(lines: List[str]):
+def print_escpos(lines: List[str], printer_name: str = None):
     printer = None
     if settings.printer_conn == 'net':
         printer = Network(settings.printer_net_host, settings.printer_net_port)
     elif settings.printer_conn == 'win32':
-        p_name = settings.printer_name
+        p_name = printer_name or settings.printer_name
         if p_name.lower() == 'auto':
             p_name = auto_discover_printer()
             if not p_name:

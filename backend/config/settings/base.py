@@ -5,7 +5,8 @@ from urllib.parse import parse_qs, urlparse
 
 import dj_database_url
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# BASE_DIR is now three levels up: backend/config/settings/base.py -> backend/
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 
 def get_env(*names: str, default: str | None = None) -> str | None:
@@ -35,6 +36,7 @@ REQUIRE_AUTH = True
 ALLOWED_HOSTS = get_list_env('ALLOWED_HOSTS', 'DJANGO_ALLOWED_HOSTS')
 if not ALLOWED_HOSTS:
     ALLOWED_HOSTS = ['*'] if DEBUG else ['localhost', '127.0.0.1']
+
 for local_host in ('localhost', '127.0.0.1'):
     if local_host not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(local_host)
@@ -59,6 +61,9 @@ INSTALLED_APPS = [
     'apps.loyalty',
     'apps.reports',
     'apps.audit',
+    'apps.core',
+    'apps.orders',
+    'apps.integrations.whatsapp',
 ]
 
 MIDDLEWARE = [
@@ -154,6 +159,27 @@ SIMPLE_JWT = {
 
 REDIS_URL = get_env('REDIS_URL')
 REDIS_HOST = get_env('REDIS_HOST')
+CACHE_BACKEND = os.getenv("CACHE_BACKEND", "redis")
+
+if CACHE_BACKEND == "redis":
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": f"redis://{os.getenv('REDIS_HOST', 'redis')}:{os.getenv('REDIS_PORT', '6379')}/1",
+            "OPTIONS": {
+                "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            },
+            "TIMEOUT": int(os.getenv("CACHE_TIMEOUT", "300")),
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "fallback",
+        }
+    }
+
 REDIS_PORT = int(get_env('REDIS_PORT', default='6379') or '6379')
 if REDIS_URL:
     CHANNEL_LAYERS = {
@@ -206,6 +232,9 @@ X_FRAME_OPTIONS = 'DENY'
 SECURE_SSL_REDIRECT = get_bool_env('SECURE_SSL_REDIRECT', 'DJANGO_SECURE_SSL_REDIRECT', default=not DEBUG)
 
 LOG_LEVEL = get_env('LOG_LEVEL', 'DJANGO_LOG_LEVEL', default='INFO')
+LOG_DIR = BASE_DIR / 'logs'
+LOG_DIR.mkdir(exist_ok=True)
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -219,9 +248,20 @@ LOGGING = {
             'class': 'logging.StreamHandler',
             'formatter': 'standard'
         },
+        'file': {
+            'class': 'logging.FileHandler',
+            'filename': LOG_DIR / 'django.log',
+            'formatter': 'standard',
+        },
     },
     'root': {
-        'handlers': ['console'],
+        'handlers': ['console', 'file'],
         'level': LOG_LEVEL,
     },
+    "loggers": {
+        "django.db.backends": {
+            "handlers": ["console"],
+            "level": "WARNING",
+        }
+    }
 }

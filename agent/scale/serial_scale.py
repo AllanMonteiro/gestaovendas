@@ -54,3 +54,7 @@ class SerialScale:
     def last_grams(self) -> Optional[int]:
         with self._lock:
             return self._last_grams
+
+    def simulate(self, grams: int):
+        with self._lock:
+            self._last_grams = grams

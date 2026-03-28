@@ -33,6 +33,14 @@ type PaymentRow = {
 
 type ChartGranularity = 'day' | 'week' | 'month'
 
+type OrderItem = {
+  id: string
+  product_name: string
+  qty: string
+  unit_price: string
+  total: string
+}
+
 type OrderRow = {
   id: string
   display_number?: string
@@ -42,6 +50,7 @@ type OrderRow = {
   customer_name?: string | null
   customer_phone?: string | null
   canceled_reason?: string | null
+  items?: OrderItem[]
 }
 
 const formatBRL = (value: string | number | null | undefined) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -71,6 +80,7 @@ const Relatorios: React.FC = () => {
   const [finalizedOrders, setFinalizedOrders] = useState<OrderRow[]>([])
   const [canceledOrders, setCanceledOrders] = useState<OrderRow[]>([])
   const [feedback, setFeedback] = useState('')
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
 
   const loadReports = async (from = fromDate, to = toDate) => {
     try {
@@ -260,27 +270,66 @@ const Relatorios: React.FC = () => {
             </span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm lg:text-base">
               <thead>
-                <tr className="text-left text-slate-500">
-                  <th className="pb-2">Pedido</th>
-                  <th className="pb-2">Cliente</th>
-                  <th className="pb-2">Fechado em</th>
-                  <th className="pb-2">Total</th>
+                <tr className="text-left text-slate-500 text-xs uppercase tracking-wider">
+                  <th className="pb-3 pl-2">Pedido</th>
+                  <th className="pb-3">Cliente</th>
+                  <th className="pb-3">Fechado em</th>
+                  <th className="pb-3 text-right pr-2">Total</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-brand-100">
                 {finalizedOrders.map((order) => (
-                  <tr key={order.id} className="border-t border-brand-100">
-                    <td className="py-2 font-semibold text-slate-800">#{getOrderDisplayNumber(order)}</td>
-                    <td className="py-2">{order.customer_name || order.customer_phone || 'Nao informado'}</td>
-                    <td className="py-2">{new Date(order.closed_at || order.created_at).toLocaleString('pt-BR')}</td>
-                    <td className="py-2 text-emerald-700">{formatBRL(order.total)}</td>
-                  </tr>
+                  <React.Fragment key={order.id}>
+                    <tr 
+                      onClick={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}
+                      className={`cursor-pointer transition-colors hover:bg-brand-50 ${expandedOrderId === order.id ? 'bg-brand-50/50' : ''}`}
+                    >
+                      <td className="py-3 pl-2 font-bold text-brand-900">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] transition-transform ${expandedOrderId === order.id ? 'rotate-90' : ''}`}>▶</span>
+                          #{getOrderDisplayNumber(order)}
+                        </div>
+                      </td>
+                      <td className="py-3 text-slate-600">{order.customer_name || order.customer_phone || 'Nao informado'}</td>
+                      <td className="py-3 text-xs text-slate-400">{new Date(order.closed_at || order.created_at).toLocaleString('pt-BR')}</td>
+                      <td className="py-3 text-right pr-2 font-bold text-emerald-700">{formatBRL(order.total)}</td>
+                    </tr>
+                    {expandedOrderId === order.id && (
+                      <tr>
+                        <td colSpan={4} className="bg-brand-50/30 px-4 py-3">
+                          <div className="rounded-xl border border-brand-100 bg-white p-3 shadow-inner">
+                            <p className="mb-2 text-xs font-bold uppercase tracking-widest text-brand-400">Itens do Pedido</p>
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-left text-slate-400">
+                                  <th className="pb-1">Descricao</th>
+                                  <th className="pb-1 text-center font-normal">Qtd</th>
+                                  <th className="pb-1 text-right font-normal">Un.</th>
+                                  <th className="pb-1 text-right pr-1">Total</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-50">
+                                {order.items?.map((item) => (
+                                  <tr key={item.id}>
+                                    <td className="py-2 font-medium text-slate-700">{item.product_name}</td>
+                                    <td className="py-2 text-center text-slate-600">{Number(item.qty).toLocaleString('pt-BR')}</td>
+                                    <td className="py-2 text-right text-slate-400">{formatBRL(item.unit_price)}</td>
+                                    <td className="py-2 text-right pr-1 font-semibold text-slate-800">{formatBRL(item.total)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
                 {finalizedOrders.length === 0 ? (
-                  <tr className="border-t border-brand-100">
-                    <td colSpan={4} className="py-3 text-center text-slate-500">
+                  <tr>
+                    <td colSpan={4} className="py-6 text-center text-slate-400">
                       Nenhum pedido finalizado no periodo.
                     </td>
                   </tr>
@@ -301,27 +350,66 @@ const Relatorios: React.FC = () => {
             </span>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm lg:text-base">
               <thead>
-                <tr className="text-left text-slate-500">
-                  <th className="pb-2">Pedido</th>
-                  <th className="pb-2">Cliente</th>
-                  <th className="pb-2">Motivo</th>
-                  <th className="pb-2">Valor</th>
+                <tr className="text-left text-slate-500 text-xs uppercase tracking-wider">
+                  <th className="pb-3 pl-2">Pedido</th>
+                  <th className="pb-3">Cliente</th>
+                  <th className="pb-3">Motivo</th>
+                  <th className="pb-3 text-right pr-2">Valor</th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-brand-100">
                 {canceledOrders.map((order) => (
-                  <tr key={order.id} className="border-t border-brand-100">
-                    <td className="py-2 font-semibold text-slate-800">#{getOrderDisplayNumber(order)}</td>
-                    <td className="py-2">{order.customer_name || order.customer_phone || 'Nao informado'}</td>
-                    <td className="py-2">{order.canceled_reason || 'Sem motivo informado'}</td>
-                    <td className="py-2 text-rose-700">{formatBRL(order.total)}</td>
-                  </tr>
+                  <React.Fragment key={order.id}>
+                    <tr 
+                      onClick={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}
+                      className={`cursor-pointer transition-colors hover:bg-brand-50 ${expandedOrderId === order.id ? 'bg-brand-50/50' : ''}`}
+                    >
+                      <td className="py-3 pl-2 font-bold text-brand-900">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[10px] transition-transform ${expandedOrderId === order.id ? 'rotate-90' : ''}`}>▶</span>
+                          #{getOrderDisplayNumber(order)}
+                        </div>
+                      </td>
+                      <td className="py-3 text-slate-600">{order.customer_name || order.customer_phone || 'Nao informado'}</td>
+                      <td className="py-3 text-xs text-slate-400">{order.canceled_reason || 'Sem motivo'}</td>
+                      <td className="py-3 text-right pr-2 font-bold text-rose-700">{formatBRL(order.total)}</td>
+                    </tr>
+                    {expandedOrderId === order.id && (
+                      <tr>
+                        <td colSpan={4} className="bg-brand-50/30 px-4 py-3">
+                          <div className="rounded-xl border border-brand-100 bg-white p-3 shadow-inner">
+                            <p className="mb-2 text-xs font-bold uppercase tracking-widest text-brand-400">Itens Cancelados</p>
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-left text-slate-400">
+                                  <th className="pb-1">Descricao</th>
+                                  <th className="pb-1 text-center font-normal">Qtd</th>
+                                  <th className="pb-1 text-right font-normal">Un.</th>
+                                  <th className="pb-1 text-right pr-1">Total</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-50">
+                                {order.items?.map((item) => (
+                                  <tr key={item.id}>
+                                    <td className="py-2 font-medium text-slate-700">{item.product_name}</td>
+                                    <td className="py-2 text-center text-slate-600">{Number(item.qty).toLocaleString('pt-BR')}</td>
+                                    <td className="py-2 text-right text-slate-400">{formatBRL(item.unit_price)}</td>
+                                    <td className="py-2 text-right pr-1 font-semibold text-slate-800">{formatBRL(item.total)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
                 {canceledOrders.length === 0 ? (
-                  <tr className="border-t border-brand-100">
-                    <td colSpan={4} className="py-3 text-center text-slate-500">
+                  <tr>
+                    <td colSpan={4} className="py-6 text-center text-slate-400">
                       Nenhum pedido cancelado no periodo.
                     </td>
                   </tr>

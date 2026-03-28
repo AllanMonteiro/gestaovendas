@@ -33,25 +33,37 @@ async def health():
 @app.post('/print/receipt')
 async def print_receipt(body: dict):
     lines = format_receipt(body, width=42)
-    print_escpos(lines)
+    print_escpos(lines, printer_name=body.get('printer_name'))
     return {'status': 'printed'}
 
 
 @app.post('/print/kitchen')
 async def print_kitchen(body: dict):
     lines = format_receipt(body, width=42)
-    print_escpos(lines)
+    print_escpos(lines, printer_name=body.get('printer_name'))
     return {'status': 'printed'}
 
 
 @app.get('/scale/weight')
-async def get_scale_weight():
+async def get_weight():
     grams = scale.last_grams()
-    return {'grams': grams, 'stable': True}
+    return {'grams': grams, 'stable': grams is not None}
+
+
+@app.get('/printers')
+async def list_printers():
+    import win32print
+    try:
+        printers = win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL | win32print.PRINTER_ENUM_CONNECTIONS)
+        return [{'name': p[2], 'id': p[2]} for p in printers]
+    except Exception as e:
+        return {'detail': str(e)}, 500
 
 
 @app.post('/scale/config')
 async def scale_config(body: dict):
+    if 'simulate' in body:
+        scale.simulate(body.get('grams', 500))
     return {'status': 'ok'}
 
 
@@ -63,8 +75,9 @@ async def ws_print(ws: WebSocket):
             data = await ws.receive_json()
             job_type = data.get('type')
             payload = data.get('payload', {})
+            printer_name = data.get('printer_name')
             lines = format_receipt(payload, width=42)
-            print_escpos(lines)
+            print_escpos(lines, printer_name=printer_name)
             await ws.send_json({'status': 'ok', 'type': job_type})
     except WebSocketDisconnect:
         return

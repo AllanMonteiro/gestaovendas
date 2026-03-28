@@ -1,20 +1,58 @@
+# Stage 1: Build
+FROM python:3.11-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# Instala dependências de build apenas aqui
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    gcc \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Cria virtualenv
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install gunicorn
+
+# Stage 2: Runtime (Final)
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+ENV PORT=8000
+ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 
+# Instala apenas a dependência de runtime do postgres e curl para healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+    libpq5 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
+# Copia dependências instaladas
+COPY --from=builder /opt/venv /opt/venv
 
-COPY . /app/
-RUN chmod +x /app/entrypoint.sh
+# Copia código
+COPY . .
+
+# Segurança: usuário não-root e permissões
+RUN useradd -ms /bin/bash appuser && \
+    mkdir -p /app/logs /app/staticfiles /app/media && \
+    chown -R appuser:appuser /app
+
+USER appuser
 
 EXPOSE 8000
 
-CMD ["/app/entrypoint.sh"]
+CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120 --access-logfile - --error-logfile -"]

@@ -5,10 +5,11 @@ from apps.sales.models import Order, OrderItem, Payment, CashSession, CashMove, 
 class OrderItemSerializer(serializers.ModelSerializer):
     order = serializers.UUIDField(source='order_id', read_only=True)
     product = serializers.IntegerField(source='product_id', read_only=True)
+    product_name = serializers.CharField(source='product.name', read_only=True)
 
     class Meta:
         model = OrderItem
-        fields = ['id', 'order', 'product', 'qty', 'weight_grams', 'unit_price', 'total', 'notes']
+        fields = ['id', 'order', 'product', 'product_name', 'qty', 'weight_grams', 'unit_price', 'total', 'notes']
 
 
 class OrderSerializer(serializers.ModelSerializer):
