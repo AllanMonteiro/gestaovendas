@@ -24,14 +24,7 @@ export default defineConfig({
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {
-        manualChunks(id) {
-          if (id.includes('node_modules')) {
-            if (id.includes('react')) return 'vendor-react'
-            if (id.includes('axios')) return 'vendor-axios'
-            if (id.includes('dexie')) return 'vendor-db'
-            return 'vendor'
-          }
-        }
+        // Let Vite optimize chunks automatically to avoid initialization errors
       }
     }
   }

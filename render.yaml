@@ -46,10 +46,9 @@ services:
       - key: WHATSAPP_VERIFY_TOKEN
         sync: false
 
-  # 2. Frontend: Site Estático
-  - type: web
+  # 2. Frontend: Site Estático (Modernizado)
+  - type: static
     name: gestaovendas-frontend
-    runtime: static
     rootDir: frontend
     buildCommand: "npm ci && npm run build"
     staticPublishPath: dist
