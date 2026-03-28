@@ -9,7 +9,8 @@ class WhatsAppClient:
     def __init__(self):
         self.phone_id = os.getenv("WHATSAPP_PHONE_ID")
         self.token = os.getenv("WHATSAPP_TOKEN")
-        self.base_url = f"https://graph.facebook.com/v16.0/{self.phone_id}/messages"
+        # Updated to v20.0 as seen in user dashboard
+        self.base_url = f"https://graph.facebook.com/v20.0/{self.phone_id}/messages"
 
     def is_configured(self) -> bool:
         return bool(self.phone_id and self.token)
