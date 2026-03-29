@@ -2,7 +2,7 @@ from decimal import Decimal, ROUND_HALF_UP, ROUND_FLOOR
 from django.db import transaction, models
 from django.contrib.auth import get_user_model
 from django.utils import timezone
-from apps.catalog.models import ProductPrice
+from apps.catalog.models import Product, ProductPrice
 from apps.sales.models import Order, OrderItem, Payment, CashSession, CashMove, StoreConfig
 from apps.kitchen.models import KitchenTicket
 from apps.audit.utils import log_audit
@@ -392,16 +392,30 @@ def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_car
 @transaction.atomic
 def reset_sales(*, user):
     from apps.loyalty.models import LoyaltyMove, LoyaltyAccount
-    from apps.kitchen.models import KitchenTicket
     from apps.audit.models import AuditLog
 
-    # Deleting Order triggers CASCADE for OrderItem, Payment, KitchenTicket
+    stock_restore_rows = (
+        OrderItem.objects.filter(order__status=Order.STATUS_PAID)
+        .values('product_id')
+        .annotate(total_qty=models.Sum('qty'))
+    )
+    for row in stock_restore_rows:
+        product_id = row.get('product_id')
+        total_qty = row.get('total_qty')
+        if product_id and total_qty:
+            Product.objects.filter(id=product_id).update(stock=models.F('stock') + total_qty)
+
+    # Deleting Order triggers CASCADE for OrderItem, Payment and KitchenTicket.
     Order.objects.all().delete()
     CashMove.objects.all().delete()
     CashSession.objects.all().delete()
     LoyaltyMove.objects.all().delete()
     LoyaltyAccount.objects.all().update(points_balance=0)
-    AuditLog.objects.all().delete()
+    AuditLog.objects.filter(
+        models.Q(entity='order')
+        | models.Q(entity='cash_session')
+        | models.Q(action='system.reset_sales')
+    ).delete()
 
     log_audit(
         user=resolve_effective_user(user),

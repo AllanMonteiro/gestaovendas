@@ -457,7 +457,7 @@ const Configuracoes: React.FC = () => {
   const handleResetSales = async () => {
     const password = window.prompt(
       'ATENÇÃO: Isso irá apagar todo o histórico de vendas, caixas e pontos de fidelidade. ' +
-      'Os produtos e categorias serão mantidos. ' +
+      'Os produtos e categorias serão mantidos, e o estoque consumido por essas vendas será recomposto. ' +
       'Digite sua SENHA DE ACESSO para confirmar:'
     )
     
