@@ -15,6 +15,21 @@ interface Order {
   pix_payload?: string
 }
 
+type OrdersResponse = Order[] | { results?: Order[] } | { data?: Order[] }
+
+const normalizeOrders = (payload: OrdersResponse): Order[] => {
+  if (Array.isArray(payload)) {
+    return payload
+  }
+  if (payload && Array.isArray(payload.results)) {
+    return payload.results
+  }
+  if (payload && Array.isArray(payload.data)) {
+    return payload.data
+  }
+  return []
+}
+
 const PedidosDelivery: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
@@ -23,8 +38,8 @@ const PedidosDelivery: React.FC = () => {
 
   const fetchOrders = async () => {
     try {
-      const response = await api.get<Order[]>('/api/orders/')
-      setOrders(response.data)
+      const response = await api.get<OrdersResponse>('/api/orders/')
+      setOrders(normalizeOrders(response.data))
       setFeedback((current) => (current?.type === 'error' ? null : current))
     } catch (err: any) {
       const msg = err.response?.data?.detail || 'Erro ao carregar pedidos de delivery.'
