@@ -4,7 +4,7 @@ from rest_framework import generics, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from apps.catalog.models import Category, Product, ProductPrice
-from apps.catalog.serializers import CategorySerializer, ProductSerializer, ProductPriceSerializer
+from apps.catalog.serializers import CategorySerializer, ProductCompactSerializer, ProductSerializer, ProductPriceSerializer
 from apps.accounts.permissions import auth_is_required, user_has_permission
 
 
@@ -108,6 +108,11 @@ class ProductListView(generics.ListCreateAPIView):
                 return [permissions.IsAdminUser()]
             return [permissions.IsAuthenticated()] if auth_is_required() else [permissions.AllowAny()]
         return [permissions.AllowAny()]
+
+    def get_serializer_class(self):
+        if self.request.method == 'GET' and self.request.query_params.get('compact', '').strip().lower() in {'1', 'true', 'yes', 'on'}:
+            return ProductCompactSerializer
+        return ProductSerializer
 
     def get_queryset(self):
         qs = Product.objects.select_related('category').all()

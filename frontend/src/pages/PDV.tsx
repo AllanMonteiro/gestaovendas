@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import { openThermalReceiptPdf, type ThermalReceiptPayload } from '../app/thermalReceipt'
 import { ProductGrid } from '../components/ProductGrid'
@@ -191,6 +191,7 @@ const PDV: React.FC = () => {
   const [scaleLoading, setScaleLoading] = useState(false)
   const [isOnline, setIsOnline] = useState(window.navigator.onLine)
   const [outboxCount, setOutboxCount] = useState(0)
+  const deferredProductSearchTerm = useDeferredValue(productSearchTerm)
 
   const parsedScaleWeightInput = useMemo(() => parseScaleWeightInput(scaleWeightInput), [scaleWeightInput])
   const effectiveScaleWeight = scaleWeightInput.trim() ? parsedScaleWeightInput : scaleWeight
@@ -207,12 +208,12 @@ const PDV: React.FC = () => {
   }, [products])
 
   const searchResultProducts = useMemo(() => {
-    const normalizedSearch = productSearchTerm.trim().toLowerCase()
+    const normalizedSearch = deferredProductSearchTerm.trim().toLowerCase()
     if (!normalizedSearch) {
       return []
     }
     return products.filter((product) => product.name.toLowerCase().includes(normalizedSearch))
-  }, [products, productSearchTerm])
+  }, [deferredProductSearchTerm, products])
 
   const visibleProducts = useMemo(() => {
     if (selectedCategoryId === null) {
@@ -264,7 +265,7 @@ const PDV: React.FC = () => {
     try {
       const [categoriesResp, productsResp, configResp] = await Promise.all([
         api.get<Category[]>('/api/categories'),
-        api.get<Product[]>('/api/products'),
+        api.get<Product[]>('/api/products?compact=1'),
         api.get<StoreConfigResponse>('/api/config/pdv')
       ])
       

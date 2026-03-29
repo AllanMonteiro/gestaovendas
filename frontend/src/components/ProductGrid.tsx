@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 
 type Category = {
   id: number
@@ -39,10 +39,19 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
   onSearchTermChange,
   onAddProduct
 }) => {
-  const categoryProductLabel = (categoryId: number) => {
-    const sample = allProducts.find((product) => product.category === categoryId && product.active !== false)
-    return sample?.name || 'Sem produto vinculado'
-  }
+  const categorySummaries = useMemo(() => {
+    const summaries = new Map<number, { sample: Product | null; stock: string | number }>()
+    allProducts.forEach((product) => {
+      if (product.active === false || summaries.has(product.category)) {
+        return
+      }
+      summaries.set(product.category, {
+        sample: product,
+        stock: product.stock ?? 0,
+      })
+    })
+    return summaries
+  }, [allProducts])
 
   return (
     <div className="space-y-3">
@@ -107,9 +116,9 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
             <button
               key={category.id}
               onClick={() => {
-                const sample = allProducts.find((product) => product.category === category.id && product.active !== false)
-                if (sample) {
-                  onAddProduct(sample)
+                const summary = categorySummaries.get(category.id)
+                if (summary?.sample) {
+                  onAddProduct(summary.sample)
                 } else {
                   onSelectCategory(category.id)
                 }
@@ -136,7 +145,7 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
                     {category.name}
                   </p>
                   <p className="truncate text-xs text-slate-500">
-                    Estoque: {allProducts.find(p => p.category === category.id && p.active !== false)?.stock ?? 0}
+                    Estoque: {categorySummaries.get(category.id)?.stock ?? 0}
                   </p>
                 </div>
               </div>

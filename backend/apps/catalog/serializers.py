@@ -14,6 +14,12 @@ class ProductSerializer(serializers.ModelSerializer):
         fields = ['id', 'category', 'name', 'description', 'active', 'sold_by_weight', 'image_url', 'stock']
 
 
+class ProductCompactSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Product
+        fields = ['id', 'category', 'name', 'active', 'sold_by_weight', 'stock']
+
+
 class ProductPriceSerializer(serializers.ModelSerializer):
     ideal_price = serializers.SerializerMethodField()
     cost_base = serializers.SerializerMethodField()

@@ -81,6 +81,13 @@ def _serialize_orders(orders, include_items=True):
     return serializer_class(orders, many=True).data
 
 
+def _orders_with_customer(include_items=True):
+    qs = Order.objects.select_related('customer')
+    if include_items:
+        qs = qs.prefetch_related('items__product')
+    return qs
+
+
 class OrdersCreateView(APIView):
     def post(self, request):
         if auth_is_required() and not user_has_permission(request.user, 'pdv.operate'):
@@ -260,32 +267,34 @@ class OrderDeleteView(APIView):
 
 class OrdersOpenView(APIView):
     def get(self, request):
+        include_items = _wants_items(request, default=True)
         orders = (
-            Order.objects.filter(status__in=[Order.STATUS_OPEN, Order.STATUS_SENT, Order.STATUS_READY])
-            .select_related('customer')
-            .prefetch_related('items__product')
+            _orders_with_customer(include_items=include_items)
+            .filter(status__in=[Order.STATUS_OPEN, Order.STATUS_SENT, Order.STATUS_READY])
             .order_by('-created_at')
         )
-        return Response(_serialize_orders(orders, include_items=_wants_items(request, default=True)))
+        return Response(_serialize_orders(orders, include_items=include_items))
 
 
 class OrdersClosedView(APIView):
     def get(self, request):
         from_date = request.query_params.get('from')
         to_date = request.query_params.get('to')
-        qs = Order.objects.filter(status=Order.STATUS_PAID).select_related('customer').prefetch_related('items__product')
+        include_items = _wants_items(request, default=True)
+        qs = _orders_with_customer(include_items=include_items).filter(status=Order.STATUS_PAID)
         qs = qs.filter(closed_at__isnull=False)
         qs = _apply_range_filter_for_field(qs, 'closed_at', from_date, to_date)
-        return Response(_serialize_orders(qs.order_by('-closed_at'), include_items=_wants_items(request, default=True)))
+        return Response(_serialize_orders(qs.order_by('-closed_at'), include_items=include_items))
 
 
 class OrdersCanceledView(APIView):
     def get(self, request):
         from_date = request.query_params.get('from')
         to_date = request.query_params.get('to')
-        qs = Order.objects.filter(status=Order.STATUS_CANCELED).select_related('customer').prefetch_related('items__product')
+        include_items = _wants_items(request, default=True)
+        qs = _orders_with_customer(include_items=include_items).filter(status=Order.STATUS_CANCELED)
         qs = _apply_range_filter(qs, from_date, to_date)
-        return Response(_serialize_orders(qs.order_by('-created_at'), include_items=_wants_items(request, default=True)))
+        return Response(_serialize_orders(qs.order_by('-created_at'), include_items=include_items))
 
 
 class OrderDetailView(APIView):
