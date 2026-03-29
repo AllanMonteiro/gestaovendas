@@ -83,6 +83,17 @@ type StoreConfigResponse = {
   }
 }
 
+type CashDashboardResponse = {
+  cash_status: CashStatusResponse
+  closed_orders: Order[]
+  cash_moves: CashMove[]
+  cash_history: CashHistoryEntry[]
+  payments: PaymentAgg[]
+  today_summary: Summary
+  open_orders_count: number
+  config: StoreConfigResponse
+}
+
 const formatBRL = (value: string | number) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const getOrderDisplayNumber = (order: Pick<Order, 'id' | 'display_number'>) => order.display_number || order.id.slice(0, 8)
 const formatSignedBRL = (value: string | number) => {
@@ -132,54 +143,22 @@ const Caixa: React.FC = () => {
   const [storeAddress, setStoreAddress] = useState('')
 
   const loadData = useCallback(async () => {
-    const [statusResp, closedResp, moveResp, paymentResp, dailySummaryResp, openOrdersResp, configResp, historyResp] = await Promise.allSettled([
-      api.get<CashStatusResponse>('/api/cash/status'),
-      api.get<Order[]>(`/api/orders/closed?from=${fromDate}&to=${toDate}`),
-      api.get<CashMove[]>(`/api/cash/move?from=${fromDate}&to=${toDate}`),
-      api.get<PaymentAgg[]>(`/api/reports/by_payment?from=${fromDate}&to=${toDate}`),
-      api.get<Summary>(`/api/reports/summary?from=${todayISO()}&to=${todayISO()}`),
-      api.get<Order[]>('/api/orders/open'),
-      api.get<StoreConfigResponse>('/api/config'),
-      api.get<CashHistoryEntry[]>(`/api/cash/history?from=${fromDate}&to=${toDate}`)
-    ])
-
-    if (statusResp.status === 'fulfilled') {
-      setCashStatus(statusResp.value.data)
-    }
-    if (closedResp.status === 'fulfilled') {
-      setOrders(closedResp.value.data.sort((a, b) => ((a.closed_at || a.created_at) < (b.closed_at || b.created_at) ? 1 : -1)))
-    }
-    if (moveResp.status === 'fulfilled') {
-      setCashMoves(moveResp.value.data)
-    }
-    if (historyResp.status === 'fulfilled') {
-      setCashHistory(historyResp.value.data)
-    }
-    if (paymentResp.status === 'fulfilled') {
-      setPaymentsAgg(paymentResp.value.data)
-    }
-    if (dailySummaryResp.status === 'fulfilled') {
-      setDailySummary(dailySummaryResp.value.data)
-    }
-    if (openOrdersResp.status === 'fulfilled') {
-      setOpenOrdersCount(openOrdersResp.value.data.length)
-    }
-    if (configResp.status === 'fulfilled') {
-      setAgentUrl(configResp.value.data.printer?.agent_url?.trim() ?? '')
-      setStoreLabel(configResp.value.data.company_name || configResp.value.data.store_name || 'Sorveteria POS')
-      setStoreCnpj(configResp.value.data.cnpj || '')
-      setStoreAddress(configResp.value.data.address || '')
-    }
-
-    if (
-      statusResp.status === 'rejected' ||
-      closedResp.status === 'rejected' ||
-      moveResp.status === 'rejected' ||
-      paymentResp.status === 'rejected' ||
-      dailySummaryResp.status === 'rejected' ||
-      openOrdersResp.status === 'rejected' ||
-      configResp.status === 'rejected'
-    ) {
+    try {
+      const response = await api.get<CashDashboardResponse>(`/api/cash/dashboard?from=${fromDate}&to=${toDate}`)
+      const payload = response.data
+      setCashStatus(payload.cash_status)
+      setOrders(payload.closed_orders.sort((a, b) => ((a.closed_at || a.created_at) < (b.closed_at || b.created_at) ? 1 : -1)))
+      setCashMoves(payload.cash_moves)
+      setCashHistory(payload.cash_history)
+      setPaymentsAgg(payload.payments)
+      setDailySummary(payload.today_summary)
+      setOpenOrdersCount(payload.open_orders_count)
+      setAgentUrl(payload.config.printer?.agent_url?.trim() ?? '')
+      setStoreLabel(payload.config.company_name || payload.config.store_name || 'Sorveteria POS')
+      setStoreCnpj(payload.config.cnpj || '')
+      setStoreAddress(payload.config.address || '')
+      setFeedback('')
+    } catch {
       setFeedback('Alguns dados do caixa falharam ao atualizar. Tente novamente.')
     }
   }, [fromDate, toDate])

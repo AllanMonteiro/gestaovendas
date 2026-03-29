@@ -2,18 +2,27 @@ from decimal import Decimal
 import logging
 import re
 from datetime import datetime, time, timedelta
-from django.db.models import Sum, Q
+from django.db.models import Count, Sum, Q
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 from apps.accounts.permissions import auth_is_required, user_has_permission
 from apps.sales.models import Order, OrderItem, CashSession, CashMove, Payment
-from apps.sales.serializers import OrderSerializer, OrderItemSerializer, CashSessionSerializer, CashMoveSerializer, StoreConfigSerializer
+from apps.sales.serializers import (
+    OrderSerializer,
+    OrderItemSerializer,
+    OrderSummarySerializer,
+    CashSessionSerializer,
+    CashMoveSerializer,
+    StoreConfigSerializer,
+    StoreConfigUiSerializer,
+)
 from apps.sales import services
 from apps.kitchen.consumers import broadcast_kitchen_event
 from apps.sales.consumers import broadcast_pdv_event
 from apps.loyalty.models import Customer
+from apps.reports import queries as report_queries
 
 logger = logging.getLogger(__name__)
 
@@ -27,32 +36,48 @@ def _normalize_phone(value: str | None) -> str:
 
 
 def _apply_range_filter(qs, from_date=None, to_date=None):
+    return _apply_range_filter_for_field(qs, 'created_at', from_date, to_date)
+
+
+def _apply_range_filter_for_field(qs, field_name, from_date=None, to_date=None):
     local_tz = timezone.get_current_timezone()
     if from_date:
         parsed_from_date = parse_date(from_date)
         parsed_from_datetime = parse_datetime(from_date)
         if parsed_from_date and _is_date_only(from_date):
             start_local = timezone.make_aware(datetime.combine(parsed_from_date, time.min), local_tz)
-            qs = qs.filter(created_at__gte=start_local)
+            qs = qs.filter(**{f'{field_name}__gte': start_local})
         else:
             if parsed_from_datetime and timezone.is_naive(parsed_from_datetime):
                 parsed_from_datetime = timezone.make_aware(parsed_from_datetime, local_tz)
             if parsed_from_datetime:
                 from_date = parsed_from_datetime
-            qs = qs.filter(created_at__gte=from_date)
+            qs = qs.filter(**{f'{field_name}__gte': from_date})
     if to_date:
         parsed_to_date = parse_date(to_date)
         parsed_to_datetime = parse_datetime(to_date)
         if parsed_to_date and _is_date_only(to_date):
             next_day_local = timezone.make_aware(datetime.combine(parsed_to_date + timedelta(days=1), time.min), local_tz)
-            qs = qs.filter(created_at__lt=next_day_local)
+            qs = qs.filter(**{f'{field_name}__lt': next_day_local})
         else:
             if parsed_to_datetime and timezone.is_naive(parsed_to_datetime):
                 parsed_to_datetime = timezone.make_aware(parsed_to_datetime, local_tz)
             if parsed_to_datetime:
                 to_date = parsed_to_datetime
-            qs = qs.filter(created_at__lte=to_date)
+            qs = qs.filter(**{f'{field_name}__lte': to_date})
     return qs
+
+
+def _wants_items(request, default=True):
+    raw = request.query_params.get('include_items')
+    if raw is None:
+        return default
+    return raw.strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _serialize_orders(orders, include_items=True):
+    serializer_class = OrderSerializer if include_items else OrderSummarySerializer
+    return serializer_class(orders, many=True).data
 
 
 class OrdersCreateView(APIView):
@@ -237,56 +262,42 @@ class OrdersOpenView(APIView):
         orders = (
             Order.objects.filter(status__in=[Order.STATUS_OPEN, Order.STATUS_SENT, Order.STATUS_READY])
             .select_related('customer')
-            .prefetch_related('items')
+            .prefetch_related('items__product')
             .order_by('-created_at')
         )
-        return Response(OrderSerializer(orders, many=True).data)
+        return Response(_serialize_orders(orders, include_items=_wants_items(request, default=True)))
 
 
 class OrdersClosedView(APIView):
     def get(self, request):
         from_date = request.query_params.get('from')
         to_date = request.query_params.get('to')
-        qs = Order.objects.filter(status=Order.STATUS_PAID).select_related('customer').prefetch_related('items')
+        qs = Order.objects.filter(status=Order.STATUS_PAID).select_related('customer').prefetch_related('items__product')
         qs = qs.filter(closed_at__isnull=False)
-
-        if from_date:
-            parsed_from_date = parse_date(from_date)
-            parsed_from_datetime = parse_datetime(from_date)
-            if parsed_from_date and _is_date_only(from_date):
-                start_local = timezone.make_aware(datetime.combine(parsed_from_date, time.min), timezone.get_current_timezone())
-                qs = qs.filter(closed_at__gte=start_local)
-            else:
-                if parsed_from_datetime and timezone.is_naive(parsed_from_datetime):
-                    parsed_from_datetime = timezone.make_aware(parsed_from_datetime, timezone.get_current_timezone())
-                if parsed_from_datetime:
-                    qs = qs.filter(closed_at__gte=parsed_from_datetime)
-
-        if to_date:
-            parsed_to_date = parse_date(to_date)
-            parsed_to_datetime = parse_datetime(to_date)
-            if parsed_to_date and _is_date_only(to_date):
-                next_day_local = timezone.make_aware(
-                    datetime.combine(parsed_to_date + timedelta(days=1), time.min),
-                    timezone.get_current_timezone(),
-                )
-                qs = qs.filter(closed_at__lt=next_day_local)
-            else:
-                if parsed_to_datetime and timezone.is_naive(parsed_to_datetime):
-                    parsed_to_datetime = timezone.make_aware(parsed_to_datetime, timezone.get_current_timezone())
-                if parsed_to_datetime:
-                    qs = qs.filter(closed_at__lte=parsed_to_datetime)
-
-        return Response(OrderSerializer(qs.order_by('-closed_at'), many=True).data)
+        qs = _apply_range_filter_for_field(qs, 'closed_at', from_date, to_date)
+        return Response(_serialize_orders(qs.order_by('-closed_at'), include_items=_wants_items(request, default=True)))
 
 
 class OrdersCanceledView(APIView):
     def get(self, request):
         from_date = request.query_params.get('from')
         to_date = request.query_params.get('to')
-        qs = Order.objects.filter(status=Order.STATUS_CANCELED).select_related('customer').prefetch_related('items')
+        qs = Order.objects.filter(status=Order.STATUS_CANCELED).select_related('customer').prefetch_related('items__product')
         qs = _apply_range_filter(qs, from_date, to_date)
-        return Response(OrderSerializer(qs.order_by('-created_at'), many=True).data)
+        return Response(_serialize_orders(qs.order_by('-created_at'), include_items=_wants_items(request, default=True)))
+
+
+class OrderDetailView(APIView):
+    def get(self, request, id):
+        order = (
+            Order.objects.select_related('customer')
+            .prefetch_related('items__product')
+            .filter(id=id)
+            .first()
+        )
+        if not order:
+            return Response({'detail': 'Order not found'}, status=404)
+        return Response(OrderSerializer(order).data)
 
 
 class CashOpenView(APIView):
@@ -407,6 +418,38 @@ class CashHistoryView(APIView):
         return Response(CashSessionSerializer(qs, many=True).data)
 
 
+class CashDashboardView(APIView):
+    def get(self, request):
+        from_date = request.query_params.get('from')
+        to_date = request.query_params.get('to')
+        today = timezone.localdate().isoformat()
+
+        status_response = CashStatusView().get(request).data
+        orders_qs = Order.objects.filter(status=Order.STATUS_PAID, closed_at__isnull=False).select_related('customer')
+        orders_qs = _apply_range_filter_for_field(orders_qs, 'closed_at', from_date, to_date).order_by('-closed_at')
+        moves_qs = CashMove.objects.select_related('session', 'user').order_by('-created_at')
+        moves_qs = _apply_range_filter(moves_qs, from_date, to_date)
+        history_qs = CashSession.objects.filter(status=CashSession.STATUS_CLOSED).order_by('-closed_at')
+        if from_date or to_date:
+            history_qs = _apply_range_filter_for_field(history_qs, 'closed_at', from_date, to_date)
+
+        config = services.get_store_config()
+        open_orders_count = Order.objects.filter(
+            status__in=[Order.STATUS_OPEN, Order.STATUS_SENT, Order.STATUS_READY]
+        ).aggregate(total=Count('id'))['total'] or 0
+
+        return Response({
+            'cash_status': status_response,
+            'closed_orders': OrderSummarySerializer(orders_qs, many=True).data,
+            'cash_moves': CashMoveSerializer(moves_qs, many=True).data,
+            'payments': report_queries.by_payment(from_date, to_date),
+            'today_summary': report_queries.summary(today, today),
+            'open_orders_count': open_orders_count,
+            'config': StoreConfigUiSerializer(config).data,
+            'cash_history': CashSessionSerializer(history_qs, many=True).data,
+        })
+
+
 class ConfigView(APIView):
     def get(self, request):
         config = services.get_store_config()
@@ -420,6 +463,12 @@ class ConfigView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class ConfigUiView(APIView):
+    def get(self, request):
+        config = services.get_store_config()
+        return Response(StoreConfigUiSerializer(config).data)
 
 
 class ResetSalesView(APIView):

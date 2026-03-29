@@ -52,7 +52,7 @@ const Cozinha: React.FC = () => {
     try {
       const [queueResponse, configResponse] = await Promise.all([
         api.get<KitchenOrder[]>('/api/kitchen/queue'),
-        api.get<StoreConfigResponse>('/api/config')
+        api.get<StoreConfigResponse>('/api/config/ui')
       ])
       setOrders(queueResponse.data)
       setAgentUrl(configResponse.data.printer?.agent_url?.trim() ?? '')

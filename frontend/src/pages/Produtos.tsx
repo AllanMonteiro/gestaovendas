@@ -135,7 +135,10 @@ const Produtos: React.FC = () => {
       const productIdSet = new Set(productIds)
 
       try {
-        const pricesResp = await api.get<ProductPrice[]>('/api/products/prices')
+        const priceQuery = productIds.join(',')
+        const pricesResp = priceQuery
+          ? await api.get<ProductPrice[]>(`/api/products/prices?product_ids=${priceQuery}`)
+          : { data: [] as ProductPrice[] }
         const mapped = Object.fromEntries(
           pricesResp.data
             .filter((price) => typeof price.product === 'number' && productIdSet.has(Number(price.product)))

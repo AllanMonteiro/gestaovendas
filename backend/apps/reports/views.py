@@ -65,3 +65,18 @@ class CashReconciliationView(ReportPermissionView):
         if not self.has_report_access(request):
             return Response({'detail': 'Forbidden'}, status=403)
         return Response(queries.cash_reconciliation(request.query_params.get('session_id')))
+
+
+class DashboardView(ReportPermissionView):
+    def get(self, request):
+        if not self.has_report_access(request):
+            return Response({'detail': 'Forbidden'}, status=403)
+        from_date = request.query_params.get('from')
+        to_date = request.query_params.get('to')
+        limit = int(request.query_params.get('limit', '20'))
+        return Response({
+            'summary': queries.summary(from_date, to_date),
+            'products': queries.by_product(from_date, to_date, limit=limit),
+            'daily_sales': queries.daily_sales(from_date, to_date),
+            'payments': queries.by_payment(from_date, to_date),
+        })

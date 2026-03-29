@@ -2,6 +2,7 @@ from django.urls import path
 from apps.reports import views
 
 urlpatterns = [
+    path('reports/dashboard', views.DashboardView.as_view()),
     path('reports/summary', views.SummaryView.as_view()),
     path('reports/by_payment', views.ByPaymentView.as_view()),
     path('reports/by_category', views.ByCategoryView.as_view()),

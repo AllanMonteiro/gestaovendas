@@ -57,7 +57,7 @@ const Layout: React.FC = () => {
     const loadConfig = async () => {
       try {
         const [configResponse, sessionResponse] = await Promise.all([
-          api.get<StoreHeaderConfig>('/api/config'),
+          api.get<StoreHeaderConfig>('/api/config/ui'),
           api.get<AuthSession>('/api/auth/session').catch(() => ({ data: null as AuthSession | null }))
         ])
         setStoreName(configResponse.data.store_name || 'Sorveteria POS')

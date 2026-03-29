@@ -1,6 +1,5 @@
-import React, { useEffect, useState } from 'react'
+import React, { Suspense, lazy, useEffect, useState } from 'react'
 import { ReportFilters } from '../components/ReportFilters'
-import { Charts } from '../components/Charts'
 import { api } from '../api/client'
 
 type SummaryResponse = {
@@ -53,6 +52,13 @@ type OrderRow = {
   items?: OrderItem[]
 }
 
+type ReportsDashboardResponse = {
+  summary: SummaryResponse
+  products: ProductRow[]
+  daily_sales: DailySalesRow[]
+  payments: PaymentRow[]
+}
+
 const formatBRL = (value: string | number | null | undefined) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const formatNumber = (value: number | null | undefined) => Number(value || 0).toLocaleString('pt-BR')
 const toISODate = (date: Date) => date.toISOString().slice(0, 10)
@@ -64,6 +70,10 @@ const monthRange = (value: string) => {
   return { from: toISODate(start), to: toISODate(end) }
 }
 const getOrderDisplayNumber = (order: Pick<OrderRow, 'id' | 'display_number'>) => order.display_number || order.id.slice(0, 8)
+const Charts = lazy(async () => {
+  const module = await import('../components/Charts')
+  return { default: module.Charts }
+})
 
 const Relatorios: React.FC = () => {
   const initialMonth = toMonthValue(new Date())
@@ -79,28 +89,45 @@ const Relatorios: React.FC = () => {
   const [payments, setPayments] = useState<PaymentRow[]>([])
   const [finalizedOrders, setFinalizedOrders] = useState<OrderRow[]>([])
   const [canceledOrders, setCanceledOrders] = useState<OrderRow[]>([])
+  const [orderDetails, setOrderDetails] = useState<Record<string, OrderRow>>({})
   const [feedback, setFeedback] = useState('')
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
 
   const loadReports = async (from = fromDate, to = toDate) => {
     try {
-      const [summaryResp, productsResp, dailySalesResp, paymentsResp, finalizedResp, canceledResp] = await Promise.all([
-        api.get<SummaryResponse>(`/api/reports/summary?from=${from}&to=${to}`),
-        api.get<ProductRow[]>(`/api/reports/by_product?from=${from}&to=${to}&limit=20`),
-        api.get<DailySalesRow[]>(`/api/reports/daily_sales?from=${from}&to=${to}`),
-        api.get<PaymentRow[]>(`/api/reports/by_payment?from=${from}&to=${to}`),
-        api.get<OrderRow[]>(`/api/orders/closed?from=${from}&to=${to}`),
-        api.get<OrderRow[]>(`/api/orders/canceled?from=${from}&to=${to}`)
+      const [dashboardResp, finalizedResp, canceledResp] = await Promise.all([
+        api.get<ReportsDashboardResponse>(`/api/reports/dashboard?from=${from}&to=${to}&limit=20`),
+        api.get<OrderRow[]>(`/api/orders/closed?from=${from}&to=${to}&include_items=0`),
+        api.get<OrderRow[]>(`/api/orders/canceled?from=${from}&to=${to}&include_items=0`)
       ])
-      setSummary(summaryResp.data)
-      setProducts(productsResp.data)
-      setDailySales(dailySalesResp.data)
-      setPayments(paymentsResp.data)
+      setSummary(dashboardResp.data.summary)
+      setProducts(dashboardResp.data.products)
+      setDailySales(dashboardResp.data.daily_sales)
+      setPayments(dashboardResp.data.payments)
       setFinalizedOrders(finalizedResp.data)
       setCanceledOrders(canceledResp.data)
+      setOrderDetails({})
+      setExpandedOrderId(null)
       setFeedback('')
     } catch {
       setFeedback('Falha ao carregar relatorios.')
+    }
+  }
+
+  const toggleOrderExpansion = async (orderId: string) => {
+    if (expandedOrderId === orderId) {
+      setExpandedOrderId(null)
+      return
+    }
+    setExpandedOrderId(orderId)
+    if (orderDetails[orderId]) {
+      return
+    }
+    try {
+      const response = await api.get<OrderRow>(`/api/orders/${orderId}/detail`)
+      setOrderDetails((current) => ({ ...current, [orderId]: response.data }))
+    } catch {
+      setFeedback('Falha ao carregar itens do pedido.')
     }
   }
 
@@ -220,12 +247,14 @@ const Relatorios: React.FC = () => {
         ))}
       </div>
 
-      <Charts
-        dailySales={dailySales}
-        payments={payments}
-        chartGranularity={chartGranularity}
-        selectedPeriodLabel={selectedMonthLabel}
-      />
+      <Suspense fallback={<div className="panel p-5 text-sm text-slate-500">Carregando graficos...</div>}>
+        <Charts
+          dailySales={dailySales}
+          payments={payments}
+          chartGranularity={chartGranularity}
+          selectedPeriodLabel={selectedMonthLabel}
+        />
+      </Suspense>
 
       <section className="panel p-5">
         <h3 className="mb-3 text-lg font-semibold">Tabela analitica</h3>
@@ -283,7 +312,7 @@ const Relatorios: React.FC = () => {
                 {finalizedOrders.map((order) => (
                   <React.Fragment key={order.id}>
                     <tr 
-                      onClick={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}
+                      onClick={() => void toggleOrderExpansion(order.id)}
                       className={`cursor-pointer transition-colors hover:bg-brand-50 ${expandedOrderId === order.id ? 'bg-brand-50/50' : ''}`}
                     >
                       <td className="py-3 pl-2 font-bold text-brand-900">
@@ -311,7 +340,14 @@ const Relatorios: React.FC = () => {
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-50">
-                                {order.items?.map((item) => (
+                                {orderDetails[order.id] === undefined ? (
+                                  <tr>
+                                    <td colSpan={4} className="py-3 text-center text-slate-400">
+                                      Carregando itens...
+                                    </td>
+                                  </tr>
+                                ) : null}
+                                {(orderDetails[order.id]?.items ?? []).map((item) => (
                                   <tr key={item.id}>
                                     <td className="py-2 font-medium text-slate-700">{item.product_name}</td>
                                     <td className="py-2 text-center text-slate-600">{Number(item.qty).toLocaleString('pt-BR')}</td>
@@ -363,7 +399,7 @@ const Relatorios: React.FC = () => {
                 {canceledOrders.map((order) => (
                   <React.Fragment key={order.id}>
                     <tr 
-                      onClick={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}
+                      onClick={() => void toggleOrderExpansion(order.id)}
                       className={`cursor-pointer transition-colors hover:bg-brand-50 ${expandedOrderId === order.id ? 'bg-brand-50/50' : ''}`}
                     >
                       <td className="py-3 pl-2 font-bold text-brand-900">
@@ -391,7 +427,14 @@ const Relatorios: React.FC = () => {
                                 </tr>
                               </thead>
                               <tbody className="divide-y divide-slate-50">
-                                {order.items?.map((item) => (
+                                {orderDetails[order.id] === undefined ? (
+                                  <tr>
+                                    <td colSpan={4} className="py-3 text-center text-slate-400">
+                                      Carregando itens...
+                                    </td>
+                                  </tr>
+                                ) : null}
+                                {(orderDetails[order.id]?.items ?? []).map((item) => (
                                   <tr key={item.id}>
                                     <td className="py-2 font-medium text-slate-700">{item.product_name}</td>
                                     <td className="py-2 text-center text-slate-600">{Number(item.qty).toLocaleString('pt-BR')}</td>

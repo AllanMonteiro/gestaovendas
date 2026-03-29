@@ -40,7 +40,7 @@ const PublicMenu: React.FC = () => {
       const [cats, prods, config] = await Promise.all([
         api.get<Category[]>('/api/categories'),
         api.get<Product[]>('/api/products'),
-        api.get<StoreConfig>('/api/config')
+        api.get<StoreConfig>('/api/config/ui')
       ])
 
       const productIds = prods.data.map((product) => product.id).join(',')
