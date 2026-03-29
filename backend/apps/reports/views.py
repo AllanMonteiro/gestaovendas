@@ -1,7 +1,10 @@
+from django.core.cache import cache
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from apps.reports import queries
 from apps.accounts.permissions import auth_is_required, user_has_permission
+
+REPORT_DASHBOARD_CACHE_TTL = 15
 
 
 class ReportPermissionView(APIView):
@@ -74,9 +77,15 @@ class DashboardView(ReportPermissionView):
         from_date = request.query_params.get('from')
         to_date = request.query_params.get('to')
         limit = int(request.query_params.get('limit', '20'))
-        return Response({
+        cache_key = f'reports_dashboard:{from_date or ""}:{to_date or ""}:{limit}'
+        cached_payload = cache.get(cache_key)
+        if cached_payload is not None:
+            return Response(cached_payload)
+        payload = {
             'summary': queries.summary(from_date, to_date),
             'products': queries.by_product(from_date, to_date, limit=limit),
             'daily_sales': queries.daily_sales(from_date, to_date),
             'payments': queries.by_payment(from_date, to_date),
-        })
+        }
+        cache.set(cache_key, payload, REPORT_DASHBOARD_CACHE_TTL)
+        return Response(payload)

@@ -231,7 +231,7 @@ const PDV: React.FC = () => {
       const [categoriesResp, productsResp, configResp] = await Promise.all([
         api.get<Category[]>('/api/categories'),
         api.get<Product[]>('/api/products'),
-        api.get<StoreConfigResponse>('/api/config')
+        api.get<StoreConfigResponse>('/api/config/pdv')
       ])
       
       const cats = categoriesResp.data

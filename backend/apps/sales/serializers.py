@@ -110,3 +110,20 @@ class StoreConfigUiSerializer(serializers.ModelSerializer):
             'receipt_footer_lines',
             'pix_key',
         ]
+
+
+class StoreConfigPdvSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StoreConfig
+        fields = [
+            'store_name',
+            'company_name',
+            'cnpj',
+            'address',
+            'point_value_real',
+            'min_redeem_points',
+            'printer',
+            'category_images',
+            'receipt_header_lines',
+            'receipt_footer_lines',
+        ]

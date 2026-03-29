@@ -2,6 +2,7 @@ from decimal import Decimal
 import logging
 import re
 from datetime import datetime, time, timedelta
+from django.core.cache import cache
 from django.db.models import Count, Sum, Q
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -16,6 +17,7 @@ from apps.sales.serializers import (
     CashSessionSerializer,
     CashMoveSerializer,
     StoreConfigSerializer,
+    StoreConfigPdvSerializer,
     StoreConfigUiSerializer,
 )
 from apps.sales import services
@@ -25,6 +27,7 @@ from apps.loyalty.models import Customer
 from apps.reports import queries as report_queries
 
 logger = logging.getLogger(__name__)
+CASH_DASHBOARD_CACHE_TTL = 15
 
 
 def _is_date_only(value: str) -> bool:
@@ -423,6 +426,10 @@ class CashDashboardView(APIView):
         from_date = request.query_params.get('from')
         to_date = request.query_params.get('to')
         today = timezone.localdate().isoformat()
+        cache_key = f'cash_dashboard:{from_date or ""}:{to_date or ""}:{today}'
+        cached_payload = cache.get(cache_key)
+        if cached_payload is not None:
+            return Response(cached_payload)
 
         status_response = CashStatusView().get(request).data
         orders_qs = Order.objects.filter(status=Order.STATUS_PAID, closed_at__isnull=False).select_related('customer')
@@ -438,7 +445,7 @@ class CashDashboardView(APIView):
             status__in=[Order.STATUS_OPEN, Order.STATUS_SENT, Order.STATUS_READY]
         ).aggregate(total=Count('id'))['total'] or 0
 
-        return Response({
+        payload = {
             'cash_status': status_response,
             'closed_orders': OrderSummarySerializer(orders_qs, many=True).data,
             'cash_moves': CashMoveSerializer(moves_qs, many=True).data,
@@ -447,7 +454,9 @@ class CashDashboardView(APIView):
             'open_orders_count': open_orders_count,
             'config': StoreConfigUiSerializer(config).data,
             'cash_history': CashSessionSerializer(history_qs, many=True).data,
-        })
+        }
+        cache.set(cache_key, payload, CASH_DASHBOARD_CACHE_TTL)
+        return Response(payload)
 
 
 class ConfigView(APIView):
@@ -469,6 +478,12 @@ class ConfigUiView(APIView):
     def get(self, request):
         config = services.get_store_config()
         return Response(StoreConfigUiSerializer(config).data)
+
+
+class ConfigPdvView(APIView):
+    def get(self, request):
+        config = services.get_store_config()
+        return Response(StoreConfigPdvSerializer(config).data)
 
 
 class ResetSalesView(APIView):
