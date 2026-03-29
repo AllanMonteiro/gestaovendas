@@ -5,6 +5,7 @@ import { ProductGrid } from '../components/ProductGrid'
 import { OrderPanel } from '../components/OrderPanel'
 import { PaymentModal, type PaymentEntry, type PaymentMethod } from '../components/PaymentModal'
 import { getCategories, getProducts, getConfig, saveCategories, saveProducts, saveConfig } from '../offline/catalog'
+import { getLocalOrder, listLocalOrders, removeLocalOrder, saveLocalOrder, syncLocalOpenOrders } from '../offline/localOrders'
 import { getOutboxCount } from '../offline/outbox'
 import { connectWS } from '../api/ws'
 
@@ -26,6 +27,8 @@ type OrderItem = {
   product: number
   qty: string | number
   total: string | number
+  unit_price?: string | number
+  product_name?: string
   weight_grams?: number | null
   notes?: string | null
 }
@@ -37,6 +40,8 @@ type Order = {
   total: string
   subtotal: string
   discount: string
+  client_request_id?: string | null
+  local_only?: boolean
   customer?: number | null
   customer_name?: string | null
   customer_phone?: string | null
@@ -95,6 +100,7 @@ const formatBRL = (value: string | number) => {
 
 const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100
 const round3 = (value: number) => Math.round((value + Number.EPSILON) * 1000) / 1000
+const moneyString = (value: number) => round2(value).toFixed(2)
 
 const parseScaleWeightInput = (value: string) => {
   const normalized = value.trim().replace(',', '.')
@@ -144,6 +150,33 @@ const getApiErrorText = (error: unknown, fallback: string) => {
   }
   return fallback
 }
+
+const toOrderSummary = (order: Order | OrderSummary): OrderSummary => {
+  const { items, ...summary } = order
+  return summary
+}
+
+const normalizeOrder = (order: Partial<Order> & { id: string }): Order => ({
+  id: order.id,
+  display_number: order.display_number,
+  status: order.status ?? 'OPEN',
+  subtotal: String(order.subtotal ?? '0'),
+  discount: String(order.discount ?? '0'),
+  total: String(order.total ?? '0'),
+  client_request_id: order.client_request_id ?? null,
+  local_only: Boolean(order.local_only),
+  customer: order.customer ?? null,
+  customer_name: order.customer_name ?? null,
+  customer_phone: order.customer_phone ?? null,
+  items: Array.isArray(order.items) ? order.items : [],
+})
+
+const addItemToOrder = (order: Order, item: OrderItem): Order => ({
+  ...order,
+  items: [...order.items, item],
+  subtotal: moneyString(Number(order.subtotal || 0) + Number(item.total || 0)),
+  total: moneyString(Number(order.total || 0) + Number(item.total || 0)),
+})
 
 const PDV: React.FC = () => {
   const [openOrders, setOpenOrders] = useState<OrderSummary[]>([])
@@ -249,14 +282,39 @@ const PDV: React.FC = () => {
     const total = Number(selectedOrder?.total || 0)
     return round2(Math.max(total - pointsDiscount, 0))
   }, [selectedOrder?.total, pointsDiscount])
+  const canOperateOrders = cashOpen || !isOnline
+
+  const applyOrderSnapshot = useCallback((order: Order) => {
+    setSelectedOrder(order)
+    setSelectedOrderId(order.id)
+    setOpenOrders((prev) => {
+      const summary = toOrderSummary(order)
+      const existingIndex = prev.findIndex((entry) => entry.id === order.id)
+      if (existingIndex === -1) {
+        return [summary, ...prev]
+      }
+      const next = [...prev]
+      next[existingIndex] = { ...next[existingIndex], ...summary }
+      return next
+    })
+    void saveLocalOrder(order)
+  }, [])
 
   const fetchOrderDetail = useCallback(async (orderId: string) => {
     try {
       const response = await api.get<Order>(`/api/orders/${orderId}/detail`)
-      setSelectedOrder(response.data)
+      const order = normalizeOrder(response.data)
+      setSelectedOrder(order)
+      void saveLocalOrder(order)
       setIsOnline(true)
-      return response.data
+      return order
     } catch {
+      const localOrder = await getLocalOrder<Order>(orderId)
+      if (localOrder) {
+        const normalizedLocalOrder = normalizeOrder(localOrder)
+        setSelectedOrder(normalizedLocalOrder)
+        return normalizedLocalOrder
+      }
       setIsOnline(false)
       return null
     }
@@ -330,6 +388,7 @@ const PDV: React.FC = () => {
     try {
       const response = await api.get<OrderSummary[]>('/api/orders/open?include_items=0')
       setOpenOrders(response.data)
+      void syncLocalOpenOrders(response.data)
       setIsOnline(true)
       let nextSelectedOrderId = selectedOrderId
       if (typeof targetOrderId !== 'undefined') {
@@ -347,8 +406,23 @@ const PDV: React.FC = () => {
         return
       }
     } catch {
+      const localOrders = (await listLocalOrders<Order | OrderSummary>()).map((order) => normalizeOrder(order as Order))
+      if (localOrders.length > 0) {
+        setOpenOrders(localOrders.map((order) => toOrderSummary(order)))
+        let nextSelectedOrderId = selectedOrderId
+        if (typeof targetOrderId !== 'undefined') {
+          nextSelectedOrderId = targetOrderId
+        }
+        const fallbackOrder = nextSelectedOrderId ? localOrders.find((order) => order.id === nextSelectedOrderId) ?? null : null
+        if (fallbackOrder) {
+          setSelectedOrder(fallbackOrder)
+          setSelectedOrderId(fallbackOrder.id)
+        } else {
+          setSelectedOrder(localOrders[0] ?? null)
+          setSelectedOrderId(localOrders[0]?.id ?? null)
+        }
+      }
       setIsOnline(false)
-      // Se estiver offline, mantemos as comandas atuais.
     }
   }, [fetchOrderDetail, selectedOrderId])
 
@@ -357,6 +431,10 @@ const PDV: React.FC = () => {
       const response = await api.get<CashStatusResponse>('/api/cash/status')
       setCashOpen(Boolean(response.data.open))
     } catch {
+      if (!window.navigator.onLine) {
+        setCashOpen(true)
+        return
+      }
       setCashOpen(false)
     }
   }, [])
@@ -373,6 +451,7 @@ const PDV: React.FC = () => {
     } catch {
       // Se estiver offline ou falhar, confiamos no estado local ou permitimos se offline
       if (!isOnline) {
+        setCashOpen(true)
         return true 
       }
       setCashOpen(false)
@@ -495,11 +574,13 @@ const PDV: React.FC = () => {
     }
     try {
       const response = await api.post<Order>('/api/orders', payload)
-      await fetchOpenOrders(response.data.id)
+      const createdOrder = normalizeOrder(response.data)
+      applyOrderSnapshot(createdOrder)
       setShowNewOrderModal(false)
       resetNewOrderModal()
       setFeedback({ type: 'ok', text: 'Pedido criado com sucesso.' })
       setIsOnline(true)
+      void fetchOpenOrders(createdOrder.id)
       return true
     } catch (error: any) {
       if (error.enqueued) {
@@ -511,13 +592,13 @@ const PDV: React.FC = () => {
           subtotal: '0',
           discount: '0',
           total: '0',
+          client_request_id: localId,
+          local_only: true,
           customer_phone: (payload.customer_phone as string) || null,
           customer_name: (payload.customer_name as string) || (payload.customer_phone ? 'Cliente' : 'Balcao'),
           items: []
         }
-        setOpenOrders((prev) => [...prev, { ...localOrder, items: undefined }])
-        setSelectedOrder(localOrder)
-        setSelectedOrderId(localId)
+        applyOrderSnapshot(localOrder)
         setShowNewOrderModal(false)
         resetNewOrderModal()
         setFeedback({ type: 'ok', text: 'Modo Offline: Pedido criado localmente.' })
@@ -590,6 +671,9 @@ const PDV: React.FC = () => {
 
     const orderId = selectedOrderId
     if (!orderId) {
+      setShowQtyModal(false)
+      setQtyProduct(null)
+      setQtyInput('1')
       setFeedback({ type: 'error', text: 'Crie/selecione um pedido antes de adicionar itens.' })
       return
     }
@@ -599,30 +683,28 @@ const PDV: React.FC = () => {
       qty
     }
     try {
-      await api.post(`/api/orders/${orderId}/items`, payload)
-      await fetchOpenOrders(orderId)
+      const response = await api.post<OrderItem>(`/api/orders/${orderId}/items`, payload)
+      if (selectedOrder && selectedOrder.id === orderId) {
+        applyOrderSnapshot(addItemToOrder(selectedOrder, response.data))
+      }
       setFeedback({ type: 'ok', text: 'Item adicionado ao pedido.' })
       setShowQtyModal(false)
       setQtyProduct(null)
       setQtyInput('1')
       setIsOnline(true)
+      void fetchOpenOrders(orderId)
     } catch (error: any) {
       if (error.enqueued) {
-        // Atualiza pedido localmente
-        setOpenOrders(prev => prev.map(o => {
-          if (o.id !== orderId) return o
-          return o
-        }))
-        setSelectedOrder((prev) => {
-          if (!prev || prev.id !== orderId) return prev
-          const newItem: OrderItem = {
-            id: Math.floor(Math.random() * 1000000),
-            product: qtyProduct.id,
-            qty: qty,
-            total: 0
-          }
-          return { ...prev, items: [...prev.items, newItem] }
-        })
+        if (selectedOrder && selectedOrder.id === orderId) {
+          applyOrderSnapshot(
+            addItemToOrder(selectedOrder, {
+              id: Math.floor(Math.random() * 1000000),
+              product: qtyProduct.id,
+              qty,
+              total: 0,
+            })
+          )
+        }
         setFeedback({ type: 'ok', text: 'Modo Offline: Item adicionado localmente.' })
         setShowQtyModal(false)
         setQtyProduct(null)
@@ -636,6 +718,10 @@ const PDV: React.FC = () => {
 
   const handleAddProduct = async (product: Product) => {
     if (!(await ensureCashOpen())) {
+      return
+    }
+    if (!selectedOrderId) {
+      setFeedback({ type: 'error', text: 'Crie ou selecione um pedido antes de adicionar itens.' })
       return
     }
     if (product.sold_by_weight) {
@@ -683,6 +769,10 @@ const PDV: React.FC = () => {
 
     const orderId = selectedOrderId
     if (!orderId) {
+      setShowScaleModal(false)
+      setScaleProduct(null)
+      setScaleWeight(null)
+      setScaleWeightInput('')
       setFeedback({ type: 'error', text: 'Crie/selecione um pedido antes de adicionar itens.' })
       return
     }
@@ -694,30 +784,30 @@ const PDV: React.FC = () => {
     }
 
     try {
-      await api.post(`/api/orders/${orderId}/items`, payload)
-      await fetchOpenOrders(orderId)
+      const response = await api.post<OrderItem>(`/api/orders/${orderId}/items`, payload)
+      if (selectedOrder && selectedOrder.id === orderId) {
+        applyOrderSnapshot(addItemToOrder(selectedOrder, response.data))
+      }
       setFeedback({ type: 'ok', text: 'Item adicionado ao pedido.' })
       setShowScaleModal(false)
       setScaleProduct(null)
       setScaleWeight(null)
       setScaleWeightInput('')
       setIsOnline(true)
+      void fetchOpenOrders(orderId)
     } catch (error: any) {
       if (error.enqueued) {
-        setOpenOrders((prev) =>
-          prev.map((o) => o)
-        )
-        setSelectedOrder((prev) => {
-          if (!prev || prev.id !== orderId) return prev
-          const newItem: OrderItem = {
-            id: Math.floor(Math.random() * 1000000),
-            product: scaleProduct.id,
-            qty: payload.qty,
-            weight_grams: normalizedScaleWeight,
-            total: 0
-          }
-          return { ...prev, items: [...prev.items, newItem] }
-        })
+        if (selectedOrder && selectedOrder.id === orderId) {
+          applyOrderSnapshot(
+            addItemToOrder(selectedOrder, {
+              id: Math.floor(Math.random() * 1000000),
+              product: scaleProduct.id,
+              qty: payload.qty,
+              weight_grams: normalizedScaleWeight,
+              total: 0,
+            })
+          )
+        }
         setFeedback({ type: 'ok', text: 'Modo Offline: Item de balanca adicionado localmente.' })
         setShowScaleModal(false)
         setScaleProduct(null)
@@ -743,14 +833,21 @@ const PDV: React.FC = () => {
       if (autoPrintKitchen) {
         const printed = await printKitchenTicket(selectedOrder)
         if (!printed) {
-          await fetchOpenOrders()
+          void fetchOpenOrders()
           setFeedback({ type: 'error', text: 'Pedido enviado para cozinha, mas a impressao falhou.' })
           return
         }
       }
-      await fetchOpenOrders()
+      applyOrderSnapshot({ ...selectedOrder, status: 'SENT' })
+      void fetchOpenOrders(selectedOrder.id)
       setFeedback({ type: 'ok', text: 'Pedido enviado para cozinha.' })
-    } catch {
+    } catch (error: any) {
+      if (error.enqueued) {
+        applyOrderSnapshot({ ...selectedOrder, status: 'SENT' })
+        setFeedback({ type: 'ok', text: 'Modo Offline: pedido marcado para envio a cozinha.' })
+        setIsOnline(false)
+        return
+      }
       setFeedback({ type: 'error', text: 'Falha ao enviar para cozinha.' })
     }
   }
@@ -953,6 +1050,7 @@ const PDV: React.FC = () => {
           setOpenOrders(prev => prev.filter(o => o.id !== selectedOrder.id))
           setSelectedOrder(null)
           setSelectedOrderId(null)
+          void removeLocalOrder(selectedOrder.id)
           setFeedback({ type: 'ok', text: 'Modo Offline: Venda salva localmente para sincronizar.' })
           setShowPaymentModal(false)
           setIsOnline(false)
@@ -970,8 +1068,12 @@ const PDV: React.FC = () => {
         }
       }
       setShowPaymentModal(false)
-      await fetchOpenOrders()
-      await fetchCashStatus()
+      setOpenOrders((prev) => prev.filter((order) => order.id !== selectedOrder.id))
+      setSelectedOrder(null)
+      setSelectedOrderId(null)
+      void removeLocalOrder(selectedOrder.id)
+      void fetchOpenOrders()
+      void fetchCashStatus()
       setPointsToRedeem('0')
       const successText =
         effectiveRedeemPoints > 0
@@ -1010,10 +1112,22 @@ const PDV: React.FC = () => {
     }
     try {
       await api.post(`/api/orders/${selectedOrder.id}/cancel`, { reason: reason.trim() })
+      setOpenOrders((prev) => prev.filter((order) => order.id !== selectedOrder.id))
+      setSelectedOrder(null)
       setSelectedOrderId(null)
-      await fetchOpenOrders()
+      void removeLocalOrder(selectedOrder.id)
+      void fetchOpenOrders()
       setFeedback({ type: 'ok', text: 'Pedido cancelado.' })
-    } catch {
+    } catch (error: any) {
+      if (error.enqueued) {
+        setOpenOrders((prev) => prev.filter((order) => order.id !== selectedOrder.id))
+        setSelectedOrder(null)
+        setSelectedOrderId(null)
+        void removeLocalOrder(selectedOrder.id)
+        setFeedback({ type: 'ok', text: 'Modo Offline: cancelamento salvo para sincronizar.' })
+        setIsOnline(false)
+        return
+      }
       setFeedback({ type: 'error', text: 'Falha ao cancelar pedido.' })
     }
   }
@@ -1028,9 +1142,22 @@ const PDV: React.FC = () => {
     }
     try {
       await api.delete(`/api/orders/${selectedOrder.id}`)
-      await fetchOpenOrders()
+      setOpenOrders((prev) => prev.filter((order) => order.id !== selectedOrder.id))
+      setSelectedOrder(null)
+      setSelectedOrderId(null)
+      void removeLocalOrder(selectedOrder.id)
+      void fetchOpenOrders()
       setFeedback({ type: 'ok', text: 'Pedido excluido.' })
-    } catch {
+    } catch (error: any) {
+      if (error.enqueued) {
+        setOpenOrders((prev) => prev.filter((order) => order.id !== selectedOrder.id))
+        setSelectedOrder(null)
+        setSelectedOrderId(null)
+        void removeLocalOrder(selectedOrder.id)
+        setFeedback({ type: 'ok', text: 'Modo Offline: exclusao salva para sincronizar.' })
+        setIsOnline(false)
+        return
+      }
       setFeedback({ type: 'error', text: 'Falha ao excluir pedido.' })
     }
   }
@@ -1080,8 +1207,8 @@ const PDV: React.FC = () => {
           </div>
           <button
             onClick={() => void openNewOrderModal()}
-            disabled={!cashOpen}
-            title={!cashOpen ? 'Abra o caixa para criar pedido.' : undefined}
+            disabled={!canOperateOrders}
+            title={!canOperateOrders ? 'Abra o caixa para criar pedido.' : undefined}
             className="w-full rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 px-4 py-2.5 text-sm font-semibold text-white"
           >
             Novo pedido
@@ -1120,14 +1247,14 @@ const PDV: React.FC = () => {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
               <button
                 onClick={() => void handleSendKitchen()}
-                disabled={!cashOpen}
+                disabled={!canOperateOrders}
                 className="rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Enviar cozinha
               </button>
               <button
                 onClick={() => void handleOpenCloseSaleModal()}
-                disabled={!cashOpen}
+                disabled={!canOperateOrders}
                 className="rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Fechar venda

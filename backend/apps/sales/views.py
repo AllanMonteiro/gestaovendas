@@ -88,6 +88,14 @@ def _orders_with_customer(include_items=True):
     return qs
 
 
+def _get_order_by_id_or_client_request_id(order_id, *, include_items=False):
+    qs = _orders_with_customer(include_items=include_items)
+    order = qs.filter(id=order_id).first()
+    if order:
+        return order
+    return qs.filter(client_request_id=order_id).first()
+
+
 class OrdersCreateView(APIView):
     def post(self, request):
         if auth_is_required() and not user_has_permission(request.user, 'pdv.operate'):
@@ -141,7 +149,9 @@ class OrderItemsView(APIView):
         if auth_is_required() and not user_has_permission(request.user, 'pdv.operate'):
             return Response({'detail': 'Forbidden'}, status=403)
         data = request.data
-        order = Order.objects.get(id=id)
+        order = _get_order_by_id_or_client_request_id(id)
+        if not order:
+            return Response({'detail': 'Order not found'}, status=404)
         try:
             item = services.add_item(
                 order=order,
@@ -163,7 +173,10 @@ class OrderItemDeleteView(APIView):
             services.ensure_open_cash_session()
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=400)
-        item = OrderItem.objects.get(id=item_id, order_id=id)
+        order = _get_order_by_id_or_client_request_id(id)
+        if not order:
+            return Response({'detail': 'Order not found'}, status=404)
+        item = OrderItem.objects.get(id=item_id, order=order)
         order = item.order
         data = request.data
         try:
@@ -189,7 +202,10 @@ class OrderItemDeleteView(APIView):
             services.ensure_open_cash_session()
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=400)
-        item = OrderItem.objects.get(id=item_id, order_id=id)
+        order = _get_order_by_id_or_client_request_id(id)
+        if not order:
+            return Response({'detail': 'Order not found'}, status=404)
+        item = OrderItem.objects.get(id=item_id, order=order)
         order = item.order
         item.delete()
         services.recalc_order_totals(order)
@@ -200,7 +216,9 @@ class OrderSendKitchenView(APIView):
     def post(self, request, id):
         if auth_is_required() and not user_has_permission(request.user, 'kitchen.manage'):
             return Response({'detail': 'Forbidden'}, status=403)
-        order = Order.objects.get(id=id)
+        order = _get_order_by_id_or_client_request_id(id, include_items=True)
+        if not order:
+            return Response({'detail': 'Order not found'}, status=404)
         ticket = services.send_to_kitchen(order=order)
         try:
             broadcast_kitchen_event('order_sent', {'order_id': str(order.id)})
@@ -214,7 +232,9 @@ class OrderCloseView(APIView):
         if auth_is_required() and not user_has_permission(request.user, 'pdv.operate'):
             return Response({'detail': 'Forbidden'}, status=403)
         data = request.data
-        order = Order.objects.get(id=id)
+        order = _get_order_by_id_or_client_request_id(id, include_items=True)
+        if not order:
+            return Response({'detail': 'Order not found'}, status=404)
         try:
             order = services.close_order(
                 order=order,
@@ -241,7 +261,9 @@ class OrderCancelView(APIView):
         if not user_has_permission(request.user, 'order.cancel'):
             return Response({'detail': 'Forbidden'}, status=403)
         data = request.data
-        order = Order.objects.get(id=id)
+        order = _get_order_by_id_or_client_request_id(id, include_items=True)
+        if not order:
+            return Response({'detail': 'Order not found'}, status=404)
         try:
             order = services.cancel_order(order=order, reason=data.get('reason', ''), user=request.user)
         except ValueError as exc:
@@ -261,7 +283,9 @@ class OrderDeleteView(APIView):
             services.ensure_open_cash_session()
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=400)
-        Order.objects.filter(id=id).delete()
+        deleted, _ = Order.objects.filter(Q(id=id) | Q(client_request_id=id)).delete()
+        if not deleted:
+            return Response({'detail': 'Order not found'}, status=404)
         return Response({'status': 'deleted'})
 
 
@@ -299,12 +323,7 @@ class OrdersCanceledView(APIView):
 
 class OrderDetailView(APIView):
     def get(self, request, id):
-        order = (
-            Order.objects.select_related('customer')
-            .prefetch_related('items__product')
-            .filter(id=id)
-            .first()
-        )
+        order = _get_order_by_id_or_client_request_id(id, include_items=True)
         if not order:
             return Response({'detail': 'Order not found'}, status=404)
         return Response(OrderSerializer(order).data)
