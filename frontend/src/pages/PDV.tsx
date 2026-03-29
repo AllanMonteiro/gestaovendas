@@ -43,6 +43,10 @@ type Order = {
   items: OrderItem[]
 }
 
+type OrderSummary = Omit<Order, 'items'> & {
+  items?: OrderItem[]
+}
+
 type CustomerLookupResponse = {
   customer: {
     id: number
@@ -91,6 +95,18 @@ const formatBRL = (value: string | number) => {
 
 const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100
 
+const parseScaleWeightInput = (value: string) => {
+  const normalized = value.trim().replace(',', '.')
+  if (!normalized) {
+    return null
+  }
+  const parsed = Number(normalized)
+  if (!Number.isFinite(parsed)) {
+    return null
+  }
+  return parsed
+}
+
 
 const receiptPaymentLabel = (method: string, meta?: Record<string, string> | null) => {
   if (method === 'CARD') {
@@ -129,8 +145,9 @@ const getApiErrorText = (error: unknown, fallback: string) => {
 }
 
 const PDV: React.FC = () => {
-  const [openOrders, setOpenOrders] = useState<Order[]>([])
+  const [openOrders, setOpenOrders] = useState<OrderSummary[]>([])
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
+  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
 
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -170,14 +187,18 @@ const PDV: React.FC = () => {
   const [showScaleModal, setShowScaleModal] = useState(false)
   const [scaleProduct, setScaleProduct] = useState<Product | null>(null)
   const [scaleWeight, setScaleWeight] = useState<number | null>(null)
+  const [scaleWeightInput, setScaleWeightInput] = useState('')
   const [scaleLoading, setScaleLoading] = useState(false)
   const [isOnline, setIsOnline] = useState(window.navigator.onLine)
   const [outboxCount, setOutboxCount] = useState(0)
 
-  const selectedOrder = useMemo(
-    () => openOrders.find((order) => order.id === selectedOrderId) ?? null,
-    [openOrders, selectedOrderId]
-  )
+  const parsedScaleWeightInput = useMemo(() => parseScaleWeightInput(scaleWeightInput), [scaleWeightInput])
+  const effectiveScaleWeight = scaleWeightInput.trim() ? parsedScaleWeightInput : scaleWeight
+  const normalizedScaleWeight =
+    effectiveScaleWeight !== null && Number.isFinite(effectiveScaleWeight) && effectiveScaleWeight > 0
+      ? Math.round(effectiveScaleWeight)
+      : null
+  const canConfirmScaleProduct = normalizedScaleWeight !== null
 
   const productsById = useMemo(() => {
     const map = new Map<number, Product>()
@@ -226,6 +247,18 @@ const PDV: React.FC = () => {
     const total = Number(selectedOrder?.total || 0)
     return round2(Math.max(total - pointsDiscount, 0))
   }, [selectedOrder?.total, pointsDiscount])
+
+  const fetchOrderDetail = useCallback(async (orderId: string) => {
+    try {
+      const response = await api.get<Order>(`/api/orders/${orderId}/detail`)
+      setSelectedOrder(response.data)
+      setIsOnline(true)
+      return response.data
+    } catch {
+      setIsOnline(false)
+      return null
+    }
+  }, [])
 
   const fetchCatalog = useCallback(async () => {
     try {
@@ -293,22 +326,29 @@ const PDV: React.FC = () => {
 
   const fetchOpenOrders = useCallback(async (targetOrderId?: string | null) => {
     try {
-      const response = await api.get<Order[]>('/api/orders/open')
+      const response = await api.get<OrderSummary[]>('/api/orders/open?include_items=0')
       setOpenOrders(response.data)
       setIsOnline(true)
+      let nextSelectedOrderId = selectedOrderId
       if (typeof targetOrderId !== 'undefined') {
-        const exists = targetOrderId ? response.data.some((order) => order.id === targetOrderId) : false
-        setSelectedOrderId(exists ? targetOrderId : null)
-        return
+        nextSelectedOrderId = targetOrderId
       }
-      if (selectedOrderId && !response.data.some((order) => order.id === selectedOrderId)) {
-        setSelectedOrderId(null)
+      const exists = nextSelectedOrderId ? response.data.some((order) => order.id === nextSelectedOrderId) : false
+      if (!exists) {
+        nextSelectedOrderId = null
+      }
+      setSelectedOrderId(nextSelectedOrderId)
+      if (nextSelectedOrderId) {
+        await fetchOrderDetail(nextSelectedOrderId)
+      } else {
+        setSelectedOrder(null)
+        return
       }
     } catch {
       setIsOnline(false)
       // Se estiver offline, mantemos as comandas atuais.
     }
-  }, [selectedOrderId])
+  }, [fetchOrderDetail, selectedOrderId])
 
   const fetchCashStatus = useCallback(async () => {
     try {
@@ -379,6 +419,17 @@ const PDV: React.FC = () => {
     })
     return () => ws.close()
   }, [fetchCashStatus, fetchOpenOrders])
+
+  useEffect(() => {
+    if (!selectedOrderId) {
+      setSelectedOrder(null)
+      return
+    }
+    if (selectedOrder?.id === selectedOrderId) {
+      return
+    }
+    void fetchOrderDetail(selectedOrderId)
+  }, [fetchOrderDetail, selectedOrder?.id, selectedOrderId])
 
   useEffect(() => {
     const loadLoyalty = async () => {
@@ -462,7 +513,8 @@ const PDV: React.FC = () => {
           customer_name: (payload.customer_name as string) || (payload.customer_phone ? 'Cliente' : 'Balcao'),
           items: []
         }
-        setOpenOrders((prev) => [...prev, localOrder])
+        setOpenOrders((prev) => [...prev, { ...localOrder, items: undefined }])
+        setSelectedOrder(localOrder)
         setSelectedOrderId(localId)
         setShowNewOrderModal(false)
         resetNewOrderModal()
@@ -557,14 +609,18 @@ const PDV: React.FC = () => {
         // Atualiza pedido localmente
         setOpenOrders(prev => prev.map(o => {
           if (o.id !== orderId) return o
+          return o
+        }))
+        setSelectedOrder((prev) => {
+          if (!prev || prev.id !== orderId) return prev
           const newItem: OrderItem = {
             id: Math.floor(Math.random() * 1000000),
             product: qtyProduct.id,
             qty: qty,
-            total: 0 // Localmente fica 0 ate sincronizar
+            total: 0
           }
-          return { ...o, items: [...o.items, newItem] }
-        }))
+          return { ...prev, items: [...prev.items, newItem] }
+        })
         setFeedback({ type: 'ok', text: 'Modo Offline: Item adicionado localmente.' })
         setShowQtyModal(false)
         setQtyProduct(null)
@@ -583,6 +639,7 @@ const PDV: React.FC = () => {
     if (product.sold_by_weight) {
       setScaleProduct(product)
       setScaleWeight(null)
+      setScaleWeightInput('')
       setShowScaleModal(true)
       return
     }
@@ -602,7 +659,10 @@ const PDV: React.FC = () => {
       const response = await fetch(`${normalizedAgentUrl}/scale/weight`)
       if (!response.ok) throw new Error()
       const data = await response.json()
-      setScaleWeight(data.grams ?? 0)
+      const grams = Number(data.grams ?? 0)
+      const nextWeight = Number.isFinite(grams) && grams > 0 ? Math.round(grams) : 0
+      setScaleWeight(nextWeight)
+      setScaleWeightInput(nextWeight > 0 ? String(nextWeight) : '')
     } catch {
       setFeedback({ type: 'error', text: 'Falha ao ler balanca. Confira se o Agent esta rodando.' })
     } finally {
@@ -611,7 +671,8 @@ const PDV: React.FC = () => {
   }
 
   const handleConfirmScaleProduct = async () => {
-    if (!scaleProduct || scaleWeight === null || scaleWeight <= 0) {
+    if (!scaleProduct || normalizedScaleWeight === null) {
+      setFeedback({ type: 'error', text: 'Digite um peso valido para continuar.' })
       return
     }
     if (!(await ensureCashOpen())) {
@@ -626,8 +687,8 @@ const PDV: React.FC = () => {
 
     const payload = {
       product_id: scaleProduct.id,
-      qty: round2(scaleWeight / 1000),
-      weight_grams: scaleWeight
+      qty: round2(normalizedScaleWeight / 1000),
+      weight_grams: normalizedScaleWeight
     }
 
     try {
@@ -637,26 +698,29 @@ const PDV: React.FC = () => {
       setShowScaleModal(false)
       setScaleProduct(null)
       setScaleWeight(null)
+      setScaleWeightInput('')
       setIsOnline(true)
     } catch (error: any) {
       if (error.enqueued) {
         setOpenOrders((prev) =>
-          prev.map((o) => {
-            if (o.id !== orderId) return o
-            const newItem: OrderItem = {
-              id: Math.floor(Math.random() * 1000000),
-              product: scaleProduct.id,
-              qty: payload.qty,
-              weight_grams: scaleWeight,
-              total: 0
-            }
-            return { ...o, items: [...o.items, newItem] }
-          })
+          prev.map((o) => o)
         )
+        setSelectedOrder((prev) => {
+          if (!prev || prev.id !== orderId) return prev
+          const newItem: OrderItem = {
+            id: Math.floor(Math.random() * 1000000),
+            product: scaleProduct.id,
+            qty: payload.qty,
+            weight_grams: normalizedScaleWeight,
+            total: 0
+          }
+          return { ...prev, items: [...prev.items, newItem] }
+        })
         setFeedback({ type: 'ok', text: 'Modo Offline: Item de balanca adicionado localmente.' })
         setShowScaleModal(false)
         setScaleProduct(null)
         setScaleWeight(null)
+        setScaleWeightInput('')
         setIsOnline(false)
         return
       }
@@ -885,6 +949,7 @@ const PDV: React.FC = () => {
       } catch (error: any) {
         if (error.enqueued) {
           setOpenOrders(prev => prev.filter(o => o.id !== selectedOrder.id))
+          setSelectedOrder(null)
           setSelectedOrderId(null)
           setFeedback({ type: 'ok', text: 'Modo Offline: Venda salva localmente para sincronizar.' })
           setShowPaymentModal(false)
@@ -998,51 +1063,15 @@ const PDV: React.FC = () => {
                   selectedOrderId === order.id ? 'border-brand-500 bg-brand-50' : 'border-brand-100 bg-brand-50/60'
                 }`}
               >
-                <button className="w-full text-left" onClick={() => setSelectedOrderId(order.id)}>
+                <button className="w-full text-left" onClick={() => {
+                  setSelectedOrderId(order.id)
+                  void fetchOrderDetail(order.id)
+                }}>
                   <div className="font-semibold">Pedido {getOrderDisplayNumber(order)} | {formatBRL(order.total)}</div>
                   <div className="text-xs text-slate-600">
                     Cliente: {order.customer_name || order.customer_phone || 'Nao informado'}
                   </div>
                 </button>
-
-                {selectedOrderId === order.id ? (
-                  <div className="mt-2 space-y-2 border-t border-brand-100 pt-2">
-                    {order.items.length === 0 ? (
-                      <p className="text-xs text-slate-500">Sem itens nesta comanda.</p>
-                    ) : (
-                      order.items.map((item) => (
-                        <div key={item.id} className="rounded-lg border border-brand-100 bg-white px-2 py-1">
-                          <p className="text-xs font-medium">{productsById.get(item.product)?.name ?? `Produto ${item.product}`}</p>
-                          <div className="mt-1 flex items-center justify-between gap-2">
-                            <span className="text-xs text-slate-600">Qtd: {Number(item.qty)}</span>
-                            <div className="flex gap-1">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedOrderId(order.id)
-                                  void handleEditItem(item)
-                                }}
-                                className="rounded border border-indigo-300 px-2 py-0.5 text-[11px] font-semibold text-indigo-700"
-                              >
-                                Editar
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedOrderId(order.id)
-                                  void handleDeleteItem(item)
-                                }}
-                                className="rounded border border-rose-300 px-2 py-0.5 text-[11px] font-semibold text-rose-700"
-                              >
-                                Excluir
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                ) : null}
               </div>
             ))}
             {openOrders.length === 0 ? <p className="text-sm text-slate-500">Sem comandas abertas.</p> : null}
@@ -1314,20 +1343,24 @@ const PDV: React.FC = () => {
             
             <div className="mt-6 flex flex-col items-center justify-center rounded-2xl bg-slate-50 py-6 border-2 border-dashed border-slate-200">
               <div className="text-center">
-                <span className="text-4xl font-bold text-brand-700">{scaleWeight || 0}g</span>
-                <p className="mt-1 text-sm font-medium text-slate-500">{((scaleWeight || 0) / 1000).toFixed(3)} kg</p>
+                <span className="text-4xl font-bold text-brand-700">{normalizedScaleWeight ?? 0}g</span>
+                <p className="mt-1 text-sm font-medium text-slate-500">{((normalizedScaleWeight ?? 0) / 1000).toFixed(3)} kg</p>
               </div>
             </div>
 
             <div className="mt-4">
               <label className="text-xs font-semibold text-slate-500 uppercase">Digite o peso manualmente (gramas)</label>
               <input
-                type="number"
-                value={scaleWeight || ''}
-                onChange={(e) => setScaleWeight(Number(e.target.value))}
+                type="text"
+                inputMode="decimal"
+                value={scaleWeightInput}
+                onChange={(e) => setScaleWeightInput(e.target.value)}
                 placeholder="Ex: 500"
                 className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none transition-all"
               />
+              {scaleWeightInput.trim() && parsedScaleWeightInput === null ? (
+                <p className="mt-1 text-xs font-medium text-rose-600">Digite um peso valido em gramas.</p>
+              ) : null}
             </div>
 
             <button
@@ -1344,6 +1377,7 @@ const PDV: React.FC = () => {
                   setShowScaleModal(false)
                   setScaleProduct(null)
                   setScaleWeight(null)
+                  setScaleWeightInput('')
                 }}
                 className="rounded-xl border border-slate-300 px-4 py-2 text-sm"
               >
@@ -1351,7 +1385,7 @@ const PDV: React.FC = () => {
               </button>
               <button
                 onClick={() => void handleConfirmScaleProduct()}
-                disabled={scaleWeight === null || scaleWeight <= 0}
+                disabled={!canConfirmScaleProduct}
                 className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
               >
                 Confirmar e Adicionar
