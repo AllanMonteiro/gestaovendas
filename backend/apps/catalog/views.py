@@ -56,32 +56,46 @@ class CategoryApplyPriceView(APIView):
         category.price = price
         category.save(update_fields=['price'])
 
-        products = list(Product.objects.filter(category_id=category.id))
-        updated = 0
-        for product in products:
-            product_price, created = ProductPrice.objects.get_or_create(
-                product_id=product.id,
-                store_id=1,
-                defaults={
-                    'price': price,
-                    'cost': Decimal('0'),
-                    'freight': Decimal('0'),
-                    'other': Decimal('0'),
-                    'tax_pct': Decimal('0'),
-                    'overhead_pct': Decimal('0'),
-                    'margin_pct': Decimal('0'),
-                },
+        product_ids = list(Product.objects.filter(category_id=category.id).values_list('id', flat=True))
+        existing_prices_by_product_id: dict[int, list[ProductPrice]] = {}
+        for product_price in ProductPrice.objects.filter(product_id__in=product_ids).order_by('product_id', 'store_id'):
+            existing_prices_by_product_id.setdefault(product_price.product_id, []).append(product_price)
+
+        prices_to_update: list[ProductPrice] = []
+        prices_to_create: list[ProductPrice] = []
+
+        for product_id in product_ids:
+            existing_prices = existing_prices_by_product_id.get(product_id, [])
+            if existing_prices:
+                for product_price in existing_prices:
+                    product_price.price = price
+                    prices_to_update.append(product_price)
+                continue
+
+            prices_to_create.append(
+                ProductPrice(
+                    product_id=product_id,
+                    store_id=1,
+                    price=price,
+                    cost=Decimal('0'),
+                    freight=Decimal('0'),
+                    other=Decimal('0'),
+                    tax_pct=Decimal('0'),
+                    overhead_pct=Decimal('0'),
+                    margin_pct=Decimal('0'),
+                )
             )
-            if not created:
-                product_price.price = price
-                product_price.save(update_fields=['price'])
-            updated += 1
+
+        if prices_to_update:
+            ProductPrice.objects.bulk_update(prices_to_update, ['price'])
+        if prices_to_create:
+            ProductPrice.objects.bulk_create(prices_to_create)
 
         return Response({
             'status': 'ok',
             'category_id': category.id,
             'price': str(price),
-            'updated_products': updated,
+            'updated_products': len(product_ids),
         })
 
 
@@ -123,7 +137,7 @@ class ProductPriceView(APIView):
         return Decimal(str(raw))
 
     def get(self, request, id):
-        price = ProductPrice.objects.filter(product_id=id).first()
+        price = ProductPrice.objects.filter(product_id=id).order_by('store_id').first()
         if not price:
             return Response({'detail': 'Price not found'}, status=404)
         return Response(ProductPriceSerializer(price).data)
@@ -150,7 +164,7 @@ class ProductPriceView(APIView):
 
 class ProductPriceListView(APIView):
     def get(self, request):
-        qs = ProductPrice.objects.all().order_by('product_id')
+        qs = ProductPrice.objects.all().order_by('product_id', 'store_id')
         product_ids_raw = request.query_params.get('product_ids')
         if product_ids_raw:
             try:

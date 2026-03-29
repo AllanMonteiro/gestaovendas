@@ -1,0 +1,67 @@
+from decimal import Decimal
+
+from django.test import TestCase, override_settings
+from rest_framework.test import APIClient
+
+from apps.accounts.models import User
+from apps.catalog.models import Category, Product, ProductPrice
+
+
+@override_settings(REQUIRE_AUTH=False)
+class CategoryApplyPriceTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_user(
+            email='admin-catalog@test.com',
+            password='test123',
+            name='Admin Catalogo',
+            is_superuser=True,
+            is_staff=True,
+        )
+        self.client.force_authenticate(user=self.user)
+        self.category = Category.objects.create(name='Picole Premium', price=Decimal('10.00'))
+
+    def test_apply_price_updates_existing_product_prices_for_all_store_ids(self):
+        product = Product.objects.create(category=self.category, name='Morango', active=True)
+        ProductPrice.objects.create(
+            product=product,
+            store_id=1,
+            price=Decimal('8.00'),
+            cost=Decimal('2.00'),
+            freight=Decimal('0.50'),
+            other=Decimal('0.25'),
+            tax_pct=Decimal('5.00'),
+            overhead_pct=Decimal('4.00'),
+            margin_pct=Decimal('30.00'),
+        )
+        ProductPrice.objects.create(
+            product=product,
+            store_id=2,
+            price=Decimal('9.50'),
+            cost=Decimal('2.10'),
+            freight=Decimal('0.40'),
+            other=Decimal('0.10'),
+            tax_pct=Decimal('6.00'),
+            overhead_pct=Decimal('3.00'),
+            margin_pct=Decimal('28.00'),
+        )
+
+        response = self.client.post(f'/api/categories/{self.category.id}/apply-price', {'price': '12.00'}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['updated_products'], 1)
+        self.category.refresh_from_db()
+        self.assertEqual(self.category.price, Decimal('12.00'))
+        self.assertEqual(
+            list(ProductPrice.objects.filter(product=product).order_by('store_id').values_list('price', flat=True)),
+            [Decimal('12.00'), Decimal('12.00')],
+        )
+
+    def test_apply_price_creates_default_price_when_product_has_no_price_row(self):
+        product = Product.objects.create(category=self.category, name='Chocolate', active=True)
+
+        response = self.client.post(f'/api/categories/{self.category.id}/apply-price', {'price': '13.50'}, format='json')
+
+        self.assertEqual(response.status_code, 200)
+        created_price = ProductPrice.objects.get(product=product, store_id=1)
+        self.assertEqual(created_price.price, Decimal('13.50'))

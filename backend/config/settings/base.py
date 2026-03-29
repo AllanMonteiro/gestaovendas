@@ -106,12 +106,13 @@ def build_database_from_url(url: str) -> dict:
         conn_max_age=int(get_env('DB_CONN_MAX_AGE', default='120') or '120'),
         ssl_require=not DEBUG,
     )
-    parsed = urlparse(url)
-    query = parse_qs(parsed.query)
-    options = config.setdefault('OPTIONS', {})
-    options.setdefault('connect_timeout', int(get_env('DB_CONNECT_TIMEOUT', default='5') or '5'))
-    options.setdefault('sslmode', query.get('sslmode', ['require' if not DEBUG else 'prefer'])[0])
-    options.setdefault('options', query.get('options', ['-c search_path=public'])[0])
+    if config.get('ENGINE') == 'django.db.backends.postgresql':
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
+        options = config.setdefault('OPTIONS', {})
+        options.setdefault('connect_timeout', int(get_env('DB_CONNECT_TIMEOUT', default='5') or '5'))
+        options.setdefault('sslmode', query.get('sslmode', ['require' if not DEBUG else 'prefer'])[0])
+        options.setdefault('options', query.get('options', ['-c search_path=public'])[0])
     config['CONN_HEALTH_CHECKS'] = True
     return config
 
