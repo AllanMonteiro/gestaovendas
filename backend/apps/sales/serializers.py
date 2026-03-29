@@ -87,13 +87,36 @@ class CashMoveSerializer(serializers.ModelSerializer):
         fields = ['id', 'session', 'type', 'amount', 'reason', 'created_at', 'user']
 
 
-class StoreConfigSerializer(serializers.ModelSerializer):
+class StoreConfigAssetSerializer(serializers.ModelSerializer):
+    def _resolve_asset_url(self, value):
+        if not isinstance(value, str) or not value:
+            return value
+        if value.startswith('http://') or value.startswith('https://') or value.startswith('data:'):
+            return value
+        request = self.context.get('request')
+        if value.startswith('/') and request is not None:
+            return request.build_absolute_uri(value)
+        return value
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['logo_url'] = self._resolve_asset_url(data.get('logo_url'))
+        category_images = data.get('category_images')
+        if isinstance(category_images, dict):
+            data['category_images'] = {
+                key: self._resolve_asset_url(value)
+                for key, value in category_images.items()
+            }
+        return data
+
+
+class StoreConfigSerializer(StoreConfigAssetSerializer):
     class Meta:
         model = StoreConfig
         fields = '__all__'
 
 
-class StoreConfigUiSerializer(serializers.ModelSerializer):
+class StoreConfigUiSerializer(StoreConfigAssetSerializer):
     class Meta:
         model = StoreConfig
         fields = [
@@ -112,7 +135,7 @@ class StoreConfigUiSerializer(serializers.ModelSerializer):
         ]
 
 
-class StoreConfigPdvSerializer(serializers.ModelSerializer):
+class StoreConfigPdvSerializer(StoreConfigAssetSerializer):
     class Meta:
         model = StoreConfig
         fields = [

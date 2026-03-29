@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import { openThermalReceiptPdf, type ThermalReceiptPayload } from '../app/thermalReceipt'
+import { connectWS } from '../api/ws'
 
 type Order = {
   id: string
@@ -192,6 +193,20 @@ const Caixa: React.FC = () => {
 
   useEffect(() => {
     void loadData()
+  }, [loadData])
+
+  useEffect(() => {
+    const ws = connectWS('/ws/pdv', (data) => {
+      if (
+        data?.event === 'order_paid' ||
+        data?.event === 'order_canceled' ||
+        data?.event === 'cash_move_created' ||
+        data?.event === 'cash_status_changed'
+      ) {
+        void loadData()
+      }
+    })
+    return () => ws.close()
   }, [loadData])
 
   const totalsByMethod = useMemo(() => {

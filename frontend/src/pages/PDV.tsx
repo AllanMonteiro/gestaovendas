@@ -6,6 +6,7 @@ import { OrderPanel } from '../components/OrderPanel'
 import { PaymentModal, type PaymentEntry, type PaymentMethod } from '../components/PaymentModal'
 import { getCategories, getProducts, getConfig, saveCategories, saveProducts, saveConfig } from '../offline/catalog'
 import { getOutboxCount } from '../offline/outbox'
+import { connectWS } from '../api/ws'
 
 type Category = {
   id: number
@@ -343,16 +344,17 @@ const PDV: React.FC = () => {
       setIsOnline(window.navigator.onLine)
       void getOutboxCount().then(setOutboxCount)
     }
+    const handleOutboxChanged = () => {
+      void getOutboxCount().then(setOutboxCount)
+    }
     window.addEventListener('online', handleStatus)
     window.addEventListener('offline', handleStatus)
-    const int = setInterval(() => {
-      void getOutboxCount().then(setOutboxCount)
-    }, 5000)
+    window.addEventListener('sorveteria:outbox-changed', handleOutboxChanged)
     handleStatus()
     return () => {
       window.removeEventListener('online', handleStatus)
       window.removeEventListener('offline', handleStatus)
-      clearInterval(int)
+      window.removeEventListener('sorveteria:outbox-changed', handleOutboxChanged)
     }
   }, [])
 
@@ -361,6 +363,22 @@ const PDV: React.FC = () => {
     void fetchOpenOrders()
     void fetchCashStatus()
   }, [fetchCatalog, fetchOpenOrders, fetchCashStatus])
+
+  useEffect(() => {
+    const ws = connectWS('/ws/pdv', (data) => {
+      if (data?.event === 'order_paid' || data?.event === 'order_canceled') {
+        void fetchOpenOrders()
+        void fetchCashStatus()
+      }
+      if (data?.event === 'cash_move_created' || data?.event === 'cash_status_changed') {
+        void fetchCashStatus()
+      }
+      if (data?.event === 'order_status_changed' || data?.event === 'order_ready') {
+        void fetchOpenOrders()
+      }
+    })
+    return () => ws.close()
+  }, [fetchCashStatus, fetchOpenOrders])
 
   useEffect(() => {
     const loadLoyalty = async () => {

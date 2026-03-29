@@ -3,8 +3,10 @@ import logging
 import re
 from datetime import datetime, time, timedelta
 from django.core.cache import cache
+from django.core.files.storage import default_storage
 from django.db.models import Count, Sum, Q
 from rest_framework.response import Response
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.views import APIView
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
@@ -311,6 +313,10 @@ class CashOpenView(APIView):
             session = services.open_cash(user=request.user, initial_float=Decimal(str(request.data.get('initial_float', '0'))))
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=400)
+        try:
+            broadcast_pdv_event('cash_status_changed', {'open': True, 'session_id': session.id})
+        except Exception:
+            logger.exception('Failed to broadcast cash status open event')
         return Response(CashSessionSerializer(session).data)
 
 
@@ -356,6 +362,10 @@ class CashCloseView(APIView):
             )
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=400)
+        try:
+            broadcast_pdv_event('cash_status_changed', {'open': False})
+        except Exception:
+            logger.exception('Failed to broadcast cash status close event')
         return Response(result)
 
 
@@ -462,7 +472,7 @@ class CashDashboardView(APIView):
 class ConfigView(APIView):
     def get(self, request):
         config = services.get_store_config()
-        return Response(StoreConfigSerializer(config).data)
+        return Response(StoreConfigSerializer(config, context={'request': request}).data)
 
     def put(self, request):
         if auth_is_required() and not user_has_permission(request.user, 'system.config.manage'):
@@ -471,19 +481,50 @@ class ConfigView(APIView):
         serializer = StoreConfigSerializer(config, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response(serializer.data)
+        return Response(StoreConfigSerializer(config, context={'request': request}).data)
 
 
 class ConfigUiView(APIView):
     def get(self, request):
         config = services.get_store_config()
-        return Response(StoreConfigUiSerializer(config).data)
+        return Response(StoreConfigUiSerializer(config, context={'request': request}).data)
 
 
 class ConfigPdvView(APIView):
     def get(self, request):
         config = services.get_store_config()
-        return Response(StoreConfigPdvSerializer(config).data)
+        return Response(StoreConfigPdvSerializer(config, context={'request': request}).data)
+
+
+class ConfigUploadImageView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+
+    def post(self, request):
+        if auth_is_required() and not user_has_permission(request.user, 'system.config.manage'):
+            return Response({'detail': 'Forbidden'}, status=403)
+
+        file = request.FILES.get('file')
+        slot = (request.data.get('slot') or '').strip().lower()
+        category_id = (request.data.get('category_id') or '').strip()
+
+        if file is None:
+            return Response({'detail': 'file required'}, status=400)
+        if slot not in {'logo', 'category'}:
+            return Response({'detail': 'slot invalid'}, status=400)
+        if slot == 'category' and not category_id:
+            return Response({'detail': 'category_id required'}, status=400)
+
+        safe_name = re.sub(r'[^a-zA-Z0-9._-]+', '-', file.name or 'image')
+        prefix = 'logo' if slot == 'logo' else f'category-{category_id}'
+        stored_name = default_storage.save(f'store-config/{prefix}-{safe_name}', file)
+        relative_url = default_storage.url(stored_name)
+        absolute_url = request.build_absolute_uri(relative_url)
+        return Response({
+            'slot': slot,
+            'category_id': category_id or None,
+            'url': absolute_url,
+            'relative_url': relative_url,
+        })
 
 
 class ResetSalesView(APIView):

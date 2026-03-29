@@ -22,5 +22,6 @@ urlpatterns = [
     path('config', views.ConfigView.as_view()),
     path('config/pdv', views.ConfigPdvView.as_view()),
     path('config/ui', views.ConfigUiView.as_view()),
+    path('config/upload-image', views.ConfigUploadImageView.as_view()),
     path('maintenance/reset-sales', views.ResetSalesView.as_view()),
 ]

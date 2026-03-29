@@ -40,6 +40,13 @@ type CategoryPriceApplyResponse = {
   updated_products: number
 }
 
+type UploadImageResponse = {
+  url: string
+  relative_url: string
+  slot: 'logo' | 'category'
+  category_id?: string | null
+}
+
 type Role = {
   id: number
   name: string
@@ -74,6 +81,8 @@ const Configuracoes: React.FC = () => {
   const [selectedCategoryPrice, setSelectedCategoryPrice] = useState<string>('')
   const [savingCategoryId, setSavingCategoryId] = useState<string>('')
   const [applyingCategoryId, setApplyingCategoryId] = useState<string>('')
+  const [uploadingLogo, setUploadingLogo] = useState(false)
+  const [uploadingCategoryImage, setUploadingCategoryImage] = useState(false)
 
   const [storeName, setStoreName] = useState('')
   const [companyName, setCompanyName] = useState('')
@@ -217,13 +226,7 @@ const Configuracoes: React.FC = () => {
     if (!file || !selectedCategoryId) {
       return
     }
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = typeof reader.result === 'string' ? reader.result : ''
-      setSelectedCategoryImage(result)
-      handleCategoryImageChange(Number(selectedCategoryId), result)
-    }
-    reader.readAsDataURL(file)
+    void uploadConfigImage(file, 'category', selectedCategoryId)
   }
 
   const handleClearCategoryImage = () => {
@@ -332,12 +335,46 @@ const Configuracoes: React.FC = () => {
     if (!file) {
       return
     }
-    const reader = new FileReader()
-    reader.onload = () => {
-      const result = typeof reader.result === 'string' ? reader.result : ''
-      setLogoUrl(result)
+    void uploadConfigImage(file, 'logo')
+  }
+
+  const uploadConfigImage = async (file: File, slot: 'logo' | 'category', categoryId?: string) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('slot', slot)
+    if (slot === 'category' && categoryId) {
+      formData.append('category_id', categoryId)
     }
-    reader.readAsDataURL(file)
+
+    if (slot === 'logo') {
+      setUploadingLogo(true)
+    } else {
+      setUploadingCategoryImage(true)
+    }
+
+    try {
+      const response = await api.post<UploadImageResponse>('/api/config/upload-image', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      })
+      if (slot === 'logo') {
+        setLogoUrl(response.data.url)
+        setFeedback('Logo enviada com sucesso.')
+      } else if (categoryId) {
+        setSelectedCategoryImage(response.data.url)
+        handleCategoryImageChange(Number(categoryId), response.data.url)
+        setFeedback('Imagem da categoria enviada com sucesso.')
+      }
+    } catch {
+      setFeedback(slot === 'logo' ? 'Falha ao enviar logo.' : 'Falha ao enviar imagem da categoria.')
+    } finally {
+      if (slot === 'logo') {
+        setUploadingLogo(false)
+      } else {
+        setUploadingCategoryImage(false)
+      }
+    }
   }
 
   const [printers, setPrinters] = useState<{ name: string, id: string }[]>([])
@@ -495,8 +532,10 @@ const Configuracoes: React.FC = () => {
           type="file"
           accept="image/*"
           onChange={handlePickLogo}
+          disabled={uploadingLogo}
           className="w-full rounded-lg border border-brand-100 bg-white px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-brand-100 file:px-3 file:py-1 file:text-brand-700"
         />
+        {uploadingLogo ? <p className="text-xs text-slate-500">Enviando logo...</p> : null}
         {logoUrl ? (
           <div className="flex items-center gap-3">
             <img src={logoUrl} alt="Logo da empresa" className="h-14 w-14 rounded-lg border border-brand-100 object-cover" />
@@ -611,9 +650,10 @@ const Configuracoes: React.FC = () => {
               type="file"
               accept="image/*"
               onChange={handlePickCategoryImage}
-              disabled={!selectedCategoryId}
+              disabled={!selectedCategoryId || uploadingCategoryImage}
               className="w-full rounded-lg border border-brand-100 bg-white px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-brand-100 file:px-3 file:py-1 file:text-brand-700"
             />
+            {uploadingCategoryImage ? <p className="text-xs text-slate-500">Enviando imagem...</p> : null}
           </div>
 
           <div className="space-y-1">

@@ -1,5 +1,7 @@
 from django.contrib import admin
+from django.conf import settings
 from django.urls import path, include
+from django.views.static import serve
 from config.health import health_view
 
 urlpatterns = [
@@ -15,4 +17,5 @@ urlpatterns = [
     path('api/whatsapp/', include('apps.integrations.whatsapp.urls')),
     path('api/', include('apps.reports.urls')),
     path('api/', include('apps.audit.urls')),
+    path('media/<path:path>', serve, {'document_root': settings.MEDIA_ROOT}),
 ]

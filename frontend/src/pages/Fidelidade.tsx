@@ -78,10 +78,20 @@ const Fidelidade: React.FC = () => {
     if (!customerData?.customer?.phone) {
       return
     }
-    const timer = window.setInterval(() => {
+    const run = () => {
+      if (document.visibilityState === 'hidden') {
+        return
+      }
       void loadCustomer(customerData.customer.phone, { silent: true })
-    }, 10000)
-    return () => window.clearInterval(timer)
+    }
+    const timer = window.setInterval(() => {
+      run()
+    }, 30000)
+    document.addEventListener('visibilitychange', run)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', run)
+    }
   }, [customerData?.customer?.phone, loadCustomer])
 
   const handleMove = async (type: 'earn' | 'redeem') => {

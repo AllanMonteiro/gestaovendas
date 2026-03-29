@@ -1,11 +1,18 @@
 import { db, OutboxItem } from './db'
 
+const dispatchOutboxChanged = () => {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('sorveteria:outbox-changed'))
+  }
+}
+
 export async function enqueueOutbox(item: Omit<OutboxItem, 'id' | 'created_at' | 'attempts'>) {
   await db.outbox.add({
     ...item,
     created_at: new Date().toISOString(),
     attempts: 0
   })
+  dispatchOutboxChanged()
 }
 
 export async function listOutbox() {
@@ -19,6 +26,7 @@ export async function markOutboxError(id: number, error: string) {
 
 export async function removeOutbox(id: number) {
   await db.outbox.delete(id)
+  dispatchOutboxChanged()
 }
 
 export async function getOutboxCount() {

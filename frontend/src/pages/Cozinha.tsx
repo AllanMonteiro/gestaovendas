@@ -1,5 +1,6 @@
 ﻿import React, { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
+import { connectWS } from '../api/ws'
 
 type KitchenOrder = {
   id: string
@@ -65,6 +66,15 @@ const Cozinha: React.FC = () => {
 
   useEffect(() => {
     void loadQueue()
+  }, [loadQueue])
+
+  useEffect(() => {
+    const ws = connectWS('/ws/kitchen', (data) => {
+      if (data?.event === 'order_sent' || data?.event === 'order_ready' || data?.event === 'order_status_changed') {
+        void loadQueue()
+      }
+    })
+    return () => ws.close()
   }, [loadQueue])
 
   const handleReady = async (orderId: string) => {

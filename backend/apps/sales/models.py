@@ -50,6 +50,7 @@ class Order(models.Model):
         indexes = [
             models.Index(fields=['business_date', 'daily_number']),
             models.Index(fields=['status', 'created_at']),
+            models.Index(fields=['status', 'closed_at']),
             models.Index(fields=['created_at']),
         ]
 

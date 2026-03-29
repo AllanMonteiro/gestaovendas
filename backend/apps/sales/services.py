@@ -1,6 +1,12 @@
+import base64
+import binascii
+import uuid
 from decimal import Decimal, ROUND_HALF_UP, ROUND_FLOOR
+from pathlib import Path
 from django.db import transaction, models
 from django.contrib.auth import get_user_model
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.utils import timezone
 from apps.catalog.models import Product, ProductPrice
 from apps.sales.models import Order, OrderItem, Payment, CashSession, CashMove, StoreConfig
@@ -32,6 +38,53 @@ def resolve_effective_user(user):
     )
 
 
+def _save_data_url_asset(data_url: str, prefix: str) -> str:
+    if not isinstance(data_url, str) or not data_url.startswith('data:image/'):
+        return data_url
+    try:
+        header, encoded = data_url.split(',', 1)
+    except ValueError:
+        return data_url
+    extension = 'png'
+    if ';base64' in header:
+        mime_type = header.split(';', 1)[0]
+        extension = mime_type.split('/', 1)[-1] or extension
+    try:
+        binary = base64.b64decode(encoded)
+    except (ValueError, binascii.Error):
+        return data_url
+    safe_extension = Path(f'image.{extension}').suffix or '.png'
+    filename = f'store-config/{prefix}-{uuid.uuid4().hex}{safe_extension}'
+    saved_name = default_storage.save(filename, ContentFile(binary))
+    return default_storage.url(saved_name)
+
+
+def normalize_store_config_assets(config: StoreConfig) -> StoreConfig:
+    changed_fields: list[str] = []
+
+    if config.logo_url and isinstance(config.logo_url, str) and config.logo_url.startswith('data:image/'):
+        config.logo_url = _save_data_url_asset(config.logo_url, 'logo')
+        changed_fields.append('logo_url')
+
+    if isinstance(config.category_images, dict):
+        normalized_images = {}
+        changed = False
+        for key, value in config.category_images.items():
+            if isinstance(value, str) and value.startswith('data:image/'):
+                normalized_images[key] = _save_data_url_asset(value, f'category-{key}')
+                changed = True
+            else:
+                normalized_images[key] = value
+        if changed:
+            config.category_images = normalized_images
+            changed_fields.append('category_images')
+
+    if changed_fields:
+        config.save(update_fields=changed_fields)
+
+    return config
+
+
 def get_store_config() -> StoreConfig:
     config, _ = StoreConfig.objects.get_or_create(id=1, defaults={
         'printer': {},
@@ -40,7 +93,7 @@ def get_store_config() -> StoreConfig:
         'receipt_header_lines': [],
         'receipt_footer_lines': [],
     })
-    return config
+    return normalize_store_config_assets(config)
 
 
 def ensure_open_cash_session() -> CashSession:
