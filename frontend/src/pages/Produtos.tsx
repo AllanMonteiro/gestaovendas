@@ -48,6 +48,7 @@ const Produtos: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([])
   const [priceMap, setPriceMap] = useState<Record<number, ProductPrice>>({})
   const [feedback, setFeedback] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showCreateCategoryModal, setShowCreateCategoryModal] = useState(false)
   const [createCategory, setCreateCategory] = useState('')
@@ -92,6 +93,17 @@ const Produtos: React.FC = () => {
     categories.forEach((category) => map.set(category.id, String(category.price || '0')))
     return map
   }, [categories])
+
+  const filteredProducts = useMemo(() => {
+    const normalizedSearch = searchTerm.trim().toLowerCase()
+    if (!normalizedSearch) {
+      return products
+    }
+    return products.filter((product) => {
+      const categoryName = categoryById.get(product.category) || ''
+      return `${product.name} ${categoryName}`.toLowerCase().includes(normalizedSearch)
+    })
+  }, [categoryById, products, searchTerm])
 
   const loadData = async () => {
     try {
@@ -421,8 +433,32 @@ const Produtos: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <h2 className="text-xl font-semibold">Produtos</h2>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold">Produtos</h2>
+          <p className="text-sm text-slate-500">
+            {filteredProducts.length} produto(s) encontrado(s)
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <input
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="Pesquisar produto ou categoria"
+            className="w-full rounded-lg border border-brand-200 px-3 py-2 text-sm sm:w-72"
+          />
+          {searchTerm ? (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700"
+            >
+              Limpar
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
         <div className="flex gap-2">
           <button onClick={() => void loadData()} className="px-3 py-2 rounded-lg border border-brand-200 text-brand-700">
             Atualizar
@@ -453,7 +489,13 @@ const Produtos: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {products.map((product) => {
+            {filteredProducts.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="py-8 text-center text-slate-500">
+                  Nenhum produto encontrado para a pesquisa informada.
+                </td>
+              </tr>
+            ) : filteredProducts.map((product) => {
               const pricing = priceMap[product.id]
               return (
                 <tr key={product.id} className="border-t border-brand-100">
