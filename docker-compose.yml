@@ -45,6 +45,7 @@ services:
       POSTGRES_DB: sorveteria_pos
       POSTGRES_USER: sorveteria
       POSTGRES_PASSWORD: sorveteria
+      REQUIRE_AUTH: 0
       REDIS_HOST: redis
       REDIS_PORT: 6379
       CACHE_BACKEND: redis

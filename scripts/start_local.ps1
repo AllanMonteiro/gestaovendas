@@ -5,6 +5,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 Set-Location (Join-Path $PSScriptRoot "..")
+$env:REQUIRE_AUTH = "0"
 
 Write-Host "Starting local Docker stack..." -ForegroundColor Cyan
 docker compose -f docker-compose.prod.yml up -d --build

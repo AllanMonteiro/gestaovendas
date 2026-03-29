@@ -4,9 +4,15 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import dj_database_url
+from dotenv import load_dotenv
 
 # BASE_DIR is now three levels up: backend/config/settings/base.py -> backend/
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+# Load local env files so Django respects backend/.env and backend/.env.production.
+for env_path in (BASE_DIR / '.env', BASE_DIR / '.env.production'):
+    if env_path.exists():
+        load_dotenv(env_path, override=False)
 
 
 def get_env(*names: str, default: str | None = None) -> str | None:
@@ -31,7 +37,7 @@ def get_list_env(*names: str) -> list[str]:
 
 SECRET_KEY = get_env('SECRET_KEY', 'DJANGO_SECRET_KEY', default='dev-secret')
 DEBUG = get_bool_env('DEBUG', 'DJANGO_DEBUG', default=True)
-REQUIRE_AUTH = get_bool_env('REQUIRE_AUTH', default=True)
+REQUIRE_AUTH = get_bool_env('REQUIRE_AUTH', 'DJANGO_REQUIRE_AUTH', default=True)
 
 ALLOWED_HOSTS = get_list_env('ALLOWED_HOSTS', 'DJANGO_ALLOWED_HOSTS')
 if not ALLOWED_HOSTS:

@@ -2,6 +2,7 @@ services:
   backend:
     environment:
       DATABASE_URL: postgresql://sorveteria:sorveteria@postgres:5432/sorveteria_pos
+      REQUIRE_AUTH: 0
       REDIS_URL: redis://redis:6379
       DB_CONN_MAX_AGE: 300
       DB_CONNECT_TIMEOUT: 3

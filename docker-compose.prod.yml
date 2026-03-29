@@ -42,6 +42,7 @@ services:
       - ./backend/.env.production
     environment:
       DJANGO_LOG_LEVEL: INFO
+      REQUIRE_AUTH: ${REQUIRE_AUTH:-1}
       RUN_SEED: ${RUN_SEED:-0}
       RUN_COLLECTSTATIC: ${RUN_COLLECTSTATIC:-0}
     depends_on:
