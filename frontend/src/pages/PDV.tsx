@@ -6,7 +6,7 @@ import { OrderPanel } from '../components/OrderPanel'
 import { PaymentModal, type PaymentEntry, type PaymentMethod } from '../components/PaymentModal'
 import { getCategories, getProducts, getConfig, saveCategories, saveProducts, saveConfig } from '../offline/catalog'
 import { getLocalOrder, listLocalOrders, removeLocalOrder, saveLocalOrder, syncLocalOpenOrders } from '../offline/localOrders'
-import { getOutboxCount } from '../offline/outbox'
+import { enqueueOutbox, getOutboxCount, listOutbox, removeOutboxEntries } from '../offline/outbox'
 import { connectWS } from '../api/ws'
 
 type Category = {
@@ -29,6 +29,7 @@ type OrderItem = {
   total: string | number
   unit_price?: string | number
   product_name?: string
+  client_request_id?: string | null
   weight_grams?: number | null
   notes?: string | null
 }
@@ -178,6 +179,65 @@ const addItemToOrder = (order: Order, item: OrderItem): Order => ({
   total: moneyString(Number(order.total || 0) + Number(item.total || 0)),
 })
 
+const updateItemInOrder = (order: Order, itemId: number, changes: { qty: number; notes?: string | null }) => {
+  const items = order.items.map((item) => {
+    if (item.id !== itemId) {
+      return item
+    }
+    const currentQty = Number(item.qty) || 1
+    const fallbackUnitPrice = Number(item.total || 0) / Math.max(currentQty, 1)
+    const unitPrice = Number(item.unit_price ?? fallbackUnitPrice)
+    const nextTotal = moneyString(unitPrice * changes.qty)
+    return {
+      ...item,
+      qty: changes.qty,
+      notes: changes.notes ?? null,
+      total: nextTotal,
+      unit_price: unitPrice,
+    }
+  })
+  const nextSubtotal = items.reduce((sum, item) => sum + Number(item.total || 0), 0)
+  return {
+    ...order,
+    items,
+    subtotal: moneyString(nextSubtotal),
+    total: moneyString(nextSubtotal - Number(order.discount || 0)),
+  }
+}
+
+const removeItemFromOrder = (order: Order, itemId: number) => {
+  const items = order.items.filter((item) => item.id !== itemId)
+  const nextSubtotal = items.reduce((sum, item) => sum + Number(item.total || 0), 0)
+  return {
+    ...order,
+    items,
+    subtotal: moneyString(nextSubtotal),
+    total: moneyString(nextSubtotal - Number(order.discount || 0)),
+  }
+}
+
+const buildPendingOrderKeys = (items: Array<{ url?: string; body?: { client_request_id?: string } | null }>) => {
+  const keys = new Set<string>()
+  items.forEach((item) => {
+    if (item.url === '/api/orders' && item.body?.client_request_id) {
+      keys.add(item.body.client_request_id)
+      return
+    }
+    const match = item.url?.match(/^\/api\/orders\/([^/]+)/)
+    if (match?.[1]) {
+      keys.add(match[1])
+    }
+  })
+  return keys
+}
+
+const isOrderLinkedToOutboxEntry = (order: Order, entry: { url: string; body?: { client_request_id?: string } | null }) => {
+  if (entry.url === '/api/orders' && entry.body?.client_request_id && entry.body.client_request_id === order.client_request_id) {
+    return true
+  }
+  return entry.url.startsWith(`/api/orders/${order.id}`)
+}
+
 const PDV: React.FC = () => {
   const [openOrders, setOpenOrders] = useState<OrderSummary[]>([])
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null)
@@ -225,6 +285,7 @@ const PDV: React.FC = () => {
   const [scaleLoading, setScaleLoading] = useState(false)
   const [isOnline, setIsOnline] = useState(window.navigator.onLine)
   const [outboxCount, setOutboxCount] = useState(0)
+  const [pendingSyncOrderKeys, setPendingSyncOrderKeys] = useState<Set<string>>(new Set())
   const deferredProductSearchTerm = useDeferredValue(productSearchTerm)
 
   const parsedScaleWeightInput = useMemo(() => parseScaleWeightInput(scaleWeightInput), [scaleWeightInput])
@@ -283,6 +344,25 @@ const PDV: React.FC = () => {
     return round2(Math.max(total - pointsDiscount, 0))
   }, [selectedOrder?.total, pointsDiscount])
   const canOperateOrders = cashOpen || !isOnline
+  const refreshOutboxState = useCallback(async () => {
+    const items = await listOutbox()
+    setOutboxCount(items.length)
+    setPendingSyncOrderKeys(buildPendingOrderKeys(items))
+  }, [])
+
+  const isOrderPendingSync = useCallback(
+    (order: Order | OrderSummary | null) => {
+      if (!order) {
+        return false
+      }
+      return Boolean(
+        order.local_only ||
+        pendingSyncOrderKeys.has(order.id) ||
+        (order.client_request_id && pendingSyncOrderKeys.has(order.client_request_id))
+      )
+    },
+    [pendingSyncOrderKeys]
+  )
 
   const applyOrderSnapshot = useCallback((order: Order) => {
     setSelectedOrder(order)
@@ -298,6 +378,32 @@ const PDV: React.FC = () => {
       return next
     })
     void saveLocalOrder(order)
+  }, [])
+
+  const discardLocalOrder = useCallback(async (order: Order) => {
+    await removeOutboxEntries((entry) => isOrderLinkedToOutboxEntry(order, entry))
+    await removeLocalOrder(order.id)
+    setOpenOrders((prev) => prev.filter((item) => item.id !== order.id))
+    setSelectedOrder((prev) => (prev?.id === order.id ? null : prev))
+    setSelectedOrderId((prev) => (prev === order.id ? null : prev))
+  }, [])
+
+  const rebuildLocalOnlyOrderQueue = useCallback(async (order: Order) => {
+    await removeOutboxEntries((entry) => entry.url.startsWith(`/api/orders/${order.id}/items`))
+    for (const item of order.items) {
+      await enqueueOutbox({
+        method: 'POST',
+        url: `/api/orders/${order.id}/items`,
+        body: {
+          product_id: item.product,
+          qty: item.qty,
+          weight_grams: item.weight_grams ?? undefined,
+          notes: item.notes ?? undefined,
+          client_request_id: item.client_request_id ?? undefined,
+        },
+        headers: {},
+      })
+    }
   }, [])
 
   const fetchOrderDetail = useCallback(async (orderId: string) => {
@@ -463,10 +569,10 @@ const PDV: React.FC = () => {
   useEffect(() => {
     const handleStatus = () => {
       setIsOnline(window.navigator.onLine)
-      void getOutboxCount().then(setOutboxCount)
+      void refreshOutboxState()
     }
     const handleOutboxChanged = () => {
-      void getOutboxCount().then(setOutboxCount)
+      void refreshOutboxState()
     }
     window.addEventListener('online', handleStatus)
     window.addEventListener('offline', handleStatus)
@@ -477,7 +583,7 @@ const PDV: React.FC = () => {
       window.removeEventListener('offline', handleStatus)
       window.removeEventListener('sorveteria:outbox-changed', handleOutboxChanged)
     }
-  }, [])
+  }, [refreshOutboxState])
 
   useEffect(() => {
     void fetchCatalog()
@@ -680,7 +786,8 @@ const PDV: React.FC = () => {
 
     const payload = {
       product_id: qtyProduct.id,
-      qty
+      qty,
+      client_request_id: crypto.randomUUID()
     }
     try {
       const response = await api.post<OrderItem>(`/api/orders/${orderId}/items`, payload)
@@ -701,6 +808,7 @@ const PDV: React.FC = () => {
               id: Math.floor(Math.random() * 1000000),
               product: qtyProduct.id,
               qty,
+              client_request_id: payload.client_request_id,
               total: 0,
             })
           )
@@ -780,7 +888,8 @@ const PDV: React.FC = () => {
     const payload = {
       product_id: scaleProduct.id,
       qty: round3(normalizedScaleWeight / 1000),
-      weight_grams: normalizedScaleWeight
+      weight_grams: normalizedScaleWeight,
+      client_request_id: crypto.randomUUID()
     }
 
     try {
@@ -803,6 +912,7 @@ const PDV: React.FC = () => {
               id: Math.floor(Math.random() * 1000000),
               product: scaleProduct.id,
               qty: payload.qty,
+              client_request_id: payload.client_request_id,
               weight_grams: normalizedScaleWeight,
               total: 0,
             })
@@ -867,14 +977,31 @@ const PDV: React.FC = () => {
       return
     }
     const notesInput = window.prompt('Observacao (opcional):', item.notes ?? '')
+    const nextOrder = updateItemInOrder(selectedOrder, item.id, {
+      qty,
+      notes: notesInput ?? item.notes ?? '',
+    })
+    if (selectedOrder.local_only) {
+      applyOrderSnapshot(nextOrder)
+      await rebuildLocalOnlyOrderQueue(nextOrder)
+      setFeedback({ type: 'ok', text: 'Item atualizado localmente e mantido na fila offline.' })
+      return
+    }
     try {
       await api.put(`/api/orders/${selectedOrder.id}/items/${item.id}`, {
         qty,
         notes: notesInput ?? item.notes ?? ''
       })
-      await fetchOpenOrders()
+      applyOrderSnapshot(nextOrder)
+      void fetchOpenOrders(selectedOrder.id)
       setFeedback({ type: 'ok', text: 'Item atualizado.' })
-    } catch {
+    } catch (error: any) {
+      if (error.enqueued) {
+        applyOrderSnapshot(nextOrder)
+        setFeedback({ type: 'ok', text: 'Modo Offline: item atualizado localmente.' })
+        setIsOnline(false)
+        return
+      }
       setFeedback({ type: 'error', text: 'Falha ao editar item.' })
     }
   }
@@ -887,11 +1014,25 @@ const PDV: React.FC = () => {
     if (!window.confirm('Excluir este item do pedido?')) {
       return
     }
+    const nextOrder = removeItemFromOrder(selectedOrder, item.id)
+    if (selectedOrder.local_only) {
+      applyOrderSnapshot(nextOrder)
+      await rebuildLocalOnlyOrderQueue(nextOrder)
+      setFeedback({ type: 'ok', text: 'Item removido localmente da fila offline.' })
+      return
+    }
     try {
       await api.delete(`/api/orders/${selectedOrder.id}/items/${item.id}`)
-      await fetchOpenOrders()
+      applyOrderSnapshot(nextOrder)
+      void fetchOpenOrders(selectedOrder.id)
       setFeedback({ type: 'ok', text: 'Item removido do pedido.' })
-    } catch {
+    } catch (error: any) {
+      if (error.enqueued) {
+        applyOrderSnapshot(nextOrder)
+        setFeedback({ type: 'ok', text: 'Modo Offline: item removido localmente.' })
+        setIsOnline(false)
+        return
+      }
       setFeedback({ type: 'error', text: 'Falha ao excluir item.' })
     }
   }
@@ -1110,6 +1251,11 @@ const PDV: React.FC = () => {
     if (!reason || !reason.trim()) {
       return
     }
+    if (selectedOrder.local_only) {
+      await discardLocalOrder(selectedOrder)
+      setFeedback({ type: 'ok', text: 'Pedido local cancelado e removido da fila offline.' })
+      return
+    }
     try {
       await api.post(`/api/orders/${selectedOrder.id}/cancel`, { reason: reason.trim() })
       setOpenOrders((prev) => prev.filter((order) => order.id !== selectedOrder.id))
@@ -1138,6 +1284,11 @@ const PDV: React.FC = () => {
       return
     }
     if (!window.confirm('Deseja excluir este pedido?')) {
+      return
+    }
+    if (selectedOrder.local_only) {
+      await discardLocalOrder(selectedOrder)
+      setFeedback({ type: 'ok', text: 'Pedido local removido da fila offline.' })
       return
     }
     try {
@@ -1196,7 +1347,14 @@ const PDV: React.FC = () => {
                   setSelectedOrderId(order.id)
                   void fetchOrderDetail(order.id)
                 }}>
-                  <div className="font-semibold">Pedido {getOrderDisplayNumber(order)} | {formatBRL(order.total)}</div>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-semibold">Pedido {getOrderDisplayNumber(order)} | {formatBRL(order.total)}</div>
+                    {isOrderPendingSync(order) ? (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                        Pendente sync
+                      </span>
+                    ) : null}
+                  </div>
                   <div className="text-xs text-slate-600">
                     Cliente: {order.customer_name || order.customer_phone || 'Nao informado'}
                   </div>
@@ -1224,6 +1382,11 @@ const PDV: React.FC = () => {
                 <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
                   {selectedOrder ? `Pedido #${getOrderDisplayNumber(selectedOrder)}` : 'Sem pedido selecionado'}
                 </span>
+                {isOrderPendingSync(selectedOrder) ? (
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+                    Pendente de sincronizacao
+                  </span>
+                ) : null}
                 {selectedOrder ? (
                   <span className="text-xs text-slate-500">
                     Cliente: {selectedOrder.customer_name || selectedOrder.customer_phone || 'Nao informado'}

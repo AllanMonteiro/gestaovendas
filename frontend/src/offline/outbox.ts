@@ -29,6 +29,19 @@ export async function removeOutbox(id: number) {
   dispatchOutboxChanged()
 }
 
+export async function removeOutboxEntries(predicate: (item: OutboxItem) => boolean) {
+  const items = await db.outbox.toArray()
+  const idsToRemove = items.filter(predicate).map((item) => item.id).filter((id): id is number => typeof id === 'number')
+  if (idsToRemove.length === 0) {
+    return 0
+  }
+  await db.transaction('rw', db.outbox, async () => {
+    await db.outbox.bulkDelete(idsToRemove)
+  })
+  dispatchOutboxChanged()
+  return idsToRemove.length
+}
+
 export async function getOutboxCount() {
   return db.outbox.count()
 }
