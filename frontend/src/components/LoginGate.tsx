@@ -24,7 +24,16 @@ export const LoginGate: React.FC<LoginGateProps> = ({ children }) => {
       setSession(response.data)
       setFeedback('')
     } catch {
-      setFeedback('Erro ao carregar sessão. Verifique se o servidor está rodando.')
+      // Broken or expired local tokens should not bypass the login gate.
+      clearTokens()
+      try {
+        const response = await api.get<AuthSession>('/api/auth/session')
+        setSession(response.data)
+        setFeedback('')
+      } catch {
+        setSession(null)
+        setFeedback('Erro ao carregar sessao. Verifique se o servidor esta rodando.')
+      }
     } finally {
       setLoading(false)
     }
@@ -81,6 +90,39 @@ export const LoginGate: React.FC<LoginGateProps> = ({ children }) => {
 
   if (loading) {
     return <div className="panel p-6 text-sm text-slate-500">Carregando sessao...</div>
+  }
+
+  if (session === null) {
+    return (
+      <div className="mx-auto flex min-h-[70vh] max-w-3xl items-center justify-center px-3 py-6 sm:px-4">
+        <section className="panel w-full p-6 sm:p-8">
+          <h1 className="text-2xl font-semibold text-slate-900">Nao foi possivel validar a sessao</h1>
+          <p className="mt-2 text-sm text-slate-500">
+            O sistema nao conseguiu confirmar o acesso agora. Tente novamente ou recarregue a pagina.
+          </p>
+          {feedback ? <p className="mt-4 text-sm text-rose-600">{feedback}</p> : null}
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => void loadSession()}
+              className="rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 px-4 py-3 text-sm font-semibold text-white"
+            >
+              Tentar novamente
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                clearTokens()
+                window.location.reload()
+              }}
+              className="rounded-xl border border-brand-200 px-4 py-3 text-sm font-semibold text-brand-700"
+            >
+              Limpar sessao e recarregar
+            </button>
+          </div>
+        </section>
+      </div>
+    )
   }
 
   if (!requiresLogin) {
