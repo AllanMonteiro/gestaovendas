@@ -1,12 +1,27 @@
 from decimal import Decimal
 import logging
 from apps.orders.models import Order, OrderItem
+from apps.catalog.models import ProductPrice
 from apps.catalog.services.product_matcher import find_product_by_name
 from apps.sales.services import get_store_config
 from apps.integrations.viacep_service import get_address_from_cep, calculate_delivery_fee
 from apps.integrations.pix_service import generate_static_pix
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_product_price(product) -> Decimal:
+    if product is None:
+        return Decimal("0.00")
+
+    price = ProductPrice.objects.filter(product=product).order_by("store_id").first()
+    if price is not None:
+        return Decimal(price.price)
+
+    if product.category_id and product.category.price is not None:
+        return Decimal(product.category.price)
+
+    return Decimal("0.00")
 
 def create_delivery_order_from_parsed(phone: str, parsed: dict) -> Order:
     """
@@ -23,7 +38,7 @@ def create_delivery_order_from_parsed(phone: str, parsed: dict) -> Order:
         
         # Professional Fuzzy Search (difflib)
         product = find_product_by_name(name)
-        price = product.price if product else Decimal("0.00")
+        price = resolve_product_price(product)
         
         subtotal += price * qty
         item_details.append({

@@ -213,6 +213,8 @@ const Configuracoes: React.FC = () => {
       delete next[selectedCategoryId]
       return next
     })
+  }
+
   const handleSaveCategoryPrice = async () => {
     if (!selectedCategoryId) return
     try {

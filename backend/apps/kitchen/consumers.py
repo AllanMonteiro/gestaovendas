@@ -1,13 +1,11 @@
-import os
+from django.conf import settings
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 
 
 def auth_is_required() -> bool:
-    debug_enabled = os.environ.get('DJANGO_DEBUG', '1') == '1'
-    default_value = '0' if debug_enabled else '1'
-    return os.environ.get('DJANGO_REQUIRE_AUTH', default_value) == '1'
+    return bool(getattr(settings, 'REQUIRE_AUTH', True))
 
 
 class KitchenConsumer(AsyncJsonWebsocketConsumer):
