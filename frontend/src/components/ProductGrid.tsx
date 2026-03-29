@@ -27,7 +27,7 @@ type ProductGridProps = {
   onAddProduct: (product: Product) => void
 }
 
-export const ProductGrid: React.FC<ProductGridProps> = ({
+const ProductGridComponent: React.FC<ProductGridProps> = ({
   categories,
   selectedCategoryId,
   products,
@@ -155,4 +155,6 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
     </div>
   )
 }
+
+export const ProductGrid = React.memo(ProductGridComponent)
 

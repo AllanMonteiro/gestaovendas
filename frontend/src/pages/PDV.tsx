@@ -1,12 +1,13 @@
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
+import React, { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import { openThermalReceiptPdf, type ThermalReceiptPayload } from '../app/thermalReceipt'
+import { OpenOrdersPanel } from '../components/OpenOrdersPanel'
 import { ProductGrid } from '../components/ProductGrid'
 import { OrderPanel } from '../components/OrderPanel'
 import { PaymentModal, type PaymentEntry, type PaymentMethod } from '../components/PaymentModal'
 import { getCategories, getProducts, getConfig, saveCategories, saveProducts, saveConfig } from '../offline/catalog'
 import { getLocalOrder, listLocalOrders, removeLocalOrder, saveLocalOrder, syncLocalOpenOrders } from '../offline/localOrders'
-import { enqueueOutbox, getOutboxCount, listOutbox, removeOutboxEntries } from '../offline/outbox'
+import { enqueueOutbox, listOutbox, removeOutboxEntries } from '../offline/outbox'
 import { connectWS } from '../api/ws'
 
 type Category = {
@@ -307,7 +308,7 @@ const PDV: React.FC = () => {
     if (!normalizedSearch) {
       return []
     }
-    return products.filter((product) => product.name.toLowerCase().includes(normalizedSearch))
+    return products.filter((product) => product.name.toLowerCase().includes(normalizedSearch)).slice(0, 12)
   }, [deferredProductSearchTerm, products])
 
   const visibleProducts = useMemo(() => {
@@ -346,8 +347,10 @@ const PDV: React.FC = () => {
   const canOperateOrders = cashOpen || !isOnline
   const refreshOutboxState = useCallback(async () => {
     const items = await listOutbox()
-    setOutboxCount(items.length)
-    setPendingSyncOrderKeys(buildPendingOrderKeys(items))
+    startTransition(() => {
+      setOutboxCount(items.length)
+      setPendingSyncOrderKeys(buildPendingOrderKeys(items))
+    })
   }, [])
 
   const isOrderPendingSync = useCallback(
@@ -365,17 +368,19 @@ const PDV: React.FC = () => {
   )
 
   const applyOrderSnapshot = useCallback((order: Order) => {
-    setSelectedOrder(order)
-    setSelectedOrderId(order.id)
-    setOpenOrders((prev) => {
-      const summary = toOrderSummary(order)
-      const existingIndex = prev.findIndex((entry) => entry.id === order.id)
-      if (existingIndex === -1) {
-        return [summary, ...prev]
-      }
-      const next = [...prev]
-      next[existingIndex] = { ...next[existingIndex], ...summary }
-      return next
+    startTransition(() => {
+      setSelectedOrder(order)
+      setSelectedOrderId(order.id)
+      setOpenOrders((prev) => {
+        const summary = toOrderSummary(order)
+        const existingIndex = prev.findIndex((entry) => entry.id === order.id)
+        if (existingIndex === -1) {
+          return [summary, ...prev]
+        }
+        const next = [...prev]
+        next[existingIndex] = { ...next[existingIndex], ...summary }
+        return next
+      })
     })
     void saveLocalOrder(order)
   }, [])
@@ -410,7 +415,9 @@ const PDV: React.FC = () => {
     try {
       const response = await api.get<Order>(`/api/orders/${orderId}/detail`)
       const order = normalizeOrder(response.data)
-      setSelectedOrder(order)
+      startTransition(() => {
+        setSelectedOrder(order)
+      })
       void saveLocalOrder(order)
       setIsOnline(true)
       return order
@@ -418,7 +425,9 @@ const PDV: React.FC = () => {
       const localOrder = await getLocalOrder<Order>(orderId)
       if (localOrder) {
         const normalizedLocalOrder = normalizeOrder(localOrder)
-        setSelectedOrder(normalizedLocalOrder)
+        startTransition(() => {
+          setSelectedOrder(normalizedLocalOrder)
+        })
         return normalizedLocalOrder
       }
       setIsOnline(false)
@@ -438,21 +447,23 @@ const PDV: React.FC = () => {
       const prods = productsResp.data.filter((item) => item.active !== false)
       const conf = configResp.data
 
-      setCategories(cats)
-      setProducts(prods)
-      setCategoryImages(conf.category_images ?? {})
-      setPointValueReal(Number(conf.point_value_real ?? 0))
-      setMinRedeemPoints(Number(conf.min_redeem_points ?? 0))
-      setAgentUrl(conf.printer?.agent_url?.trim() ?? '')
-      setStoreLabel(conf.store_name || 'Sorveteria POS')
-      setCompanyName(conf.company_name || '')
-      setStoreCnpj(conf.cnpj || '')
-      setStoreAddress(conf.address || '')
-      setReceiptHeaderLines(conf.receipt_header_lines ?? [])
-      setReceiptFooterLines(conf.receipt_footer_lines ?? [])
-      setAutoPrintReceipt(Boolean(conf.printer?.auto_print_receipt ?? true))
-      setAutoPrintKitchen(Boolean(conf.printer?.auto_print_kitchen ?? false))
-      setPrinterName(conf.printer?.printer_name || 'auto')
+      startTransition(() => {
+        setCategories(cats)
+        setProducts(prods)
+        setCategoryImages(conf.category_images ?? {})
+        setPointValueReal(Number(conf.point_value_real ?? 0))
+        setMinRedeemPoints(Number(conf.min_redeem_points ?? 0))
+        setAgentUrl(conf.printer?.agent_url?.trim() ?? '')
+        setStoreLabel(conf.store_name || 'Sorveteria POS')
+        setCompanyName(conf.company_name || '')
+        setStoreCnpj(conf.cnpj || '')
+        setStoreAddress(conf.address || '')
+        setReceiptHeaderLines(conf.receipt_header_lines ?? [])
+        setReceiptFooterLines(conf.receipt_footer_lines ?? [])
+        setAutoPrintReceipt(Boolean(conf.printer?.auto_print_receipt ?? true))
+        setAutoPrintKitchen(Boolean(conf.printer?.auto_print_kitchen ?? false))
+        setPrinterName(conf.printer?.printer_name || 'auto')
+      })
 
       void saveCategories(cats)
       void saveProducts(prods)
@@ -466,24 +477,26 @@ const PDV: React.FC = () => {
       ])
       
       if (localCats.length > 0 || localProds.length > 0 || localConf) {
-        if (localCats.length > 0) setCategories(localCats as Category[])
-        if (localProds.length > 0) setProducts((localProds as Product[]).filter(p => p.active !== false))
-        if (localConf) {
-          const conf = localConf as StoreConfigResponse
-          setCategoryImages(conf.category_images ?? {})
-          setPointValueReal(Number(conf.point_value_real ?? 0))
-          setMinRedeemPoints(Number(conf.min_redeem_points ?? 0))
-          setAgentUrl(conf.printer?.agent_url?.trim() ?? '')
-          setStoreLabel(conf.store_name || 'Sorveteria POS')
-          setCompanyName(conf.company_name || '')
-          setStoreCnpj(conf.cnpj || '')
-          setStoreAddress(conf.address || '')
-          setReceiptHeaderLines(conf.receipt_header_lines ?? [])
-          setReceiptFooterLines(conf.receipt_footer_lines ?? [])
-          setAutoPrintReceipt(Boolean(conf.printer?.auto_print_receipt ?? true))
-          setAutoPrintKitchen(Boolean(conf.printer?.auto_print_kitchen ?? false))
-          setPrinterName(conf.printer?.printer_name || 'auto')
-        }
+        startTransition(() => {
+          if (localCats.length > 0) setCategories(localCats as Category[])
+          if (localProds.length > 0) setProducts((localProds as Product[]).filter(p => p.active !== false))
+          if (localConf) {
+            const conf = localConf as StoreConfigResponse
+            setCategoryImages(conf.category_images ?? {})
+            setPointValueReal(Number(conf.point_value_real ?? 0))
+            setMinRedeemPoints(Number(conf.min_redeem_points ?? 0))
+            setAgentUrl(conf.printer?.agent_url?.trim() ?? '')
+            setStoreLabel(conf.store_name || 'Sorveteria POS')
+            setCompanyName(conf.company_name || '')
+            setStoreCnpj(conf.cnpj || '')
+            setStoreAddress(conf.address || '')
+            setReceiptHeaderLines(conf.receipt_header_lines ?? [])
+            setReceiptFooterLines(conf.receipt_footer_lines ?? [])
+            setAutoPrintReceipt(Boolean(conf.printer?.auto_print_receipt ?? true))
+            setAutoPrintKitchen(Boolean(conf.printer?.auto_print_kitchen ?? false))
+            setPrinterName(conf.printer?.printer_name || 'auto')
+          }
+        })
         setFeedback({ type: 'ok', text: 'Modo offline: usando dados locais.' })
       }
       setIsOnline(false)
@@ -493,7 +506,9 @@ const PDV: React.FC = () => {
   const fetchOpenOrders = useCallback(async (targetOrderId?: string | null) => {
     try {
       const response = await api.get<OrderSummary[]>('/api/orders/open?include_items=0')
-      setOpenOrders(response.data)
+      startTransition(() => {
+        setOpenOrders(response.data)
+      })
       void syncLocalOpenOrders(response.data)
       setIsOnline(true)
       let nextSelectedOrderId = selectedOrderId
@@ -514,23 +529,44 @@ const PDV: React.FC = () => {
     } catch {
       const localOrders = (await listLocalOrders<Order | OrderSummary>()).map((order) => normalizeOrder(order as Order))
       if (localOrders.length > 0) {
-        setOpenOrders(localOrders.map((order) => toOrderSummary(order)))
+        startTransition(() => {
+          setOpenOrders(localOrders.map((order) => toOrderSummary(order)))
+        })
         let nextSelectedOrderId = selectedOrderId
         if (typeof targetOrderId !== 'undefined') {
           nextSelectedOrderId = targetOrderId
         }
         const fallbackOrder = nextSelectedOrderId ? localOrders.find((order) => order.id === nextSelectedOrderId) ?? null : null
         if (fallbackOrder) {
-          setSelectedOrder(fallbackOrder)
-          setSelectedOrderId(fallbackOrder.id)
+          startTransition(() => {
+            setSelectedOrder(fallbackOrder)
+            setSelectedOrderId(fallbackOrder.id)
+          })
         } else {
-          setSelectedOrder(localOrders[0] ?? null)
-          setSelectedOrderId(localOrders[0]?.id ?? null)
+          startTransition(() => {
+            setSelectedOrder(localOrders[0] ?? null)
+            setSelectedOrderId(localOrders[0]?.id ?? null)
+          })
         }
       }
       setIsOnline(false)
     }
   }, [fetchOrderDetail, selectedOrderId])
+
+  const getProductName = useCallback((productId: number) => productsById.get(productId)?.name ?? `Produto ${productId}`, [productsById])
+
+  const handleSelectOrder = useCallback((orderId: string) => {
+    setSelectedOrderId(orderId)
+    void fetchOrderDetail(orderId)
+  }, [fetchOrderDetail])
+
+  const handleRefreshOpenOrders = useCallback(() => {
+    void fetchOpenOrders()
+  }, [fetchOpenOrders])
+
+  const handleRefreshCatalog = useCallback(() => {
+    void fetchCatalog()
+  }, [fetchCatalog])
 
   const fetchCashStatus = useCallback(async () => {
     try {
@@ -654,14 +690,14 @@ const PDV: React.FC = () => {
     setLoadingCreateOrder(false)
   }
 
-  const openNewOrderModal = async () => {
+  const openNewOrderModal = useCallback(async () => {
     const canOperate = await ensureCashOpen()
     if (!canOperate) {
       return
     }
     resetNewOrderModal()
     setShowNewOrderModal(true)
-  }
+  }, [ensureCashOpen])
 
   const createOrder = async (options?: { includeProfile: boolean }) => {
     setLoadingCreateOrder(true)
@@ -824,7 +860,7 @@ const PDV: React.FC = () => {
     }
   }
 
-  const handleAddProduct = async (product: Product) => {
+  const handleAddProduct = useCallback(async (product: Product) => {
     if (!(await ensureCashOpen())) {
       return
     }
@@ -842,7 +878,15 @@ const PDV: React.FC = () => {
     setQtyProduct(product)
     setQtyInput('1')
     setShowQtyModal(true)
-  }
+  }, [ensureCashOpen, selectedOrderId])
+
+  const handleOpenNewOrder = useCallback(() => {
+    void openNewOrderModal()
+  }, [openNewOrderModal])
+
+  const handleAddProductClick = useCallback((product: Product) => {
+    void handleAddProduct(product)
+  }, [handleAddProduct])
 
   const fetchScaleWeight = async () => {
     if (!agentUrl) {
@@ -962,7 +1006,7 @@ const PDV: React.FC = () => {
     }
   }
 
-  const handleEditItem = async (item: OrderItem) => {
+  const handleEditItem = useCallback(async (item: OrderItem) => {
     if (!selectedOrder) {
       setFeedback({ type: 'error', text: 'Selecione um pedido.' })
       return
@@ -1004,9 +1048,9 @@ const PDV: React.FC = () => {
       }
       setFeedback({ type: 'error', text: 'Falha ao editar item.' })
     }
-  }
+  }, [applyOrderSnapshot, rebuildLocalOnlyOrderQueue, selectedOrder])
 
-  const handleDeleteItem = async (item: OrderItem) => {
+  const handleDeleteItem = useCallback(async (item: OrderItem) => {
     if (!selectedOrder) {
       setFeedback({ type: 'error', text: 'Selecione um pedido.' })
       return
@@ -1035,7 +1079,7 @@ const PDV: React.FC = () => {
       }
       setFeedback({ type: 'error', text: 'Falha ao excluir item.' })
     }
-  }
+  }, [applyOrderSnapshot, rebuildLocalOnlyOrderQueue, selectedOrder])
 
   const handleOpenCloseSaleModal = async () => {
     if (!selectedOrder) {
@@ -1317,61 +1361,17 @@ const PDV: React.FC = () => {
     <>
       <div className="grid grid-cols-1 gap-4 md:gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_260px] xl:grid-cols-[280px_minmax(0,1fr)_minmax(0,1.2fr)]">
         <aside className="order-3 space-y-4 rounded-2xl lg:order-3 xl:order-1">
-
-          <div className="panel p-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Comandas abertas</h2>
-            <button onClick={() => void fetchOpenOrders()} className="text-xs font-semibold text-brand-700">
-              {isOnline ? 'Atualizar' : 'Offline'}
-            </button>
-          </div>
-          {outboxCount > 0 && (
-            <div className="mt-2 rounded-lg bg-orange-50 p-2 text-[10px] text-orange-700">
-              {outboxCount} pedido(s) pendente(s) de sincronizacao.
-            </div>
-          )}
-          {!isOnline && (
-            <div className="mt-2 rounded-lg bg-red-50 p-2 text-[10px] text-red-700">
-              Modo Offline Ativado.
-            </div>
-          )}
-          <div className="mt-4 max-h-[48vh] space-y-2 overflow-y-auto pr-1">
-            {openOrders.map((order) => (
-              <div
-                key={order.id}
-                className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${
-                  selectedOrderId === order.id ? 'border-brand-500 bg-brand-50' : 'border-brand-100 bg-brand-50/60'
-                }`}
-              >
-                <button className="w-full text-left" onClick={() => {
-                  setSelectedOrderId(order.id)
-                  void fetchOrderDetail(order.id)
-                }}>
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="font-semibold">Pedido {getOrderDisplayNumber(order)} | {formatBRL(order.total)}</div>
-                    {isOrderPendingSync(order) ? (
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
-                        Pendente sync
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="text-xs text-slate-600">
-                    Cliente: {order.customer_name || order.customer_phone || 'Nao informado'}
-                  </div>
-                </button>
-              </div>
-            ))}
-            {openOrders.length === 0 ? <p className="text-sm text-slate-500">Sem comandas abertas.</p> : null}
-          </div>
-          <button
-            onClick={() => void openNewOrderModal()}
-            disabled={!canOperateOrders}
-            title={!canOperateOrders ? 'Abra o caixa para criar pedido.' : undefined}
-            className="w-full rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 px-4 py-2.5 text-sm font-semibold text-white"
-          >
-            Novo pedido
-          </button>
-          </div>
+          <OpenOrdersPanel
+            openOrders={openOrders}
+            selectedOrderId={selectedOrderId}
+            outboxCount={outboxCount}
+            isOnline={isOnline}
+            canOperateOrders={canOperateOrders}
+            pendingSyncOrderKeys={pendingSyncOrderKeys}
+            onRefresh={handleRefreshOpenOrders}
+            onSelectOrder={handleSelectOrder}
+            onOpenNewOrder={handleOpenNewOrder}
+          />
         </aside>
 
         <section className="order-1 min-w-0 space-y-4 lg:order-1 xl:order-2">
@@ -1399,9 +1399,9 @@ const PDV: React.FC = () => {
               subtotal={selectedOrder?.subtotal ?? '0'}
               discount={selectedOrder?.discount ?? '0'}
               total={selectedOrder?.total ?? '0'}
-              getProductName={(productId: number) => productsById.get(productId)?.name ?? `Produto ${productId}`}
-              onEditItem={(item) => void handleEditItem(item)}
-              onDeleteItem={(item) => void handleDeleteItem(item)}
+              getProductName={getProductName}
+              onEditItem={handleEditItem}
+              onDeleteItem={handleDeleteItem}
             />
           </div>
 
@@ -1476,7 +1476,7 @@ const PDV: React.FC = () => {
           <div className="mb-3 flex items-center justify-between gap-2">
             <h2 className="text-base font-semibold">Categorias</h2>
             <button
-              onClick={() => void fetchCatalog()}
+              onClick={handleRefreshCatalog}
               className="rounded-lg border border-brand-200 bg-white px-3 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50"
             >
               Atualizar
@@ -1492,7 +1492,7 @@ const PDV: React.FC = () => {
             categoryImages={categoryImages}
             onSelectCategory={setSelectedCategoryId}
             onSearchTermChange={setProductSearchTerm}
-            onAddProduct={(product) => void handleAddProduct(product)}
+            onAddProduct={handleAddProductClick}
           />
           </div>
         </aside>

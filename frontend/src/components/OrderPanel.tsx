@@ -23,7 +23,7 @@ const formatBRL = (value: string | number) => {
   return numberValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
-export const OrderPanel: React.FC<OrderPanelProps> = ({ items, subtotal, discount, total, getProductName, onEditItem, onDeleteItem }) => {
+const OrderPanelComponent: React.FC<OrderPanelProps> = ({ items, subtotal, discount, total, getProductName, onEditItem, onDeleteItem }) => {
   return (
     <div className="rounded-xl border border-brand-100 bg-white p-4">
       <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 border-b border-brand-100 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -80,3 +80,5 @@ export const OrderPanel: React.FC<OrderPanelProps> = ({ items, subtotal, discoun
     </div>
   )
 }
+
+export const OrderPanel = React.memo(OrderPanelComponent)
