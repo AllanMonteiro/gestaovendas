@@ -4,6 +4,7 @@ import { api } from '../api/client'
 type Category = {
   id: number
   name: string
+  price?: string | null
 }
 
 type Product = {
@@ -86,6 +87,12 @@ const Produtos: React.FC = () => {
     return map
   }, [categories])
 
+  const categoryPriceById = useMemo(() => {
+    const map = new Map<number, string>()
+    categories.forEach((category) => map.set(category.id, String(category.price || '0')))
+    return map
+  }, [categories])
+
   const loadData = async () => {
     try {
       const [productsResp, categoriesResp] = await Promise.all([
@@ -95,21 +102,25 @@ const Produtos: React.FC = () => {
       setProducts(productsResp.data)
       setCategories(categoriesResp.data)
 
-      const defaultPrice: ProductPrice = {
-        price: '0',
-        cost: '0',
-        freight: '0',
-        other: '0',
-        tax_pct: '0',
-        overhead_pct: '0',
-        margin_pct: '0',
-        ideal_price: '0',
-        profit: '0'
-      }
+      const fallbackMap = Object.fromEntries(
+        productsResp.data.map((product) => [
+          product.id,
+          {
+            price: String(categoriesResp.data.find((category) => category.id === product.category)?.price || '0'),
+            cost: '0',
+            freight: '0',
+            other: '0',
+            tax_pct: '0',
+            overhead_pct: '0',
+            margin_pct: '0',
+            ideal_price: '0',
+            profit: '0'
+          } satisfies ProductPrice
+        ])
+      )
 
       const productIds = productsResp.data.map((product) => product.id)
       const productIdSet = new Set(productIds)
-      const fallbackMap = Object.fromEntries(productIds.map((id) => [id, defaultPrice]))
 
       try {
         const pricesResp = await api.get<ProductPrice[]>('/api/products/prices')
@@ -140,6 +151,7 @@ const Produtos: React.FC = () => {
 
   const applyCategoryDefaults = (categoryId: number) => {
     const referenceProduct = products.find(p => p.category === categoryId)
+    const categoryBasePrice = Number(categoryPriceById.get(categoryId) || '0')
     if (referenceProduct && priceMap[referenceProduct.id]) {
       const pInfo = priceMap[referenceProduct.id]
       setCreateCost(formatInputBRL(Number(pInfo.cost || 0)))
@@ -148,7 +160,7 @@ const Produtos: React.FC = () => {
       setCreateTaxPct(formatInputBRL(Number(pInfo.tax_pct || 0)))
       setCreateOverheadPct(formatInputBRL(Number(pInfo.overhead_pct || 0)))
       setCreateMarginPct(formatInputBRL(Number(pInfo.margin_pct || 0)))
-      setCreatePrice(formatInputBRL(Number(pInfo.price || 0)))
+      setCreatePrice(formatInputBRL(Number(pInfo.price || categoryBasePrice)))
       setCreateSoldByWeight(referenceProduct.sold_by_weight)
     } else {
       setCreateCost('0,00')
@@ -156,7 +168,7 @@ const Produtos: React.FC = () => {
       setCreateOther('0,00')
       setCreateTaxPct('0,00')
       setCreateOverheadPct('0,00')
-      setCreatePrice('0,00')
+      setCreatePrice(formatInputBRL(categoryBasePrice))
       setCreateMarginPct('30,00')
       setCreateSoldByWeight(false)
     }

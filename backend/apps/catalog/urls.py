@@ -4,6 +4,7 @@ from apps.catalog import views
 urlpatterns = [
     path('categories', views.CategoryListView.as_view()),
     path('categories/<int:pk>', views.CategoryUpsertView.as_view()),
+    path('categories/<int:id>/apply-price', views.CategoryApplyPriceView.as_view()),
     path('products', views.ProductListView.as_view()),
     path('products/prices', views.ProductPriceListView.as_view()),
     path('products/<int:pk>', views.ProductUpsertView.as_view()),

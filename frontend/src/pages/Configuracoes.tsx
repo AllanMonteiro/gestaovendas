@@ -36,6 +36,10 @@ type Category = {
   price?: string | null
 }
 
+type CategoryPriceApplyResponse = {
+  updated_products: number
+}
+
 type Role = {
   id: number
   name: string
@@ -63,10 +67,13 @@ const Configuracoes: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [feedback, setFeedback] = useState('')
   const [categories, setCategories] = useState<Category[]>([])
+  const [categoryPrices, setCategoryPrices] = useState<Record<string, string>>({})
   const [categoryImages, setCategoryImages] = useState<Record<string, string>>({})
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('')
   const [selectedCategoryImage, setSelectedCategoryImage] = useState<string>('')
   const [selectedCategoryPrice, setSelectedCategoryPrice] = useState<string>('')
+  const [savingCategoryId, setSavingCategoryId] = useState<string>('')
+  const [applyingCategoryId, setApplyingCategoryId] = useState<string>('')
 
   const [storeName, setStoreName] = useState('')
   const [companyName, setCompanyName] = useState('')
@@ -136,14 +143,17 @@ const Configuracoes: React.FC = () => {
       setBaud(String(cfg.scale?.baud ?? 9600))
       setScaleEnabled(Boolean(cfg.scale?.enabled ?? true))
       setCategories(categoriesResponse.data)
+      const nextCategoryPrices = Object.fromEntries(
+        categoriesResponse.data.map((category) => [String(category.id), String(category.price || '')])
+      )
+      setCategoryPrices(nextCategoryPrices)
       setCategoryImages(cfg.category_images ?? {})
       const firstCategoryId = categoriesResponse.data[0]?.id
       if (firstCategoryId) {
         const key = String(firstCategoryId)
-        const cat = categoriesResponse.data[0]
         setSelectedCategoryId(key)
         setSelectedCategoryImage((cfg.category_images ?? {})[key] ?? '')
-        setSelectedCategoryPrice(cat.price || '')
+        setSelectedCategoryPrice(nextCategoryPrices[key] ?? '')
       } else {
         setSelectedCategoryId('')
         setSelectedCategoryImage('')
@@ -185,8 +195,21 @@ const Configuracoes: React.FC = () => {
   const handleSelectCategory = (value: string) => {
     setSelectedCategoryId(value)
     setSelectedCategoryImage(categoryImages[value] ?? '')
-    const cat = categories.find(c => String(c.id) === value)
-    setSelectedCategoryPrice(cat?.price || '')
+    setSelectedCategoryPrice(categoryPrices[value] ?? '')
+  }
+
+  const handleCategoryPriceChange = (categoryId: string, value: string) => {
+    if (!categoryId) {
+      setSelectedCategoryPrice(value)
+      return
+    }
+    setCategoryPrices((prev) => ({
+      ...prev,
+      [categoryId]: value
+    }))
+    if (selectedCategoryId === categoryId) {
+      setSelectedCategoryPrice(value)
+    }
   }
 
   const handlePickCategoryImage = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -217,14 +240,46 @@ const Configuracoes: React.FC = () => {
 
   const handleSaveCategoryPrice = async () => {
     if (!selectedCategoryId) return
+    await saveCategoryPrice(selectedCategoryId)
+  }
+
+  const saveCategoryPrice = async (categoryId: string) => {
     try {
-      await api.put(`/api/categories/${selectedCategoryId}`, {
-        price: selectedCategoryPrice.replace(',', '.') || null
+      setSavingCategoryId(categoryId)
+      const nextPrice = categoryPrices[categoryId] ?? ''
+      await api.put(`/api/categories/${categoryId}`, {
+        price: nextPrice.replace(',', '.') || null
       })
-      setCategories(prev => prev.map(c => String(c.id) === selectedCategoryId ? { ...c, price: selectedCategoryPrice } : c))
-      setFeedback('Preço da categoria salvo com sucesso.')
+      setCategories((prev) => prev.map((category) => (String(category.id) === categoryId ? { ...category, price: nextPrice } : category)))
+      if (selectedCategoryId === categoryId) {
+        setSelectedCategoryPrice(nextPrice)
+      }
+      setFeedback('Preco da categoria salvo com sucesso.')
     } catch {
-      setFeedback('Falha ao salvar preço da categoria.')
+      setFeedback('Falha ao salvar preco da categoria.')
+    } finally {
+      setSavingCategoryId('')
+    }
+  }
+
+  const handleApplyCategoryPrice = async (categoryId: string) => {
+    try {
+      setApplyingCategoryId(categoryId)
+      const nextPrice = (categoryPrices[categoryId] ?? '').trim()
+      const response = await api.post<CategoryPriceApplyResponse>(`/api/categories/${categoryId}/apply-price`, {
+        price: nextPrice.replace(',', '.') || '0'
+      })
+      setCategories((prev) =>
+        prev.map((category) => (String(category.id) === categoryId ? { ...category, price: nextPrice } : category))
+      )
+      if (selectedCategoryId === categoryId) {
+        setSelectedCategoryPrice(nextPrice)
+      }
+      setFeedback(`Preco aplicado em ${response.data.updated_products} produto(s) da categoria.`)
+    } catch {
+      setFeedback('Falha ao aplicar o preco da categoria nos produtos.')
+    } finally {
+      setApplyingCategoryId('')
     }
   }
 
@@ -566,16 +621,17 @@ const Configuracoes: React.FC = () => {
             <div className="flex gap-1">
               <input
                 value={selectedCategoryPrice}
-                onChange={(e) => setSelectedCategoryPrice(e.target.value)}
+                onChange={(e) => handleCategoryPriceChange(selectedCategoryId, e.target.value)}
                 placeholder="R$ 0,00"
                 className="w-full rounded-lg border border-brand-100 px-3 py-2 text-sm"
               />
               <button
                 type="button"
                 onClick={() => void handleSaveCategoryPrice()}
-                className="rounded-lg bg-brand-100 px-3 py-2 text-xs font-bold text-brand-700"
+                disabled={!selectedCategoryId || savingCategoryId === selectedCategoryId}
+                className="rounded-lg bg-brand-100 px-3 py-2 text-xs font-bold text-brand-700 disabled:opacity-50"
               >
-                Salvar
+                {savingCategoryId === selectedCategoryId ? 'Salvando...' : 'Salvar'}
               </button>
             </div>
           </div>
@@ -596,6 +652,67 @@ const Configuracoes: React.FC = () => {
           ) : (
             <p className="text-sm text-slate-500">Nenhuma imagem selecionada para a categoria.</p>
           )}
+        </div>
+      </div>
+
+      <div className="panel space-y-3 p-4 lg:col-span-2">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-semibold">Precos por categoria</h2>
+            <p className="text-sm text-slate-500">Defina o preco base da categoria e, se quiser, aplique o mesmo valor a todos os produtos dela.</p>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto rounded-xl border border-brand-100">
+          <table className="min-w-full text-sm">
+            <thead className="bg-brand-50 text-left text-slate-600">
+              <tr>
+                <th className="px-3 py-2 font-medium">Categoria</th>
+                <th className="px-3 py-2 font-medium">Preco base</th>
+                <th className="px-3 py-2 text-right font-medium">Acoes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {categories.map((category) => {
+                const categoryId = String(category.id)
+                const savingThisRow = savingCategoryId === categoryId
+                const applyingThisRow = applyingCategoryId === categoryId
+                return (
+                  <tr key={category.id} className="border-t border-brand-100">
+                    <td className="px-3 py-3 font-medium text-slate-800">{category.name}</td>
+                    <td className="px-3 py-3">
+                      <input
+                        value={categoryPrices[categoryId] ?? ''}
+                        onChange={(event) => handleCategoryPriceChange(categoryId, event.target.value)}
+                        placeholder="R$ 0,00"
+                        className="w-full rounded-lg border border-brand-100 px-3 py-2 text-sm"
+                      />
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void saveCategoryPrice(categoryId)}
+                          disabled={savingThisRow}
+                          className="rounded-lg border border-brand-200 px-3 py-2 text-xs font-semibold text-brand-700 disabled:opacity-50"
+                        >
+                          {savingThisRow ? 'Salvando...' : 'Salvar categoria'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleApplyCategoryPrice(categoryId)}
+                          disabled={applyingThisRow}
+                          className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                        >
+                          {applyingThisRow ? 'Aplicando...' : 'Aplicar aos produtos'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
 

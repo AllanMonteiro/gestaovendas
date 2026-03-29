@@ -1,4 +1,5 @@
 from decimal import Decimal
+from django.db import transaction
 from rest_framework import generics, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -33,6 +34,55 @@ class CategoryUpsertView(generics.CreateAPIView, generics.UpdateAPIView):
         if auth_is_required() and not user_has_permission(self.request.user, 'catalog.manage'):
             return [permissions.IsAdminUser()]
         return [permissions.IsAuthenticated()] if auth_is_required() else [permissions.AllowAny()]
+
+
+class CategoryApplyPriceView(APIView):
+    @staticmethod
+    def _to_decimal(value, default='0'):
+        raw = value if value is not None else default
+        return Decimal(str(raw))
+
+    @transaction.atomic
+    def post(self, request, id):
+        if auth_is_required() and not user_has_permission(request.user, 'catalog.manage'):
+            return Response({'detail': 'Forbidden'}, status=403)
+
+        category = Category.objects.filter(id=id).first()
+        if category is None:
+            return Response({'detail': 'Category not found'}, status=404)
+
+        price_value = request.data.get('price', category.price if category.price is not None else '0')
+        price = self._to_decimal(price_value)
+        category.price = price
+        category.save(update_fields=['price'])
+
+        products = list(Product.objects.filter(category_id=category.id))
+        updated = 0
+        for product in products:
+            product_price, created = ProductPrice.objects.get_or_create(
+                product_id=product.id,
+                store_id=1,
+                defaults={
+                    'price': price,
+                    'cost': Decimal('0'),
+                    'freight': Decimal('0'),
+                    'other': Decimal('0'),
+                    'tax_pct': Decimal('0'),
+                    'overhead_pct': Decimal('0'),
+                    'margin_pct': Decimal('0'),
+                },
+            )
+            if not created:
+                product_price.price = price
+                product_price.save(update_fields=['price'])
+            updated += 1
+
+        return Response({
+            'status': 'ok',
+            'category_id': category.id,
+            'price': str(price),
+            'updated_products': updated,
+        })
 
 
 class ProductListView(generics.ListCreateAPIView):
