@@ -27,6 +27,12 @@ type CashStatusResponse = {
   }
 }
 
+type CashSessionOpenResponse = {
+  id: number
+  opened_at: string
+  initial_float: string
+}
+
 type PaymentAgg = {
   method?: 'CASH' | 'PIX' | 'CARD' | 'CARD_CREDIT' | 'CARD_DEBIT'
   payment_method?: 'CASH' | 'PIX' | 'CARD' | 'CARD_CREDIT' | 'CARD_DEBIT'
@@ -280,9 +286,24 @@ const Caixa: React.FC = () => {
       return
     }
     try {
-      await api.post('/api/cash/open', { initial_float: initialFloat.replace(',', '.') })
+      const normalizedInitialFloat = initialFloat.replace(',', '.')
+      const response = await api.post<CashSessionOpenResponse>('/api/cash/open', { initial_float: normalizedInitialFloat })
+      setCashStatus({
+        open: true,
+        session: {
+          id: response.data.id,
+          opened_at: response.data.opened_at,
+          initial_float: response.data.initial_float,
+        },
+        totals: {
+          cash_sales: '0',
+          reforco: '0',
+          sangria: '0',
+          current_cash_estimated: response.data.initial_float,
+        }
+      })
       const slipPayload = buildCashSlipPayload('ABERTURA DE CAIXA', [
-        { label: 'Fundo inicial', value: formatBRL(initialFloat.replace(',', '.')) },
+        { label: 'Fundo inicial', value: formatBRL(normalizedInitialFloat) },
         { label: 'Data', value: new Date().toLocaleString('pt-BR') }
       ])
       let printed = false

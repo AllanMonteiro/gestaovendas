@@ -2,7 +2,6 @@ from decimal import Decimal
 import logging
 import re
 from datetime import datetime, time, timedelta
-from django.core.cache import cache
 from django.core.files.storage import default_storage
 from django.db.models import Count, Sum, Q
 from rest_framework.response import Response
@@ -29,9 +28,6 @@ from apps.loyalty.models import Customer
 from apps.reports import queries as report_queries
 
 logger = logging.getLogger(__name__)
-CASH_DASHBOARD_CACHE_TTL = 15
-
-
 def _is_date_only(value: str) -> bool:
     return isinstance(value, str) and 'T' not in value and ' ' not in value and ':' not in value
 
@@ -436,10 +432,6 @@ class CashDashboardView(APIView):
         from_date = request.query_params.get('from')
         to_date = request.query_params.get('to')
         today = timezone.localdate().isoformat()
-        cache_key = f'cash_dashboard:{from_date or ""}:{to_date or ""}:{today}'
-        cached_payload = cache.get(cache_key)
-        if cached_payload is not None:
-            return Response(cached_payload)
 
         status_response = CashStatusView().get(request).data
         orders_qs = Order.objects.filter(status=Order.STATUS_PAID, closed_at__isnull=False).select_related('customer')
@@ -465,7 +457,6 @@ class CashDashboardView(APIView):
             'config': StoreConfigUiSerializer(config).data,
             'cash_history': CashSessionSerializer(history_qs, many=True).data,
         }
-        cache.set(cache_key, payload, CASH_DASHBOARD_CACHE_TTL)
         return Response(payload)
 
 
