@@ -94,6 +94,7 @@ const formatBRL = (value: string | number) => {
 }
 
 const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100
+const round3 = (value: number) => Math.round((value + Number.EPSILON) * 1000) / 1000
 
 const parseScaleWeightInput = (value: string) => {
   const normalized = value.trim().replace(',', '.')
@@ -688,7 +689,7 @@ const PDV: React.FC = () => {
 
     const payload = {
       product_id: scaleProduct.id,
-      qty: round2(normalizedScaleWeight / 1000),
+      qty: round3(normalizedScaleWeight / 1000),
       weight_grams: normalizedScaleWeight
     }
 
