@@ -122,6 +122,11 @@ def cash_history(from_date=None, to_date=None):
         expected = reconciliation.get('expected') or {}
         counted = reconciliation.get('counted') or {}
         divergence = reconciliation.get('divergence') or {}
+        initial_float = Decimal(str(breakdown.get('initial_float', session.initial_float) or 0))
+        cash_sales = Decimal(str(breakdown.get('cash_sales', expected.get('cash', 0)) or 0))
+        reforco = Decimal(str(breakdown.get('reforco', 0) or 0))
+        sangria = Decimal(str(breakdown.get('sangria', 0) or 0))
+        expected_cash = initial_float + cash_sales + reforco - sangria
         history.append({
             'id': session.id,
             'opened_at': session.opened_at,
@@ -130,11 +135,11 @@ def cash_history(from_date=None, to_date=None):
             'status': session.status,
             'reconciliation_data': reconciliation,
             'cash_breakdown': {
-                'initial_float': breakdown.get('initial_float', session.initial_float),
-                'cash_sales': breakdown.get('cash_sales', expected.get('cash', 0)),
-                'reforco': breakdown.get('reforco', 0),
-                'sangria': breakdown.get('sangria', 0),
-                'expected_cash': expected.get('cash', 0),
+                'initial_float': initial_float,
+                'cash_sales': cash_sales,
+                'reforco': reforco,
+                'sangria': sangria,
+                'expected_cash': expected_cash,
                 'counted_cash': counted.get('cash', 0),
                 'divergence_cash': divergence.get('cash', 0),
             },

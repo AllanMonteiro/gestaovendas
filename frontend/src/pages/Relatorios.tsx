@@ -239,8 +239,6 @@ const Relatorios: React.FC = () => {
     { label: 'Descontos', value: formatBRL(summary?.total_discount) },
     { label: 'Pedidos cancelados', value: formatNumber(summary?.canceled_count) },
     { label: 'Total cancelado', value: formatBRL(summary?.canceled_total) },
-    { label: 'Entradas em dinheiro', value: formatBRL(cashSummary?.cash_sales_total) },
-    { label: 'Saldo esperado em caixa', value: formatBRL(cashSummary?.expected_cash_total) },
   ]
 
   const selectedMonthLabel = new Date(`${selectedMonth}-01T00:00:00`).toLocaleDateString('pt-BR', {
@@ -361,25 +359,7 @@ const Relatorios: React.FC = () => {
             {formatNumber(cashSummary?.sessions_count)} fechamento(s)
           </span>
         </div>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <article className="rounded-xl border border-brand-100 bg-brand-50/60 p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Fundo inicial</p>
-            <p className="mt-2 text-xl font-semibold">{formatBRL(cashSummary?.initial_float_total)}</p>
-          </article>
-          <article className="rounded-xl border border-brand-100 bg-brand-50/60 p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Reforcos</p>
-            <p className="mt-2 text-xl font-semibold">{formatBRL(cashSummary?.reforco_total)}</p>
-          </article>
-          <article className="rounded-xl border border-brand-100 bg-brand-50/60 p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Sangrias</p>
-            <p className="mt-2 text-xl font-semibold">{formatBRL(cashSummary?.sangria_total)}</p>
-          </article>
-          <article className="rounded-xl border border-brand-100 bg-brand-50/60 p-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Saldo esperado em dinheiro</p>
-            <p className="mt-2 text-xl font-semibold">{formatBRL(cashSummary?.expected_cash_total)}</p>
-          </article>
-        </div>
-        <div className="mt-4 overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-slate-500">
