@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sorveteria-pos-v6'
+const CACHE_NAME = 'sorveteria-pos-v7'
 const ASSETS = ['/', '/index.html', '/manifest.json']
 
 self.addEventListener('install', (event) => {
@@ -15,6 +15,12 @@ self.addEventListener('activate', (event) => {
     )
   )
   self.clients.claim()
+})
+
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SKIP_WAITING') {
+    self.skipWaiting()
+  }
 })
 
 self.addEventListener('fetch', (event) => {

@@ -35,6 +35,34 @@ class CategoryUpsertView(generics.CreateAPIView, generics.UpdateAPIView):
             return [permissions.IsAdminUser()]
         return [permissions.IsAuthenticated()] if auth_is_required() else [permissions.AllowAny()]
 
+    def delete(self, request, *args, **kwargs):
+        if auth_is_required() and not user_has_permission(request.user, 'catalog.manage'):
+            return Response({'detail': 'Forbidden'}, status=403)
+
+        category = self.get_object()
+        linked_products = Product.objects.filter(category=category).count()
+        if linked_products:
+            return Response(
+                {
+                    'detail': f'Nao e possivel excluir esta categoria porque existem {linked_products} produto(s) vinculados a ela.'
+                },
+                status=400,
+            )
+
+        category_id = category.id
+        category.delete()
+
+        from apps.sales.services import get_store_config
+
+        config = get_store_config()
+        category_key = str(category_id)
+        if isinstance(config.category_images, dict) and category_key in config.category_images:
+            next_images = {key: value for key, value in config.category_images.items() if key != category_key}
+            config.category_images = next_images
+            config.save(update_fields=['category_images'])
+
+        return Response({'status': 'ok', 'deleted_category_id': category_id})
+
 
 class CategoryApplyPriceView(APIView):
     @staticmethod

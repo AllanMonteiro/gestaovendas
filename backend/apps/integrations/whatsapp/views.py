@@ -13,6 +13,19 @@ from .client import WhatsAppClient
 
 logger = logging.getLogger(__name__)
 
+
+def _delivery_customer_name(order):
+    meta = getattr(order, "delivery_meta", None)
+    if meta and meta.customer_name:
+        return meta.customer_name
+    customer = getattr(order, "customer", None)
+    return getattr(customer, "name", None)
+
+
+def _delivery_status(order):
+    meta = getattr(order, "delivery_meta", None)
+    return getattr(meta, "status", None) or "novo"
+
 @csrf_exempt
 def webhook(request):
     # Lookup token on each request to ensure fresh settings from Render env
@@ -111,9 +124,9 @@ def webhook(request):
                     # Real-time Broadcast to Dashboard
                     broadcast_delivery_event('order_created', {
                         'id': order.id,
-                        'customer_name': order.customer_name,
+                        'customer_name': _delivery_customer_name(order),
                         'total': str(order.total),
-                        'status': order.status
+                        'status': _delivery_status(order)
                     })
 
             except Exception as ai_err:

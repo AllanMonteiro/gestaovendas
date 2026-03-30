@@ -1,5 +1,4 @@
 from apps.sales.models import Order as SalesOrder, CashSession, CashMove
-from apps.orders.models import Order as WhatsappOrder
 from apps.loyalty.models import LoyaltyMove, LoyaltyAccount
 from apps.catalog.models import Product
 
@@ -16,10 +15,10 @@ def reset_all():
     sessions_deleted, _ = CashSession.objects.all().delete()
     print(f"Sessões de caixa removidas: {sessions_deleted}")
     
-    # 3. Deletar pedidos de WhatsApp (Orders app)
-    whatsapp_deleted, _ = WhatsappOrder.objects.all().delete()
-    print(f"Pedidos WhatsApp removidos: {whatsapp_deleted}")
-    
+    # 3. Deletar pedidos de delivery/WhatsApp no dominio atual de vendas
+    delivery_deleted, _ = SalesOrder.objects.filter(delivery_meta__isnull=False).delete()
+    print(f"Pedidos Delivery/WhatsApp removidos: {delivery_deleted}")
+
     # 4. Deletar movimentacoes de fidelidade
     loyalty_deleted, _ = LoyaltyMove.objects.all().delete()
     print(f"Movimentações de fidelidade removidas: {loyalty_deleted}")

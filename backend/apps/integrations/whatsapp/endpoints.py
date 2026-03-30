@@ -4,6 +4,15 @@ from .parser_ai import parse_order_hybrid
 from .services_ai import create_delivery_order_from_parsed
 from .client import WhatsAppClient
 
+
+def _customer_name(order):
+    meta = getattr(order, 'delivery_meta', None)
+    if meta and meta.customer_name:
+        return meta.customer_name
+    customer = getattr(order, 'customer', None)
+    return getattr(customer, 'name', None)
+
+
 @api_view(['POST'])
 def manual_parse_order(request):
     """
@@ -32,8 +41,8 @@ def manual_parse_order(request):
 
         return Response({
             "ok": True, 
-            "order_id": order.id,
-            "customer_name": order.customer_name,
+            "order_id": str(order.id),
+            "customer_name": _customer_name(order),
             "total": str(order.total)
         })
     except Exception as e:

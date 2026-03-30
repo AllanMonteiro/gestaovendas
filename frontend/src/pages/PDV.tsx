@@ -301,8 +301,10 @@ const PDV: React.FC = () => {
     if (!normalizedSearch) {
       return []
     }
-    return products.filter((product) => product.name.toLowerCase().includes(normalizedSearch)).slice(0, 12)
-  }, [deferredProductSearchTerm, products])
+    const searchableProducts =
+      selectedCategoryId === null ? products : products.filter((product) => product.category === selectedCategoryId)
+    return searchableProducts.filter((product) => product.name.toLowerCase().includes(normalizedSearch)).slice(0, 12)
+  }, [deferredProductSearchTerm, products, selectedCategoryId])
 
   const visibleProducts = useMemo(() => {
     if (selectedCategoryId === null) {

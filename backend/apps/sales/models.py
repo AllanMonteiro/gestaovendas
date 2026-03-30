@@ -55,6 +55,46 @@ class Order(models.Model):
         ]
 
 
+class DeliveryOrderMeta(models.Model):
+    SOURCE_PDV = 'pdv'
+    SOURCE_WHATSAPP = 'whatsapp'
+    SOURCE_CHOICES = [
+        (SOURCE_PDV, 'PDV'),
+        (SOURCE_WHATSAPP, 'WhatsApp'),
+    ]
+
+    STATUS_NEW = 'novo'
+    STATUS_PREPARATION = 'preparo'
+    STATUS_DISPATCHED = 'despachado'
+    STATUS_DELIVERED = 'entregue'
+    STATUS_CHOICES = [
+        (STATUS_NEW, 'Novo'),
+        (STATUS_PREPARATION, 'Em preparo'),
+        (STATUS_DISPATCHED, 'Saindo para entrega'),
+        (STATUS_DELIVERED, 'Entregue'),
+    ]
+
+    order = models.OneToOneField(Order, on_delete=models.CASCADE, related_name='delivery_meta')
+    customer_name = models.CharField(max_length=150)
+    customer_phone = models.CharField(max_length=30, blank=True, null=True)
+    address = models.TextField(blank=True, null=True)
+    payment_method = models.CharField(max_length=50, blank=True, null=True)
+    notes = models.TextField(blank=True, null=True)
+    cep = models.CharField(max_length=15, blank=True, null=True)
+    neighborhood = models.CharField(max_length=100, blank=True, null=True)
+    delivery_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    pix_payload = models.TextField(blank=True, null=True)
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default=SOURCE_WHATSAPP)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_NEW)
+    raw_items = models.JSONField(default=list, blank=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['status']),
+            models.Index(fields=['source']),
+        ]
+
+
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey(Product, on_delete=models.PROTECT)

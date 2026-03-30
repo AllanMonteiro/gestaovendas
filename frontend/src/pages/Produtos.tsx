@@ -51,6 +51,7 @@ const Produtos: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('')
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showCreateCategoryModal, setShowCreateCategoryModal] = useState(false)
+  const [showDeleteCategoryModal, setShowDeleteCategoryModal] = useState(false)
   const [createCategory, setCreateCategory] = useState('')
   const [createName, setCreateName] = useState('')
   const [createCost, setCreateCost] = useState('0,00')
@@ -67,6 +68,8 @@ const Produtos: React.FC = () => {
   const [createCategorySortOrder, setCreateCategorySortOrder] = useState('0')
   const [createCategoryActive, setCreateCategoryActive] = useState(true)
   const [creatingCategory, setCreatingCategory] = useState(false)
+  const [deleteCategoryId, setDeleteCategoryId] = useState('')
+  const [deletingCategory, setDeletingCategory] = useState(false)
   const [creatingProduct, setCreatingProduct] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [editName, setEditName] = useState('')
@@ -104,6 +107,18 @@ const Produtos: React.FC = () => {
       return `${product.name} ${categoryName}`.toLowerCase().includes(normalizedSearch)
     })
   }, [categoryById, products, searchTerm])
+
+  const selectedDeleteCategory = useMemo(
+    () => categories.find((category) => String(category.id) === deleteCategoryId) ?? null,
+    [categories, deleteCategoryId]
+  )
+
+  const selectedDeleteCategoryProductsCount = useMemo(() => {
+    if (!deleteCategoryId) {
+      return 0
+    }
+    return products.filter((product) => String(product.category) === deleteCategoryId).length
+  }, [deleteCategoryId, products])
 
   const loadData = async () => {
     try {
@@ -226,6 +241,15 @@ const Produtos: React.FC = () => {
     setShowCreateCategoryModal(true)
   }
 
+  const openDeleteCategoryModal = () => {
+    if (categories.length === 0) {
+      setFeedback('Nao ha categorias cadastradas para excluir.')
+      return
+    }
+    setDeleteCategoryId(String(categories[0].id))
+    setShowDeleteCategoryModal(true)
+  }
+
   const handleCreateCategory = async () => {
     if (!createCategoryName.trim()) {
       setFeedback('Informe o nome da categoria.')
@@ -254,6 +278,37 @@ const Produtos: React.FC = () => {
       setFeedback(getApiErrorText(error, 'Falha ao criar categoria.'))
     } finally {
       setCreatingCategory(false)
+    }
+  }
+
+  const handleDeleteCategory = async () => {
+    if (!deleteCategoryId) {
+      setFeedback('Selecione uma categoria para excluir.')
+      return
+    }
+
+    if (selectedDeleteCategoryProductsCount > 0) {
+      setFeedback('Remova ou mova os produtos desta categoria antes de exclui-la.')
+      return
+    }
+
+    const categoryName = selectedDeleteCategory?.name || 'esta categoria'
+    const confirmed = window.confirm(`Excluir ${categoryName}? Essa acao nao pode ser desfeita.`)
+    if (!confirmed) {
+      return
+    }
+
+    setDeletingCategory(true)
+    try {
+      await api.delete(`/api/categories/${deleteCategoryId}`)
+      setFeedback('Categoria excluida com sucesso.')
+      setShowDeleteCategoryModal(false)
+      setDeleteCategoryId('')
+      await loadData()
+    } catch (error: unknown) {
+      setFeedback(getApiErrorText(error, 'Falha ao excluir categoria.'))
+    } finally {
+      setDeletingCategory(false)
     }
   }
 
@@ -468,6 +523,9 @@ const Produtos: React.FC = () => {
           </button>
           <button onClick={openCreateCategoryModal} className="px-3 py-2 rounded-lg border border-brand-300 text-brand-700">
             Nova Categoria
+          </button>
+          <button onClick={openDeleteCategoryModal} className="px-3 py-2 rounded-lg border border-rose-300 text-rose-700">
+            Apagar Categoria
           </button>
           <button onClick={() => openCreateProductModal()} className="px-3 py-2 rounded-lg bg-brand-600 text-white">
             Novo Produto
@@ -805,6 +863,54 @@ const Produtos: React.FC = () => {
                 disabled={creatingCategory}
               >
                 {creatingCategory ? 'Salvando...' : 'Salvar categoria'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showDeleteCategoryModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl space-y-4">
+            <h3 className="text-lg font-semibold text-rose-700">Apagar categoria</h3>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-slate-600">Categoria</label>
+                <select
+                  value={deleteCategoryId}
+                  onChange={(event) => setDeleteCategoryId(event.target.value)}
+                  className="mt-1 w-full rounded-lg border border-brand-100 px-3 py-2 text-sm bg-white"
+                >
+                  {categories.map((category) => (
+                    <option key={category.id} value={String(category.id)}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+                {selectedDeleteCategoryProductsCount > 0
+                  ? `Esta categoria possui ${selectedDeleteCategoryProductsCount} produto(s) vinculado(s). Remova ou mova esses produtos antes de excluir.`
+                  : 'Essa categoria nao possui produtos vinculados e pode ser excluida com seguranca.'}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowDeleteCategoryModal(false)}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm"
+                disabled={deletingCategory}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => void handleDeleteCategory()}
+                className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                disabled={deletingCategory || selectedDeleteCategoryProductsCount > 0}
+              >
+                {deletingCategory ? 'Excluindo...' : 'Excluir categoria'}
               </button>
             </div>
           </div>

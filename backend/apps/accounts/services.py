@@ -74,6 +74,41 @@ def get_user_permission_codes(user: User) -> list[str]:
     )
 
 
+def build_user_access_maps(users: Iterable[User]) -> tuple[dict[int, list[int]], dict[int, list[str]]]:
+    user_list = [user for user in users if getattr(user, 'id', None) is not None]
+    if not user_list:
+        return {}, {}
+
+    role_ids_map: dict[int, list[int]] = {}
+    all_role_ids: set[int] = set()
+    for user_id, role_id in UserRole.objects.filter(user_id__in=[user.id for user in user_list]).values_list('user_id', 'role_id'):
+        role_ids_map.setdefault(user_id, []).append(role_id)
+        all_role_ids.add(role_id)
+
+    permission_codes_by_role: dict[int, list[str]] = {}
+    for role_id, code in (
+        RolePermission.objects.filter(role_id__in=all_role_ids)
+        .values_list('role_id', 'permission__code')
+        .order_by('permission__code')
+    ):
+        permission_codes_by_role.setdefault(role_id, []).append(code)
+
+    all_permission_codes = [code for code, _ in DEFAULT_PERMISSIONS]
+    permission_codes_map: dict[int, list[str]] = {}
+    for user in user_list:
+        if user.is_superuser:
+            permission_codes_map[user.id] = list(all_permission_codes)
+            continue
+        codes = {
+            code
+            for role_id in role_ids_map.get(user.id, [])
+            for code in permission_codes_by_role.get(role_id, [])
+        }
+        permission_codes_map[user.id] = sorted(codes)
+
+    return role_ids_map, permission_codes_map
+
+
 def sync_user_roles(user: User, role_ids: Iterable[int]) -> None:
     desired_ids = {int(role_id) for role_id in role_ids}
     current_ids = set(UserRole.objects.filter(user=user).values_list('role_id', flat=True))

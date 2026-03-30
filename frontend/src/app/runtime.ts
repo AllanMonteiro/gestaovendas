@@ -1,8 +1,24 @@
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '')
 
+const isLocalHostname = (hostname: string) =>
+  hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
+
+const shouldIgnoreConfiguredUrl = (configured: string) => {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  try {
+    const parsed = new URL(configured)
+    return isLocalHostname(parsed.hostname) && !isLocalHostname(window.location.hostname)
+  } catch {
+    return false
+  }
+}
+
 export const getApiBaseUrl = () => {
   const configured = import.meta.env.VITE_API_URL?.trim()
-  if (configured) {
+  if (configured && !shouldIgnoreConfiguredUrl(configured)) {
     return trimTrailingSlash(configured)
   }
   if (typeof window !== 'undefined') {
@@ -13,7 +29,7 @@ export const getApiBaseUrl = () => {
 
 export const getWebSocketBaseUrl = () => {
   const configured = import.meta.env.VITE_WS_URL?.trim()
-  if (configured) {
+  if (configured && !shouldIgnoreConfiguredUrl(configured)) {
     return trimTrailingSlash(configured)
   }
   if (typeof window !== 'undefined') {

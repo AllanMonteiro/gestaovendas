@@ -103,13 +103,7 @@ def ensure_open_cash_session() -> CashSession:
     return session
 
 
-@transaction.atomic
-def create_order_idempotent(*, order_type: str, table_label: str | None, customer=None, client_request_id=None) -> Order:
-    if client_request_id:
-        existing = Order.objects.filter(client_request_id=client_request_id).first()
-        if existing:
-            return existing
-    ensure_open_cash_session()
+def allocate_order_sequence() -> tuple:
     business_date = timezone.localdate()
     current_max = (
         Order.objects.select_for_update()
@@ -117,9 +111,20 @@ def create_order_idempotent(*, order_type: str, table_label: str | None, custome
         .aggregate(max_daily_number=models.Max('daily_number'))['max_daily_number']
         or 0
     )
+    return business_date, current_max + 1
+
+
+@transaction.atomic
+def create_order_idempotent(*, order_type: str, table_label: str | None, customer=None, client_request_id=None) -> Order:
+    if client_request_id:
+        existing = Order.objects.filter(client_request_id=client_request_id).first()
+        if existing:
+            return existing
+    ensure_open_cash_session()
+    business_date, daily_number = allocate_order_sequence()
     order = Order.objects.create(
         business_date=business_date,
-        daily_number=current_max + 1,
+        daily_number=daily_number,
         type=order_type,
         table_label=table_label,
         customer=customer,
@@ -383,7 +388,8 @@ def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_car
     if not session:
         raise ValueError('No open session')
     has_open_orders = Order.objects.filter(
-        status__in=[Order.STATUS_OPEN, Order.STATUS_SENT, Order.STATUS_READY]
+        status__in=[Order.STATUS_OPEN, Order.STATUS_SENT, Order.STATUS_READY],
+        delivery_meta__isnull=True,
     ).exists()
     if has_open_orders:
         raise ValueError('Existem pedidos em aberto. Feche/cancele todos antes de fechar o caixa.')
@@ -394,7 +400,8 @@ def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_car
     totals = Payment.objects.filter(
         order__status=Order.STATUS_PAID,
         order__closed_at__gte=session.opened_at,
-        order__closed_at__lte=session.closed_at
+        order__closed_at__lte=session.closed_at,
+        order__delivery_meta__isnull=True,
     ).aggregate(
         cash=models.Sum('amount', filter=models.Q(method=Payment.METHOD_CASH)),
         pix=models.Sum('amount', filter=models.Q(method=Payment.METHOD_PIX)),

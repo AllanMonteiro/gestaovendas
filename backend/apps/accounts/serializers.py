@@ -16,6 +16,18 @@ class RoleSerializer(serializers.ModelSerializer):
     permission_codes = serializers.SerializerMethodField()
 
     def get_permission_codes(self, obj):
+        permission_codes_map = self.context.get('role_permission_codes_map')
+        if isinstance(permission_codes_map, dict) and obj.id in permission_codes_map:
+            return permission_codes_map[obj.id]
+        prefetched = getattr(obj, '_prefetched_objects_cache', {}).get('rolepermission_set')
+        if prefetched is not None:
+            return sorted(
+                {
+                    role_permission.permission.code
+                    for role_permission in prefetched
+                    if getattr(role_permission, 'permission', None) is not None
+                }
+            )
         return list(obj.rolepermission_set.select_related('permission').values_list('permission__code', flat=True))
 
     class Meta:
@@ -28,9 +40,15 @@ class UserSerializer(serializers.ModelSerializer):
     permission_codes = serializers.SerializerMethodField()
 
     def get_role_ids(self, obj):
+        role_ids_map = self.context.get('user_role_ids_map')
+        if isinstance(role_ids_map, dict) and obj.id in role_ids_map:
+            return role_ids_map[obj.id]
         return get_user_role_ids(obj)
 
     def get_permission_codes(self, obj):
+        permission_codes_map = self.context.get('user_permission_codes_map')
+        if isinstance(permission_codes_map, dict) and obj.id in permission_codes_map:
+            return permission_codes_map[obj.id]
         return get_user_permission_codes(obj)
 
     class Meta:

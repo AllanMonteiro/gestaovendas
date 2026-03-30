@@ -4,11 +4,11 @@ import { connectWS } from '../api/ws'
 import '../styles.css'
 
 interface Order {
-  id: number
+  id: string
   customer_name: string
   customer_phone: string
   address: string
-  total: number
+  total: string
   status: string
   created_at: string
   source: string
@@ -74,7 +74,7 @@ const PedidosDelivery: React.FC = () => {
     }
   }, [])
 
-  const updateStatus = async (id: number, status: string) => {
+  const updateStatus = async (id: string, status: string) => {
     await api.patch(`/api/orders/${id}/`, { status })
     void fetchOrders()
   }

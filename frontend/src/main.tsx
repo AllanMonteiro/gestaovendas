@@ -53,6 +53,38 @@ ReactDOM.createRoot(root).render(
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
+    let refreshing = false
+
+    const requestImmediateActivation = (worker: ServiceWorker | null) => {
+      worker?.postMessage({ type: 'SKIP_WAITING' })
+    }
+
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (refreshing) {
+        return
+      }
+      refreshing = true
+      window.location.reload()
+    })
+
+    navigator.serviceWorker.register('/sw.js').then((registration) => {
+      if (registration.waiting) {
+        requestImmediateActivation(registration.waiting)
+      }
+
+      registration.addEventListener('updatefound', () => {
+        const nextWorker = registration.installing
+        if (!nextWorker) {
+          return
+        }
+        nextWorker.addEventListener('statechange', () => {
+          if (nextWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            requestImmediateActivation(nextWorker)
+          }
+        })
+      })
+
+      void registration.update()
+    }).catch(() => undefined)
   })
 }

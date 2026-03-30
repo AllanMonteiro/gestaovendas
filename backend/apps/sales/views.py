@@ -76,13 +76,29 @@ def _wants_items(request, default=True):
     return raw.strip().lower() in {'1', 'true', 'yes', 'on'}
 
 
+def _get_positive_int_param(request, name, default, *, maximum=None):
+    raw = request.query_params.get(name)
+    if raw in (None, ''):
+        value = default
+    else:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            value = default
+    if value < 1:
+        value = default
+    if maximum is not None:
+        value = min(value, maximum)
+    return value
+
+
 def _serialize_orders(orders, include_items=True):
     serializer_class = OrderSerializer if include_items else OrderSummarySerializer
     return serializer_class(orders, many=True).data
 
 
 def _orders_with_customer(include_items=True):
-    qs = Order.objects.select_related('customer')
+    qs = Order.objects.select_related('customer').filter(delivery_meta__isnull=True)
     if include_items:
         qs = qs.prefetch_related('items__product')
     return qs
@@ -406,6 +422,7 @@ class CashStatusView(APIView):
             method=Payment.METHOD_CASH,
             order__status=Order.STATUS_PAID,
             order__closed_at__gte=session.opened_at,
+            order__delivery_meta__isnull=True,
         ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
         reforco = moves['reforco'] or Decimal('0')
         sangria = moves['sangria'] or Decimal('0')
@@ -459,20 +476,29 @@ class CashDashboardView(APIView):
     def get(self, request):
         from_date = request.query_params.get('from')
         to_date = request.query_params.get('to')
+        orders_limit = _get_positive_int_param(request, 'orders_limit', 50, maximum=200)
+        moves_limit = _get_positive_int_param(request, 'moves_limit', 50, maximum=200)
+        history_limit = _get_positive_int_param(request, 'history_limit', 30, maximum=120)
         today = timezone.localdate().isoformat()
 
         status_response = CashStatusView().get(request).data
-        orders_qs = Order.objects.filter(status=Order.STATUS_PAID, closed_at__isnull=False).select_related('customer')
-        orders_qs = _apply_range_filter_for_field(orders_qs, 'closed_at', from_date, to_date).order_by('-closed_at')
+        orders_qs = Order.objects.filter(
+            status=Order.STATUS_PAID,
+            closed_at__isnull=False,
+            delivery_meta__isnull=True,
+        ).select_related('customer')
+        orders_qs = _apply_range_filter_for_field(orders_qs, 'closed_at', from_date, to_date).order_by('-closed_at')[:orders_limit]
         moves_qs = CashMove.objects.select_related('session', 'user').order_by('-created_at')
-        moves_qs = _apply_range_filter(moves_qs, from_date, to_date)
+        moves_qs = _apply_range_filter(moves_qs, from_date, to_date)[:moves_limit]
         history_qs = CashSession.objects.filter(status=CashSession.STATUS_CLOSED).order_by('-closed_at')
         if from_date or to_date:
             history_qs = _apply_range_filter_for_field(history_qs, 'closed_at', from_date, to_date)
+        history_qs = history_qs[:history_limit]
 
         config = services.get_store_config()
         open_orders_count = Order.objects.filter(
-            status__in=[Order.STATUS_OPEN, Order.STATUS_SENT, Order.STATUS_READY]
+            status__in=[Order.STATUS_OPEN, Order.STATUS_SENT, Order.STATUS_READY],
+            delivery_meta__isnull=True,
         ).aggregate(total=Count('id'))['total'] or 0
 
         payload = {

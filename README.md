@@ -26,10 +26,14 @@ Isso cria:
 - `.env.prod`
 - `backend/.env.production`
 
+Observacao: o compose de producao usa `.env.prod` na raiz e `backend/.env.production`. O arquivo `backend/.env.prod` nao faz parte desse fluxo.
+
 ### 3) Preencher variaveis
 Edite `.env.prod`:
 - `API_DOMAIN`
 - `APP_DOMAIN`
+- `VITE_API_URL`
+- `VITE_WS_URL`
 
 Edite `backend/.env.production`:
 - `DJANGO_SECRET_KEY`
@@ -39,6 +43,8 @@ Edite `backend/.env.production`:
 - `REDIS_URL`
 
 Importante: se a senha do banco tiver caracteres especiais (`@`, `:`, `/`, `?`, `#`), use senha URL-encoded na `DATABASE_URL`.
+
+Use na `.env.prod` os dominios reais publicados. Nao deixe `localhost` em `VITE_API_URL` ou `VITE_WS_URL` quando o app estiver sendo acessado por um dominio externo.
 
 ### 4) Subir stack
 
@@ -56,6 +62,7 @@ Esse script:
 - Backend health: `http://127.0.0.1:8000/health`
 - App: `https://app.seudominio.com`
 - API: `https://api.seudominio.com/health`
+- Se abrir o app por `APP_DOMAIN`, as rotas `/api` e `/ws` passam pelo Caddy para o backend.
 
 ## Operacao diaria
 

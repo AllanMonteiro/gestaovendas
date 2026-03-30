@@ -5,7 +5,29 @@ http://{$API_DOMAIN} {
 
 http://{$APP_DOMAIN} {
   encode zstd gzip
-  reverse_proxy frontend:80
+  handle /api/* {
+    reverse_proxy backend:8000 {
+      header_up Host {$API_DOMAIN}
+    }
+  }
+  handle /ws/* {
+    reverse_proxy backend:8000 {
+      header_up Host {$API_DOMAIN}
+    }
+  }
+  handle /media/* {
+    reverse_proxy backend:8000 {
+      header_up Host {$API_DOMAIN}
+    }
+  }
+  handle /health {
+    reverse_proxy backend:8000 {
+      header_up Host {$API_DOMAIN}
+    }
+  }
+  handle {
+    reverse_proxy frontend:80
+  }
 }
 
 :80 {
@@ -13,6 +35,9 @@ http://{$APP_DOMAIN} {
   handle @local {
     encode zstd gzip
     handle /api/* {
+      reverse_proxy backend:8000
+    }
+    handle /ws/* {
       reverse_proxy backend:8000
     }
     handle /media/* {

@@ -1,3 +1,8 @@
+"""Legacy schema kept only for historical compatibility.
+
+Active delivery orders now live in apps.sales via Order + DeliveryOrderMeta.
+"""
+
 from django.db import models
 
 class Order(models.Model):

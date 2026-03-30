@@ -107,6 +107,10 @@ type CashDashboardResponse = {
   config: StoreConfigResponse
 }
 
+const CASH_DASHBOARD_ORDERS_LIMIT = 50
+const CASH_DASHBOARD_MOVES_LIMIT = 50
+const CASH_DASHBOARD_HISTORY_LIMIT = 30
+
 const formatBRL = (value: string | number) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const getOrderDisplayNumber = (order: Pick<Order, 'id' | 'display_number'>) => order.display_number || order.id.slice(0, 8)
 const formatSignedBRL = (value: string | number) => {
@@ -158,7 +162,9 @@ const Caixa: React.FC = () => {
 
   const loadData = useCallback(async () => {
     try {
-      const response = await api.get<CashDashboardResponse>(`/api/cash/dashboard?from=${fromDate}&to=${toDate}`)
+      const response = await api.get<CashDashboardResponse>(
+        `/api/cash/dashboard?from=${fromDate}&to=${toDate}&orders_limit=${CASH_DASHBOARD_ORDERS_LIMIT}&moves_limit=${CASH_DASHBOARD_MOVES_LIMIT}&history_limit=${CASH_DASHBOARD_HISTORY_LIMIT}`
+      )
       const payload = response.data
       setCashStatus(payload.cash_status)
       setOrders(payload.closed_orders.sort((a, b) => ((a.closed_at || a.created_at) < (b.closed_at || b.created_at) ? 1 : -1)))

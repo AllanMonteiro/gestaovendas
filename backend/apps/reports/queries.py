@@ -41,7 +41,7 @@ def _apply_range_filter(qs, field_name, from_date=None, to_date=None):
 
 
 def summary(from_date=None, to_date=None):
-    qs = Order.objects.filter(status=Order.STATUS_PAID, closed_at__isnull=False)
+    qs = Order.objects.filter(status=Order.STATUS_PAID, closed_at__isnull=False, delivery_meta__isnull=True)
     qs = _apply_range_filter(qs, 'closed_at', from_date, to_date)
     agg = qs.aggregate(
         total_sales=Sum('total'),
@@ -49,14 +49,14 @@ def summary(from_date=None, to_date=None):
         avg_ticket=Avg('total'),
         total_discount=Sum('discount'),
     )
-    canceled = Order.objects.filter(status=Order.STATUS_CANCELED)
+    canceled = Order.objects.filter(status=Order.STATUS_CANCELED, delivery_meta__isnull=True)
     canceled = _apply_range_filter(canceled, 'created_at', from_date, to_date)
     canceled_agg = canceled.aggregate(canceled_count=Count('id'), canceled_total=Sum('total'))
     return {**agg, **canceled_agg}
 
 
 def by_payment(from_date=None, to_date=None):
-    qs = Payment.objects.select_related('order').filter(order__status=Order.STATUS_PAID)
+    qs = Payment.objects.select_related('order').filter(order__status=Order.STATUS_PAID, order__delivery_meta__isnull=True)
     qs = _apply_range_filter(qs, 'created_at', from_date, to_date)
     qs = qs.annotate(
         payment_method=Case(
@@ -70,7 +70,10 @@ def by_payment(from_date=None, to_date=None):
 
 
 def by_category(from_date=None, to_date=None):
-    qs = OrderItem.objects.select_related('product__category', 'order').filter(order__status=Order.STATUS_PAID)
+    qs = OrderItem.objects.select_related('product__category', 'order').filter(
+        order__status=Order.STATUS_PAID,
+        order__delivery_meta__isnull=True,
+    )
     qs = _apply_range_filter(qs, 'order__closed_at', from_date, to_date)
     return list(
         qs.values('product__category__id', 'product__category__name')
@@ -80,19 +83,22 @@ def by_category(from_date=None, to_date=None):
 
 
 def by_product(from_date=None, to_date=None, limit=20):
-    qs = OrderItem.objects.select_related('product', 'order').filter(order__status=Order.STATUS_PAID)
+    qs = OrderItem.objects.select_related('product', 'order').filter(
+        order__status=Order.STATUS_PAID,
+        order__delivery_meta__isnull=True,
+    )
     qs = _apply_range_filter(qs, 'order__closed_at', from_date, to_date)
     return list(qs.values('product__id', 'product__name').annotate(total=Sum('total'), qty=Sum('qty')).order_by('-total')[:limit])
 
 
 def hourly_heatmap(from_date=None, to_date=None):
-    qs = Order.objects.filter(status=Order.STATUS_PAID, closed_at__isnull=False)
+    qs = Order.objects.filter(status=Order.STATUS_PAID, closed_at__isnull=False, delivery_meta__isnull=True)
     qs = _apply_range_filter(qs, 'closed_at', from_date, to_date)
     return list(qs.annotate(hour=ExtractHour('closed_at')).values('hour').annotate(total=Sum('total'), count=Count('id')).order_by('hour'))
 
 
 def daily_sales(from_date=None, to_date=None):
-    qs = Order.objects.filter(status=Order.STATUS_PAID, closed_at__isnull=False)
+    qs = Order.objects.filter(status=Order.STATUS_PAID, closed_at__isnull=False, delivery_meta__isnull=True)
     qs = _apply_range_filter(qs, 'closed_at', from_date, to_date)
     return list(
         qs.annotate(day=TruncDate('closed_at'))
@@ -103,7 +109,12 @@ def daily_sales(from_date=None, to_date=None):
 
 
 def top_customers(from_date=None, to_date=None, limit=20):
-    qs = Order.objects.filter(status=Order.STATUS_PAID, customer__isnull=False, closed_at__isnull=False)
+    qs = Order.objects.filter(
+        status=Order.STATUS_PAID,
+        customer__isnull=False,
+        closed_at__isnull=False,
+        delivery_meta__isnull=True,
+    )
     qs = _apply_range_filter(qs, 'closed_at', from_date, to_date)
     return list(qs.values('customer__id', 'customer__phone').annotate(total=Sum('total'), orders=Count('id')).order_by('-total')[:limit])
 
