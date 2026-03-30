@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sorveteria-pos-v5'
+const CACHE_NAME = 'sorveteria-pos-v6'
 const ASSETS = ['/', '/index.html', '/manifest.json']
 
 self.addEventListener('install', (event) => {
@@ -38,6 +38,9 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(event.request)
         .then((resp) => {
+          if (!resp.ok) {
+            return resp
+          }
           const copy = resp.clone()
           caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', copy))
           return resp
@@ -52,6 +55,9 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(event.request)
         .then((resp) => {
+          if (!resp.ok) {
+            return resp
+          }
           const copy = resp.clone()
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
           return resp
@@ -64,6 +70,9 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request).then((cached) =>
       cached || fetch(event.request).then((resp) => {
+        if (!resp.ok) {
+          return resp
+        }
         const copy = resp.clone()
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
         return resp

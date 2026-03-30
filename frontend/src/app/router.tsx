@@ -1,5 +1,5 @@
 import React, { useEffect, useState, Suspense, lazy } from 'react'
-import { createBrowserRouter, NavLink, Outlet } from 'react-router-dom'
+import { createBrowserRouter, NavLink, Outlet, useRouteError } from 'react-router-dom'
 import { useOutboxSync } from './useSync'
 import { api } from '../api/client'
 import { type AuthSession } from './auth'
@@ -22,10 +22,37 @@ type StoreHeaderConfig = {
   theme?: string
 }
 
+const CHUNK_RELOAD_KEY = 'sorveteria.chunk-reload-at'
+
 const normalizeTheme = (value?: string | null) => {
   if (!value || value === 'light') return 'cream'
   if (value === 'green' || value === 'blue' || value === 'cream') return value
   return 'cream'
+}
+
+const isChunkLoadError = (error: unknown) => {
+  const message =
+    typeof error === 'string'
+      ? error
+      : error instanceof Error
+        ? error.message
+        : typeof error === 'object' && error !== null && 'message' in error
+          ? String((error as { message?: unknown }).message ?? '')
+          : String(error ?? '')
+  return (
+    message.includes('Failed to fetch dynamically imported module') ||
+    message.includes('Importing a module script failed')
+  )
+}
+
+const tryRecoverChunk = () => {
+  const lastReloadAt = Number(window.sessionStorage.getItem(CHUNK_RELOAD_KEY) || '0')
+  if (Date.now() - lastReloadAt < 10000) {
+    return false
+  }
+  window.sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()))
+  window.location.reload()
+  return true
 }
 
 const NavLoading: React.FC = () => (
@@ -33,6 +60,44 @@ const NavLoading: React.FC = () => (
     <div className="text-sm font-medium text-slate-400">Carregando modulo...</div>
   </div>
 )
+
+const RouteErrorBoundary: React.FC = () => {
+  const error = useRouteError()
+
+  useEffect(() => {
+    if (isChunkLoadError(error)) {
+      tryRecoverChunk()
+    }
+  }, [error])
+
+  const chunkError = isChunkLoadError(error)
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error !== null && 'statusText' in error
+        ? String((error as { statusText?: unknown }).statusText ?? 'Erro inesperado')
+        : 'Erro inesperado'
+
+  return (
+    <div className="panel mx-auto max-w-2xl p-6 text-center">
+      <h2 className="text-xl font-semibold text-brand-700">
+        {chunkError ? 'Atualizando modulo do sistema...' : 'Erro ao carregar a tela'}
+      </h2>
+      <p className="mt-2 text-sm text-slate-500">
+        {chunkError
+          ? 'Uma nova versao foi publicada. Vamos recarregar a pagina para sincronizar os arquivos.'
+          : message}
+      </p>
+      <button
+        type="button"
+        onClick={() => window.location.reload()}
+        className="mt-4 rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white"
+      >
+        Recarregar pagina
+      </button>
+    </div>
+  )
+}
 
 const Layout: React.FC = () => {
   useOutboxSync()
@@ -159,6 +224,7 @@ export const router = createBrowserRouter([
   {
     path: '/',
     element: <LoginGate><Layout /></LoginGate>,
+    errorElement: <RouteErrorBoundary />,
     children: [
       { index: true, element: <Caixa /> },
       { path: 'pdv', element: <PDV /> },
@@ -173,6 +239,7 @@ export const router = createBrowserRouter([
   },
   {
     path: '/cardapio',
+    errorElement: <RouteErrorBoundary />,
     element: <Suspense fallback={<div className="p-10 text-center">Carregando cardapio...</div>}><PublicMenu /></Suspense>
   }
 ])
