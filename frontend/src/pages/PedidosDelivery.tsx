@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import { connectWS } from '../api/ws'
 import '../styles.css'
@@ -35,6 +35,7 @@ const PedidosDelivery: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
   const [pulling, setPulling] = useState(false)
+  const wsRefreshTimerRef = useRef<number | null>(null)
 
   const fetchOrders = async () => {
     try {
@@ -54,13 +55,23 @@ const PedidosDelivery: React.FC = () => {
 
     const ws = connectWS('/ws/pdv', (data) => {
       if (data?.event === 'order_created' && data?.source === 'delivery') {
-        void fetchOrders()
+        if (wsRefreshTimerRef.current !== null) {
+          window.clearTimeout(wsRefreshTimerRef.current)
+        }
+        wsRefreshTimerRef.current = window.setTimeout(() => {
+          void fetchOrders()
+        }, 120)
         const audio = new Audio('/notification.mp3')
         audio.play().catch(() => undefined)
       }
     })
 
-    return () => ws.close()
+    return () => {
+      ws.close()
+      if (wsRefreshTimerRef.current !== null) {
+        window.clearTimeout(wsRefreshTimerRef.current)
+      }
+    }
   }, [])
 
   const updateStatus = async (id: number, status: string) => {

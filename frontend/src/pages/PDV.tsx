@@ -1,9 +1,10 @@
-import React, { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
+import React, { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import { openThermalReceiptPdf, type ThermalReceiptPayload } from '../app/thermalReceipt'
 import { OpenOrdersPanel } from '../components/OpenOrdersPanel'
 import { ProductGrid } from '../components/ProductGrid'
 import { OrderPanel } from '../components/OrderPanel'
+import { ScaleProductModal } from '../components/ScaleProductModal'
 import { PaymentModal, type PaymentEntry, type PaymentMethod } from '../components/PaymentModal'
 import { getCategories, getProducts, getConfig, saveCategories, saveProducts, saveConfig } from '../offline/catalog'
 import { getLocalOrder, listLocalOrders, removeLocalOrder, saveLocalOrder, syncLocalOpenOrders } from '../offline/localOrders'
@@ -103,19 +104,6 @@ const formatBRL = (value: string | number) => {
 const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100
 const round3 = (value: number) => Math.round((value + Number.EPSILON) * 1000) / 1000
 const moneyString = (value: number) => round2(value).toFixed(2)
-
-const parseScaleWeightInput = (value: string) => {
-  const normalized = value.trim().replace(',', '.')
-  if (!normalized) {
-    return null
-  }
-  const parsed = Number(normalized)
-  if (!Number.isFinite(parsed)) {
-    return null
-  }
-  return parsed
-}
-
 
 const receiptPaymentLabel = (method: string, meta?: Record<string, string> | null) => {
   if (method === 'CARD') {
@@ -281,21 +269,11 @@ const PDV: React.FC = () => {
   const [lastReceiptPayload, setLastReceiptPayload] = useState<ThermalReceiptPayload | null>(null)
   const [showScaleModal, setShowScaleModal] = useState(false)
   const [scaleProduct, setScaleProduct] = useState<Product | null>(null)
-  const [scaleWeight, setScaleWeight] = useState<number | null>(null)
-  const [scaleWeightInput, setScaleWeightInput] = useState('')
-  const [scaleLoading, setScaleLoading] = useState(false)
   const [isOnline, setIsOnline] = useState(window.navigator.onLine)
   const [outboxCount, setOutboxCount] = useState(0)
   const [pendingSyncOrderKeys, setPendingSyncOrderKeys] = useState<Set<string>>(new Set())
   const deferredProductSearchTerm = useDeferredValue(productSearchTerm)
-
-  const parsedScaleWeightInput = useMemo(() => parseScaleWeightInput(scaleWeightInput), [scaleWeightInput])
-  const effectiveScaleWeight = scaleWeightInput.trim() ? parsedScaleWeightInput : scaleWeight
-  const normalizedScaleWeight =
-    effectiveScaleWeight !== null && Number.isFinite(effectiveScaleWeight) && effectiveScaleWeight > 0
-      ? Math.round(effectiveScaleWeight)
-      : null
-  const canConfirmScaleProduct = normalizedScaleWeight !== null
+  const wsRefreshTimerRef = useRef<number | null>(null)
 
   const productsById = useMemo(() => {
     const map = new Map<number, Product>()
@@ -629,18 +607,35 @@ const PDV: React.FC = () => {
 
   useEffect(() => {
     const ws = connectWS('/ws/pdv', (data) => {
+      const scheduleRefresh = (options?: { orders?: boolean; cash?: boolean }) => {
+        if (wsRefreshTimerRef.current !== null) {
+          window.clearTimeout(wsRefreshTimerRef.current)
+        }
+        wsRefreshTimerRef.current = window.setTimeout(() => {
+          if (options?.orders) {
+            void fetchOpenOrders()
+          }
+          if (options?.cash) {
+            void fetchCashStatus()
+          }
+        }, 120)
+      }
       if (data?.event === 'order_paid' || data?.event === 'order_canceled') {
-        void fetchOpenOrders()
-        void fetchCashStatus()
+        scheduleRefresh({ orders: true, cash: true })
       }
       if (data?.event === 'cash_move_created' || data?.event === 'cash_status_changed') {
-        void fetchCashStatus()
+        scheduleRefresh({ cash: true })
       }
       if (data?.event === 'order_status_changed' || data?.event === 'order_ready') {
-        void fetchOpenOrders()
+        scheduleRefresh({ orders: true })
       }
     })
-    return () => ws.close()
+    return () => {
+      ws.close()
+      if (wsRefreshTimerRef.current !== null) {
+        window.clearTimeout(wsRefreshTimerRef.current)
+      }
+    }
   }, [fetchCashStatus, fetchOpenOrders])
 
   useEffect(() => {
@@ -870,8 +865,6 @@ const PDV: React.FC = () => {
     }
     if (product.sold_by_weight) {
       setScaleProduct(product)
-      setScaleWeight(null)
-      setScaleWeightInput('')
       setShowScaleModal(true)
       return
     }
@@ -888,31 +881,8 @@ const PDV: React.FC = () => {
     void handleAddProduct(product)
   }, [handleAddProduct])
 
-  const fetchScaleWeight = async () => {
-    if (!agentUrl) {
-      setFeedback({ type: 'error', text: 'URL do Agent nao configurada.' })
-      return
-    }
-    setScaleLoading(true)
-    try {
-      const normalizedAgentUrl = agentUrl.trim().replace(/\/$/, '')
-      const response = await fetch(`${normalizedAgentUrl}/scale/weight`)
-      if (!response.ok) throw new Error()
-      const data = await response.json()
-      const grams = Number(data.grams ?? 0)
-      const nextWeight = Number.isFinite(grams) && grams > 0 ? Math.round(grams) : 0
-      setScaleWeight(nextWeight)
-      setScaleWeightInput(nextWeight > 0 ? String(nextWeight) : '')
-    } catch {
-      setFeedback({ type: 'error', text: 'Falha ao ler balanca. Confira se o Agent esta rodando.' })
-    } finally {
-      setScaleLoading(false)
-    }
-  }
-
-  const handleConfirmScaleProduct = async () => {
-    if (!scaleProduct || normalizedScaleWeight === null) {
-      setFeedback({ type: 'error', text: 'Digite um peso valido para continuar.' })
+  const handleConfirmScaleProduct = async (weightGrams: number) => {
+    if (!scaleProduct) {
       return
     }
     if (!(await ensureCashOpen())) {
@@ -923,16 +893,14 @@ const PDV: React.FC = () => {
     if (!orderId) {
       setShowScaleModal(false)
       setScaleProduct(null)
-      setScaleWeight(null)
-      setScaleWeightInput('')
       setFeedback({ type: 'error', text: 'Crie/selecione um pedido antes de adicionar itens.' })
       return
     }
 
     const payload = {
       product_id: scaleProduct.id,
-      qty: round3(normalizedScaleWeight / 1000),
-      weight_grams: normalizedScaleWeight,
+      qty: round3(weightGrams / 1000),
+      weight_grams: weightGrams,
       client_request_id: crypto.randomUUID()
     }
 
@@ -944,8 +912,6 @@ const PDV: React.FC = () => {
       setFeedback({ type: 'ok', text: 'Item adicionado ao pedido.' })
       setShowScaleModal(false)
       setScaleProduct(null)
-      setScaleWeight(null)
-      setScaleWeightInput('')
       setIsOnline(true)
       void fetchOpenOrders(orderId)
     } catch (error: any) {
@@ -957,7 +923,7 @@ const PDV: React.FC = () => {
               product: scaleProduct.id,
               qty: payload.qty,
               client_request_id: payload.client_request_id,
-              weight_grams: normalizedScaleWeight,
+              weight_grams: weightGrams,
               total: 0,
             })
           )
@@ -965,8 +931,6 @@ const PDV: React.FC = () => {
         setFeedback({ type: 'ok', text: 'Modo Offline: Item de balanca adicionado localmente.' })
         setShowScaleModal(false)
         setScaleProduct(null)
-        setScaleWeight(null)
-        setScaleWeightInput('')
         setIsOnline(false)
         return
       }
@@ -1627,64 +1591,17 @@ const PDV: React.FC = () => {
         </div>
       ) : null}
 
-      {showScaleModal && scaleProduct ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 px-4 pb-4 sm:items-center sm:pb-0">
-          <div className="mobile-sheet w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
-            <h3 className="text-lg font-semibold">Produto por Peso</h3>
-            <p className="mt-1 text-sm text-slate-500">{scaleProduct.name}</p>
-            
-            <div className="mt-6 flex flex-col items-center justify-center rounded-2xl bg-slate-50 py-6 border-2 border-dashed border-slate-200">
-              <div className="text-center">
-                <span className="text-4xl font-bold text-brand-700">{normalizedScaleWeight ?? 0}g</span>
-                <p className="mt-1 text-sm font-medium text-slate-500">{((normalizedScaleWeight ?? 0) / 1000).toFixed(3)} kg</p>
-              </div>
-            </div>
-
-            <div className="mt-4">
-              <label className="text-xs font-semibold text-slate-500 uppercase">Digite o peso manualmente (gramas)</label>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={scaleWeightInput}
-                onChange={(e) => setScaleWeightInput(e.target.value)}
-                placeholder="Ex: 500"
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 outline-none transition-all"
-              />
-              {scaleWeightInput.trim() && parsedScaleWeightInput === null ? (
-                <p className="mt-1 text-xs font-medium text-rose-600">Digite um peso valido em gramas.</p>
-              ) : null}
-            </div>
-
-            <button
-              onClick={() => void fetchScaleWeight()}
-              disabled={scaleLoading}
-              className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-brand-200 bg-brand-50 py-3 text-sm font-semibold text-brand-700 hover:bg-brand-100 disabled:opacity-50"
-            >
-              {scaleLoading ? 'Lendo...' : 'Ler da balanca automaticamente'}
-            </button>
-
-            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button
-                onClick={() => {
-                  setShowScaleModal(false)
-                  setScaleProduct(null)
-                  setScaleWeight(null)
-                  setScaleWeightInput('')
-                }}
-                className="rounded-xl border border-slate-300 px-4 py-2 text-sm"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => void handleConfirmScaleProduct()}
-                disabled={!canConfirmScaleProduct}
-                className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              >
-                Confirmar e Adicionar
-              </button>
-            </div>
-          </div>
-        </div>
+      {showScaleModal ? (
+        <ScaleProductModal
+          product={scaleProduct}
+          agentUrl={agentUrl}
+          onCancel={() => {
+            setShowScaleModal(false)
+            setScaleProduct(null)
+          }}
+          onConfirm={(weightGrams) => void handleConfirmScaleProduct(weightGrams)}
+          onError={(message) => setFeedback({ type: 'error', text: message })}
+        />
       ) : null}
     </>
   )

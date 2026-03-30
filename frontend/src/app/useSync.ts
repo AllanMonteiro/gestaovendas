@@ -1,18 +1,34 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { syncOutbox } from '../offline/sync'
 import { getApiBaseUrl } from './runtime'
 
 export function useOutboxSync() {
+  const runningRef = useRef(false)
+  const pendingRef = useRef(false)
+
   useEffect(() => {
     const baseURL = getApiBaseUrl()
-    const run = () => {
+    const run = async () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
         return
       }
-      void syncOutbox(baseURL)
+      if (runningRef.current) {
+        pendingRef.current = true
+        return
+      }
+      runningRef.current = true
+      try {
+        await syncOutbox(baseURL)
+      } finally {
+        runningRef.current = false
+        if (pendingRef.current) {
+          pendingRef.current = false
+          void run()
+        }
+      }
     }
     const handleVisibility = () => run()
-    run()
+    void run()
     const interval = setInterval(run, 30000)
     window.addEventListener('online', run)
     window.addEventListener('sorveteria:outbox-changed', run)

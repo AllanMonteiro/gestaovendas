@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import { openThermalReceiptPdf, type ThermalReceiptPayload } from '../app/thermalReceipt'
 import { connectWS } from '../api/ws'
@@ -148,6 +148,7 @@ const Caixa: React.FC = () => {
   const [storeLabel, setStoreLabel] = useState('Sorveteria POS')
   const [storeCnpj, setStoreCnpj] = useState('')
   const [storeAddress, setStoreAddress] = useState('')
+  const wsRefreshTimerRef = useRef<number | null>(null)
 
   const loadData = useCallback(async () => {
     try {
@@ -209,10 +210,20 @@ const Caixa: React.FC = () => {
         data?.event === 'cash_move_created' ||
         data?.event === 'cash_status_changed'
       ) {
-        void loadData()
+        if (wsRefreshTimerRef.current !== null) {
+          window.clearTimeout(wsRefreshTimerRef.current)
+        }
+        wsRefreshTimerRef.current = window.setTimeout(() => {
+          void loadData()
+        }, 120)
       }
     })
-    return () => ws.close()
+    return () => {
+      ws.close()
+      if (wsRefreshTimerRef.current !== null) {
+        window.clearTimeout(wsRefreshTimerRef.current)
+      }
+    }
   }, [loadData])
 
   const totalsByMethod = useMemo(() => {
