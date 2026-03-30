@@ -41,6 +41,12 @@ type PaymentAgg = {
 
 type Reconciliation = {
   expected: { cash: string; pix: string; card: string }
+  breakdown?: {
+    initial_float: string
+    cash_sales: string
+    reforco: string
+    sangria: string
+  }
   counted: { cash: string; pix: string; card: string }
   divergence: { cash: string; pix: string; card: string }
 }
@@ -265,7 +271,7 @@ const Caixa: React.FC = () => {
   const reconciliationRows = useMemo(() => [
     {
       label: 'Dinheiro',
-      expected: Number(reconciliation?.expected.cash ?? totalsByMethod.CASH),
+      expected: Number(reconciliation?.expected.cash ?? cashStatus.totals?.current_cash_estimated ?? 0),
       counted: Number(reconciliation?.counted.cash ?? 0),
       divergence: Number(reconciliation?.divergence.cash ?? 0),
     },
@@ -401,15 +407,19 @@ const Caixa: React.FC = () => {
       })
       setReconciliation(response.data)
       const slipPayload = buildCashSlipPayload('FECHAMENTO DE CAIXA', [
+        { label: 'Fundo inicial', value: formatBRL(response.data.breakdown?.initial_float ?? cashStatus.session?.initial_float ?? 0) },
+        { label: 'Entradas em dinheiro', value: formatBRL(response.data.breakdown?.cash_sales ?? 0) },
+        { label: 'Reforcos', value: formatBRL(response.data.breakdown?.reforco ?? 0) },
+        { label: 'Sangrias', value: formatBRL(response.data.breakdown?.sangria ?? 0) },
         { label: 'Dinheiro esperado', value: formatBRL(response.data.expected.cash) },
         { label: 'PIX esperado', value: formatBRL(response.data.expected.pix) },
         { label: 'Cartao esperado', value: formatBRL(response.data.expected.card) },
         { label: 'Dinheiro contado', value: formatBRL(response.data.counted.cash) },
         { label: 'PIX contado', value: formatBRL(response.data.counted.pix) },
         { label: 'Cartao contado', value: formatBRL(response.data.counted.card) },
-        { label: 'Divergencia dinheiro', value: formatBRL(response.data.divergence.cash) },
-        { label: 'Divergencia PIX', value: formatBRL(response.data.divergence.pix) },
-        { label: 'Divergencia cartao', value: formatBRL(response.data.divergence.card) }
+        { label: 'Divergencia dinheiro', value: formatSignedBRL(response.data.divergence.cash) },
+        { label: 'Divergencia PIX', value: formatSignedBRL(response.data.divergence.pix) },
+        { label: 'Divergencia cartao', value: formatSignedBRL(response.data.divergence.card) }
       ])
       let printed = false
       try {

@@ -146,6 +146,20 @@ const toOrderSummary = (order: Order | OrderSummary): OrderSummary => {
   return summary
 }
 
+const mergeOrderSummary = (current: Order, summary: OrderSummary): Order => ({
+  ...current,
+  display_number: summary.display_number ?? current.display_number,
+  status: summary.status ?? current.status,
+  subtotal: String(summary.subtotal ?? current.subtotal),
+  discount: String(summary.discount ?? current.discount),
+  total: String(summary.total ?? current.total),
+  client_request_id: summary.client_request_id ?? current.client_request_id ?? null,
+  local_only: Boolean(summary.local_only),
+  customer: summary.customer ?? current.customer ?? null,
+  customer_name: summary.customer_name ?? current.customer_name ?? null,
+  customer_phone: summary.customer_phone ?? current.customer_phone ?? null,
+})
+
 const normalizeOrder = (order: Partial<Order> & { id: string }): Order => ({
   id: order.id,
   display_number: order.display_number,
@@ -274,6 +288,7 @@ const PDV: React.FC = () => {
   const [pendingSyncOrderKeys, setPendingSyncOrderKeys] = useState<Set<string>>(new Set())
   const deferredProductSearchTerm = useDeferredValue(productSearchTerm)
   const wsRefreshTimerRef = useRef<number | null>(null)
+  const lastCashValidationAtRef = useRef(0)
 
   const productsById = useMemo(() => {
     const map = new Map<number, Product>()
@@ -361,6 +376,20 @@ const PDV: React.FC = () => {
       })
     })
     void saveLocalOrder(order)
+  }, [])
+
+  const mergeSelectedOrderSummary = useCallback((summary: OrderSummary | null) => {
+    if (!summary) {
+      return
+    }
+    startTransition(() => {
+      setSelectedOrder((prev) => {
+        if (!prev || prev.id !== summary.id) {
+          return prev
+        }
+        return mergeOrderSummary(prev, summary)
+      })
+    })
   }, [])
 
   const discardLocalOrder = useCallback(async (order: Order) => {
@@ -481,7 +510,8 @@ const PDV: React.FC = () => {
     }
   }, [])
 
-  const fetchOpenOrders = useCallback(async (targetOrderId?: string | null) => {
+  const fetchOpenOrders = useCallback(async (options?: { targetOrderId?: string | null; refreshSelectedDetail?: boolean }) => {
+    const refreshSelectedDetail = options?.refreshSelectedDetail ?? true
     try {
       const response = await api.get<OrderSummary[]>('/api/orders/open?include_items=0')
       startTransition(() => {
@@ -490,18 +520,25 @@ const PDV: React.FC = () => {
       void syncLocalOpenOrders(response.data)
       setIsOnline(true)
       let nextSelectedOrderId = selectedOrderId
-      if (typeof targetOrderId !== 'undefined') {
-        nextSelectedOrderId = targetOrderId
+      if (typeof options?.targetOrderId !== 'undefined') {
+        nextSelectedOrderId = options.targetOrderId
       }
-      const exists = nextSelectedOrderId ? response.data.some((order) => order.id === nextSelectedOrderId) : false
-      if (!exists) {
+      const nextSelectedSummary = nextSelectedOrderId
+        ? response.data.find((order) => order.id === nextSelectedOrderId) ?? null
+        : null
+      if (!nextSelectedSummary) {
         nextSelectedOrderId = null
       }
       setSelectedOrderId(nextSelectedOrderId)
-      if (nextSelectedOrderId) {
+      if (nextSelectedSummary && selectedOrder?.id === nextSelectedSummary.id) {
+        mergeSelectedOrderSummary(nextSelectedSummary)
+      }
+      if (nextSelectedOrderId && (refreshSelectedDetail || selectedOrder?.id !== nextSelectedOrderId)) {
         await fetchOrderDetail(nextSelectedOrderId)
       } else {
-        setSelectedOrder(null)
+        if (!nextSelectedOrderId) {
+          setSelectedOrder(null)
+        }
         return
       }
     } catch {
@@ -529,7 +566,11 @@ const PDV: React.FC = () => {
       }
       setIsOnline(false)
     }
-  }, [fetchOrderDetail, selectedOrderId])
+  }, [fetchOrderDetail, mergeSelectedOrderSummary, selectedOrder?.id, selectedOrderId])
+
+  const refreshOpenOrdersInBackground = useCallback((targetOrderId?: string | null) => {
+    void fetchOpenOrders({ targetOrderId, refreshSelectedDetail: false })
+  }, [fetchOpenOrders])
 
   const getProductName = useCallback((productId: number) => productsById.get(productId)?.name ?? `Produto ${productId}`, [productsById])
 
@@ -539,7 +580,7 @@ const PDV: React.FC = () => {
   }, [fetchOrderDetail])
 
   const handleRefreshOpenOrders = useCallback(() => {
-    void fetchOpenOrders()
+    void fetchOpenOrders({ refreshSelectedDetail: true })
   }, [fetchOpenOrders])
 
   const handleRefreshCatalog = useCallback(() => {
@@ -549,7 +590,11 @@ const PDV: React.FC = () => {
   const fetchCashStatus = useCallback(async () => {
     try {
       const response = await api.get<CashStatusResponse>('/api/cash/status')
-      setCashOpen(Boolean(response.data.open))
+      const isOpen = Boolean(response.data.open)
+      setCashOpen(isOpen)
+      if (isOpen) {
+        lastCashValidationAtRef.current = Date.now()
+      }
     } catch {
       if (!window.navigator.onLine) {
         setCashOpen(true)
@@ -560,10 +605,20 @@ const PDV: React.FC = () => {
   }, [])
 
   const ensureCashOpen = useCallback(async () => {
+    const recentlyValidated = Date.now() - lastCashValidationAtRef.current < 15000
+    if (cashOpen && (recentlyValidated || !isOnline)) {
+      if (!recentlyValidated && isOnline) {
+        void fetchCashStatus()
+      }
+      return true
+    }
     try {
       const response = await api.get<CashStatusResponse>('/api/cash/status')
       const isOpen = Boolean(response.data.open)
       setCashOpen(isOpen)
+      if (isOpen) {
+        lastCashValidationAtRef.current = Date.now()
+      }
       if (!isOpen) {
         setFeedback({ type: 'error', text: 'Caixa fechado. Abra o caixa antes de operar pedidos.' })
       }
@@ -578,7 +633,7 @@ const PDV: React.FC = () => {
       setFeedback({ type: 'error', text: 'Nao foi possivel validar o caixa. Confira a conexao com o servidor.' })
       return false
     }
-  }, [isOnline])
+  }, [cashOpen, fetchCashStatus, isOnline])
 
   useEffect(() => {
     const handleStatus = () => {
@@ -601,7 +656,7 @@ const PDV: React.FC = () => {
 
   useEffect(() => {
     void fetchCatalog()
-    void fetchOpenOrders()
+    void fetchOpenOrders({ refreshSelectedDetail: true })
     void fetchCashStatus()
   }, [fetchCatalog, fetchOpenOrders, fetchCashStatus])
 
@@ -613,7 +668,7 @@ const PDV: React.FC = () => {
         }
         wsRefreshTimerRef.current = window.setTimeout(() => {
           if (options?.orders) {
-            void fetchOpenOrders()
+            refreshOpenOrdersInBackground()
           }
           if (options?.cash) {
             void fetchCashStatus()
@@ -636,7 +691,7 @@ const PDV: React.FC = () => {
         window.clearTimeout(wsRefreshTimerRef.current)
       }
     }
-  }, [fetchCashStatus, fetchOpenOrders])
+  }, [fetchCashStatus, refreshOpenOrdersInBackground])
 
   useEffect(() => {
     if (!selectedOrderId) {
@@ -717,7 +772,7 @@ const PDV: React.FC = () => {
       resetNewOrderModal()
       setFeedback({ type: 'ok', text: 'Pedido criado com sucesso.' })
       setIsOnline(true)
-      void fetchOpenOrders(createdOrder.id)
+      refreshOpenOrdersInBackground(createdOrder.id)
       return true
     } catch (error: any) {
       if (error.enqueued) {
@@ -830,7 +885,7 @@ const PDV: React.FC = () => {
       setQtyProduct(null)
       setQtyInput('1')
       setIsOnline(true)
-      void fetchOpenOrders(orderId)
+      refreshOpenOrdersInBackground(orderId)
     } catch (error: any) {
       if (error.enqueued) {
         if (selectedOrder && selectedOrder.id === orderId) {
@@ -913,7 +968,7 @@ const PDV: React.FC = () => {
       setShowScaleModal(false)
       setScaleProduct(null)
       setIsOnline(true)
-      void fetchOpenOrders(orderId)
+      refreshOpenOrdersInBackground(orderId)
     } catch (error: any) {
       if (error.enqueued) {
         if (selectedOrder && selectedOrder.id === orderId) {
@@ -951,13 +1006,13 @@ const PDV: React.FC = () => {
       if (autoPrintKitchen) {
         const printed = await printKitchenTicket(selectedOrder)
         if (!printed) {
-          void fetchOpenOrders()
+          refreshOpenOrdersInBackground()
           setFeedback({ type: 'error', text: 'Pedido enviado para cozinha, mas a impressao falhou.' })
           return
         }
       }
       applyOrderSnapshot({ ...selectedOrder, status: 'SENT' })
-      void fetchOpenOrders(selectedOrder.id)
+      refreshOpenOrdersInBackground(selectedOrder.id)
       setFeedback({ type: 'ok', text: 'Pedido enviado para cozinha.' })
     } catch (error: any) {
       if (error.enqueued) {
@@ -1001,7 +1056,7 @@ const PDV: React.FC = () => {
         notes: notesInput ?? item.notes ?? ''
       })
       applyOrderSnapshot(nextOrder)
-      void fetchOpenOrders(selectedOrder.id)
+      refreshOpenOrdersInBackground(selectedOrder.id)
       setFeedback({ type: 'ok', text: 'Item atualizado.' })
     } catch (error: any) {
       if (error.enqueued) {
@@ -1032,7 +1087,7 @@ const PDV: React.FC = () => {
     try {
       await api.delete(`/api/orders/${selectedOrder.id}/items/${item.id}`)
       applyOrderSnapshot(nextOrder)
-      void fetchOpenOrders(selectedOrder.id)
+      refreshOpenOrdersInBackground(selectedOrder.id)
       setFeedback({ type: 'ok', text: 'Item removido do pedido.' })
     } catch (error: any) {
       if (error.enqueued) {
@@ -1221,7 +1276,7 @@ const PDV: React.FC = () => {
       setSelectedOrder(null)
       setSelectedOrderId(null)
       void removeLocalOrder(selectedOrder.id)
-      void fetchOpenOrders()
+      refreshOpenOrdersInBackground()
       void fetchCashStatus()
       setPointsToRedeem('0')
       const successText =
@@ -1270,7 +1325,7 @@ const PDV: React.FC = () => {
       setSelectedOrder(null)
       setSelectedOrderId(null)
       void removeLocalOrder(selectedOrder.id)
-      void fetchOpenOrders()
+      refreshOpenOrdersInBackground()
       setFeedback({ type: 'ok', text: 'Pedido cancelado.' })
     } catch (error: any) {
       if (error.enqueued) {
@@ -1305,7 +1360,7 @@ const PDV: React.FC = () => {
       setSelectedOrder(null)
       setSelectedOrderId(null)
       void removeLocalOrder(selectedOrder.id)
-      void fetchOpenOrders()
+      refreshOpenOrdersInBackground()
       setFeedback({ type: 'ok', text: 'Pedido excluido.' })
     } catch (error: any) {
       if (error.enqueued) {

@@ -19,6 +19,12 @@ type ProductRow = {
   qty: string
 }
 
+type CategoryRow = {
+  product__category__id: number | null
+  product__category__name: string | null
+  total: string
+}
+
 type DailySalesRow = {
   day: string
   total: string
@@ -28,6 +34,42 @@ type DailySalesRow = {
 type PaymentRow = {
   payment_method?: string
   total: string
+}
+
+type CashBreakdown = {
+  initial_float: string | number
+  cash_sales: string | number
+  reforco: string | number
+  sangria: string | number
+  expected_cash: string | number
+  counted_cash: string | number
+  divergence_cash: string | number
+}
+
+type CashHistoryRow = {
+  id: number
+  opened_at: string
+  closed_at: string | null
+  initial_float: string | number
+  reconciliation_data?: {
+    divergence?: {
+      cash?: string | number
+      pix?: string | number
+      card?: string | number
+    }
+  } | null
+  cash_breakdown?: CashBreakdown | null
+}
+
+type CashSummary = {
+  sessions_count: number
+  initial_float_total: string | number
+  cash_sales_total: string | number
+  reforco_total: string | number
+  sangria_total: string | number
+  expected_cash_total: string | number
+  counted_cash_total: string | number
+  divergence_cash_total: string | number
 }
 
 type ChartGranularity = 'day' | 'week' | 'month'
@@ -54,12 +96,23 @@ type OrderRow = {
 
 type ReportsDashboardResponse = {
   summary: SummaryResponse
+  categories: CategoryRow[]
   products: ProductRow[]
   daily_sales: DailySalesRow[]
   payments: PaymentRow[]
+  cash_summary: CashSummary
+  cash_history: CashHistoryRow[]
 }
 
 const formatBRL = (value: string | number | null | undefined) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const formatSignedBRL = (value: string | number | null | undefined) => {
+  const numeric = Number(value || 0)
+  const absolute = Math.abs(numeric)
+  const formatted = absolute.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  if (numeric > 0) return `+${formatted}`
+  if (numeric < 0) return `-${formatted}`
+  return formatted
+}
 const formatNumber = (value: number | null | undefined) => Number(value || 0).toLocaleString('pt-BR')
 const toISODate = (date: Date) => date.toISOString().slice(0, 10)
 const toMonthValue = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
@@ -84,9 +137,12 @@ const Relatorios: React.FC = () => {
   const [fromDate, setFromDate] = useState(initialRange.from)
   const [toDate, setToDate] = useState(initialRange.to)
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
+  const [categories, setCategories] = useState<CategoryRow[]>([])
   const [products, setProducts] = useState<ProductRow[]>([])
   const [dailySales, setDailySales] = useState<DailySalesRow[]>([])
   const [payments, setPayments] = useState<PaymentRow[]>([])
+  const [cashSummary, setCashSummary] = useState<CashSummary | null>(null)
+  const [cashHistory, setCashHistory] = useState<CashHistoryRow[]>([])
   const [finalizedOrders, setFinalizedOrders] = useState<OrderRow[]>([])
   const [canceledOrders, setCanceledOrders] = useState<OrderRow[]>([])
   const [orderDetails, setOrderDetails] = useState<Record<string, OrderRow>>({})
@@ -101,9 +157,12 @@ const Relatorios: React.FC = () => {
         api.get<OrderRow[]>(`/api/orders/canceled?from=${from}&to=${to}&include_items=0`)
       ])
       setSummary(dashboardResp.data.summary)
+      setCategories(dashboardResp.data.categories)
       setProducts(dashboardResp.data.products)
       setDailySales(dashboardResp.data.daily_sales)
       setPayments(dashboardResp.data.payments)
+      setCashSummary(dashboardResp.data.cash_summary)
+      setCashHistory(dashboardResp.data.cash_history)
       setFinalizedOrders(finalizedResp.data)
       setCanceledOrders(canceledResp.data)
       setOrderDetails({})
@@ -179,7 +238,9 @@ const Relatorios: React.FC = () => {
     { label: 'Ticket medio', value: formatBRL(summary?.avg_ticket) },
     { label: 'Descontos', value: formatBRL(summary?.total_discount) },
     { label: 'Pedidos cancelados', value: formatNumber(summary?.canceled_count) },
-    { label: 'Total cancelado', value: formatBRL(summary?.canceled_total) }
+    { label: 'Total cancelado', value: formatBRL(summary?.canceled_total) },
+    { label: 'Entradas em dinheiro', value: formatBRL(cashSummary?.cash_sales_total) },
+    { label: 'Saldo esperado em caixa', value: formatBRL(cashSummary?.expected_cash_total) },
   ]
 
   const selectedMonthLabel = new Date(`${selectedMonth}-01T00:00:00`).toLocaleDateString('pt-BR', {
@@ -255,6 +316,117 @@ const Relatorios: React.FC = () => {
           selectedPeriodLabel={selectedMonthLabel}
         />
       </Suspense>
+
+      <section className="panel p-5">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold">Entradas por categoria</h3>
+            <p className="text-sm text-slate-500">Valores finalizados por categoria no periodo filtrado.</p>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-slate-500">
+                <th className="pb-2">Categoria</th>
+                <th className="pb-2 text-right">Valor</th>
+              </tr>
+            </thead>
+            <tbody>
+              {categories.map((row, index) => (
+                <tr key={`${row.product__category__id ?? 'sem-categoria'}-${index}`} className="border-t border-brand-100">
+                  <td className="py-2">{row.product__category__name || 'Sem categoria'}</td>
+                  <td className="py-2 text-right font-medium">{formatBRL(row.total)}</td>
+                </tr>
+              ))}
+              {categories.length === 0 ? (
+                <tr className="border-t border-brand-100">
+                  <td colSpan={2} className="py-3 text-center text-slate-500">
+                    Sem categorias com vendas no periodo.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="panel p-5">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold">Fechamentos de caixa</h3>
+            <p className="text-sm text-slate-500">Resumo em dinheiro seguindo o mesmo filtro do relatorio.</p>
+          </div>
+          <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
+            {formatNumber(cashSummary?.sessions_count)} fechamento(s)
+          </span>
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <article className="rounded-xl border border-brand-100 bg-brand-50/60 p-4">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Fundo inicial</p>
+            <p className="mt-2 text-xl font-semibold">{formatBRL(cashSummary?.initial_float_total)}</p>
+          </article>
+          <article className="rounded-xl border border-brand-100 bg-brand-50/60 p-4">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Reforcos</p>
+            <p className="mt-2 text-xl font-semibold">{formatBRL(cashSummary?.reforco_total)}</p>
+          </article>
+          <article className="rounded-xl border border-brand-100 bg-brand-50/60 p-4">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Sangrias</p>
+            <p className="mt-2 text-xl font-semibold">{formatBRL(cashSummary?.sangria_total)}</p>
+          </article>
+          <article className="rounded-xl border border-brand-100 bg-brand-50/60 p-4">
+            <p className="text-xs uppercase tracking-wide text-slate-500">Saldo esperado em dinheiro</p>
+            <p className="mt-2 text-xl font-semibold">{formatBRL(cashSummary?.expected_cash_total)}</p>
+          </article>
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-slate-500">
+                <th className="pb-2">Abertura</th>
+                <th className="pb-2">Fechamento</th>
+                <th className="pb-2">Entradas dinheiro</th>
+                <th className="pb-2">Saldo esperado</th>
+                <th className="pb-2">Divergencia (Dinheiro / PIX / Cartao)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cashHistory.map((session) => (
+                <tr key={session.id} className="border-t border-brand-100">
+                  <td className="py-2">{new Date(session.opened_at).toLocaleString('pt-BR')}</td>
+                  <td className="py-2">{session.closed_at ? new Date(session.closed_at).toLocaleString('pt-BR') : '-'}</td>
+                  <td className="py-2 font-medium">{formatBRL(session.cash_breakdown?.cash_sales ?? 0)}</td>
+                  <td className="py-2 font-medium">{formatBRL(session.cash_breakdown?.expected_cash ?? 0)}</td>
+                  <td className="py-2">
+                    {session.reconciliation_data?.divergence ? (
+                      <div className="flex flex-wrap gap-2 text-xs">
+                        <span className={Number(session.reconciliation_data.divergence.cash ?? 0) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
+                          Din: {formatSignedBRL(session.reconciliation_data.divergence.cash)}
+                        </span>
+                        <span className={Number(session.reconciliation_data.divergence.pix ?? 0) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
+                          PIX: {formatSignedBRL(session.reconciliation_data.divergence.pix)}
+                        </span>
+                        <span className={Number(session.reconciliation_data.divergence.card ?? 0) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
+                          Car: {formatSignedBRL(session.reconciliation_data.divergence.card)}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-slate-400">Sem dados</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {cashHistory.length === 0 ? (
+                <tr className="border-t border-brand-100">
+                  <td colSpan={5} className="py-3 text-center text-slate-500">
+                    Nenhum fechamento de caixa no periodo.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section className="panel p-5">
         <h3 className="mb-3 text-lg font-semibold">Tabela analitica</h3>

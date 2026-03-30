@@ -403,7 +403,14 @@ def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_car
             filter=models.Q(method=Payment.METHOD_CARD),
         ),
     )
-    expected_cash = totals['cash'] or Decimal('0')
+    cash_moves = CashMove.objects.filter(session=session).aggregate(
+        reforco=models.Sum('amount', filter=models.Q(type=CashMove.TYPE_REFORCO)),
+        sangria=models.Sum('amount', filter=models.Q(type=CashMove.TYPE_SANGRIA)),
+    )
+    cash_sales = totals['cash'] or Decimal('0')
+    reforco = cash_moves['reforco'] or Decimal('0')
+    sangria = cash_moves['sangria'] or Decimal('0')
+    expected_cash = q2(session.initial_float + cash_sales + reforco - sangria)
     expected_pix = totals['pix'] or Decimal('0')
     expected_card = totals['card'] or Decimal('0')
     divergence = {
@@ -417,6 +424,12 @@ def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_car
             'cash': float(expected_cash),
             'pix': float(expected_pix),
             'card': float(expected_card),
+        },
+        'breakdown': {
+            'initial_float': float(session.initial_float),
+            'cash_sales': float(cash_sales),
+            'reforco': float(reforco),
+            'sangria': float(sangria),
         },
         'counted': {
             'cash': float(counted_cash),
