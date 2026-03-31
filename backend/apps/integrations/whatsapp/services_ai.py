@@ -4,7 +4,7 @@ import re
 
 from django.db import transaction
 
-from apps.catalog.models import ProductPrice
+from apps.catalog.models import Product, ProductPrice
 from apps.catalog.services.product_matcher import find_product_by_name
 from apps.integrations.pix_service import generate_static_pix
 from apps.integrations.viacep_service import calculate_delivery_fee, get_address_from_cep
@@ -86,7 +86,13 @@ def _resolve_customer_phone(phone: str | None, parsed: dict) -> str | None:
 
 
 @transaction.atomic
-def create_delivery_order_from_parsed(phone: str, parsed: dict) -> Order:
+def create_delivery_order_from_parsed(
+    phone: str | None,
+    parsed: dict,
+    *,
+    source: str = DeliveryOrderMeta.SOURCE_WHATSAPP,
+    default_customer_name: str = 'Cliente Delivery',
+) -> Order:
     subtotal = Decimal('0.00')
     raw_items = []
     order_items = []
@@ -94,7 +100,15 @@ def create_delivery_order_from_parsed(phone: str, parsed: dict) -> Order:
     for item in parsed.get('items', []) or []:
         name = (item.get('product_name') or item.get('name') or 'Item').strip()
         qty = _coerce_quantity(item.get('quantity'))
-        product = find_product_by_name(name)
+        product_id = item.get('product_id')
+        product = None
+        if product_id not in (None, ''):
+            try:
+                product = Product.objects.select_related('category').filter(id=int(product_id), active=True).first()
+            except (TypeError, ValueError):
+                product = None
+        if product is None:
+            product = find_product_by_name(name)
         unit_price = q2(resolve_product_price(product))
         line_total = q2(unit_price * qty)
 
@@ -150,7 +164,7 @@ def create_delivery_order_from_parsed(phone: str, parsed: dict) -> Order:
 
     DeliveryOrderMeta.objects.create(
         order=order,
-        customer_name=(parsed.get('customer_name') or '').strip() or (customer.name if customer and customer.name else 'Cliente WhatsApp'),
+        customer_name=(parsed.get('customer_name') or '').strip() or (customer.name if customer and customer.name else default_customer_name),
         customer_phone=_resolve_customer_phone(phone, parsed),
         address=(parsed.get('address') or '').strip() or 'Nao informado',
         payment_method=parsed.get('payment_method'),
@@ -159,7 +173,7 @@ def create_delivery_order_from_parsed(phone: str, parsed: dict) -> Order:
         neighborhood=neighborhood,
         delivery_fee=q2(delivery_fee),
         pix_payload=pix_payload,
-        source=DeliveryOrderMeta.SOURCE_WHATSAPP,
+        source=source,
         status=DeliveryOrderMeta.STATUS_NEW,
         raw_items=raw_items,
     )

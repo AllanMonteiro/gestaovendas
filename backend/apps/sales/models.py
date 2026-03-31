@@ -57,9 +57,11 @@ class Order(models.Model):
 
 class DeliveryOrderMeta(models.Model):
     SOURCE_PDV = 'pdv'
+    SOURCE_WEB = 'web'
     SOURCE_WHATSAPP = 'whatsapp'
     SOURCE_CHOICES = [
         (SOURCE_PDV, 'PDV'),
+        (SOURCE_WEB, 'Web'),
         (SOURCE_WHATSAPP, 'WhatsApp'),
     ]
 

@@ -3,8 +3,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import auth_is_required, user_has_permission
-from apps.integrations.whatsapp.client import WhatsAppClient
+from apps.integrations.whatsapp.services_ai import create_delivery_order_from_parsed
 from apps.sales.models import DeliveryOrderMeta, Order
+from apps.sales.consumers import broadcast_delivery_event
 
 from .serializers import OrderSerializer
 
@@ -36,6 +37,54 @@ class DeliveryOrdersView(APIView):
         return Response(OrderSerializer(_delivery_orders(), many=True).data)
 
 
+class PublicDeliveryOrderCreateView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        payload = request.data if isinstance(request.data, dict) else {}
+        items = payload.get('items') or []
+        if not isinstance(items, list) or not items:
+            return Response({'detail': 'items required'}, status=400)
+
+        customer_name = (payload.get('customer_name') or '').strip()
+        address = (payload.get('address') or '').strip()
+        neighborhood = (payload.get('neighborhood') or '').strip()
+        if not customer_name:
+            return Response({'detail': 'customer_name required'}, status=400)
+        if not address:
+            return Response({'detail': 'address required'}, status=400)
+        if not neighborhood:
+            return Response({'detail': 'neighborhood required'}, status=400)
+
+        parsed = {
+            'customer_name': customer_name,
+            'customer_phone': payload.get('customer_phone'),
+            'address': address,
+            'neighborhood': neighborhood,
+            'cep': payload.get('cep'),
+            'payment_method': payload.get('payment_method'),
+            'notes': payload.get('notes'),
+            'items': items,
+        }
+        order = create_delivery_order_from_parsed(
+            phone=payload.get('customer_phone'),
+            parsed=parsed,
+            source=DeliveryOrderMeta.SOURCE_WEB,
+            default_customer_name='Cliente Web',
+        )
+        try:
+            broadcast_delivery_event('order_created', {
+                'id': str(order.id),
+                'customer_name': order.delivery_meta.customer_name,
+                'total': str(order.total),
+                'status': order.delivery_meta.status,
+            })
+        except Exception:
+            pass
+        return Response(OrderSerializer(order).data, status=201)
+
+
 class DeliveryOrderDetailView(APIView):
     def patch(self, request, id):
         if _forbidden(request):
@@ -63,16 +112,5 @@ class DeliveryOrderDetailView(APIView):
             order.closed_at = None
             update_fields.append('closed_at')
         order.save(update_fields=update_fields)
-
-        if old_status != DeliveryOrderMeta.STATUS_DISPATCHED and new_status == DeliveryOrderMeta.STATUS_DISPATCHED:
-            customer_phone = meta.customer_phone
-            if customer_phone:
-                client = WhatsAppClient()
-                if client.is_configured():
-                    message = (
-                        f'Seu pedido esta a caminho.\n\n'
-                        f'Ola, {meta.customer_name}. O pedido #{order.id} saiu para entrega.'
-                    )
-                    client.send_message(customer_phone, message)
 
         return Response(OrderSerializer(order).data)

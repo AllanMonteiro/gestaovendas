@@ -30,11 +30,16 @@ const normalizeOrders = (payload: OrdersResponse): Order[] => {
   return []
 }
 
+const sourceLabel: Record<string, string> = {
+  web: 'WEB',
+  pdv: 'PDV',
+  whatsapp: 'WHATSAPP',
+}
+
 const PedidosDelivery: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
-  const [pulling, setPulling] = useState(false)
   const wsRefreshTimerRef = useRef<number | null>(null)
 
   const fetchOrders = async () => {
@@ -79,33 +84,15 @@ const PedidosDelivery: React.FC = () => {
     void fetchOrders()
   }
 
-  const handlePullFromWhats = async () => {
-    setPulling(true)
-    setFeedback(null)
+  const publicMenuUrl = `${window.location.origin}/cardapio`
+
+  const handleCopyCatalogLink = async () => {
     try {
-      const text = await navigator.clipboard.readText()
-      if (!text || text.length < 5) {
-        setFeedback({ type: 'error', text: 'Copie a mensagem do WhatsApp antes de clicar aqui.' })
-        return
-      }
-
-      const response = await api.post('/api/whatsapp/manual-parse', { text })
-      if (response.data.ok) {
-        setFeedback({ type: 'ok', text: `Pedido de ${response.data.customer_name} criado com sucesso.` })
-        void fetchOrders()
-      }
+      await navigator.clipboard.writeText(publicMenuUrl)
+      setFeedback({ type: 'ok', text: 'Link do cardapio copiado.' })
     } catch (err: any) {
-      const msg = err.response?.data?.error || 'Erro ao processar mensagem. Verifique a configuracao da IA.'
-      setFeedback({ type: 'error', text: msg })
-    } finally {
-      setPulling(false)
+      setFeedback({ type: 'error', text: err?.message || 'Nao foi possivel copiar o link do cardapio.' })
     }
-  }
-
-  const handleShareCatalog = () => {
-    const url = `${window.location.origin}/cardapio`
-    const message = `Ola! Confira nosso cardapio digital e faca seu pedido por aqui: ${url}`
-    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank')
   }
 
   return (
@@ -115,17 +102,16 @@ const PedidosDelivery: React.FC = () => {
 
         <div className="flex gap-2">
           <button
-            onClick={handleShareCatalog}
+            onClick={() => window.open(publicMenuUrl, '_blank', 'noopener,noreferrer')}
             className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50"
           >
-            <span>Link</span> Enviar Cardapio
+            <span>Web</span> Abrir Cardapio
           </button>
           <button
-            onClick={handlePullFromWhats}
-            disabled={pulling}
+            onClick={() => void handleCopyCatalogLink()}
             className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
           >
-            <span>Inbox</span> {pulling ? 'Processando...' : 'Puxar do WhatsApp'}
+            <span>Link</span> Copiar Link
           </button>
         </div>
       </div>
@@ -161,7 +147,7 @@ const PedidosDelivery: React.FC = () => {
                   <div>
                     <div className="mb-4 flex items-start justify-between">
                       <span className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-700">
-                        {order.source}
+                        {sourceLabel[order.source] || order.source}
                       </span>
                       <p className="text-xl font-black text-slate-800">R$ {order.total}</p>
                     </div>

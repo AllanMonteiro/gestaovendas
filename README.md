@@ -115,3 +115,8 @@ python app.py
 ```
 
 Health do agent: `http://127.0.0.1:9876/health`
+
+## Backend local
+
+Padrao atual da virtualenv do backend: `backend/.venv`.
+Se existir `backend/venv`, trate como legado e prefira remover para evitar instalar dependencias em ambiente duplicado.

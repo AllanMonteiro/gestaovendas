@@ -140,12 +140,15 @@ def add_item(*, order: Order, product_id: int, qty: Decimal, weight_grams: int |
         raise ValueError('qty must be > 0')
     if order.status in [Order.STATUS_PAID, Order.STATUS_CANCELED]:
         raise ValueError('Order is already finalized')
-    price = ProductPrice.objects.filter(product_id=product_id).first()
+    product_name = None
+    price = ProductPrice.objects.select_related('product').only('price', 'product__id', 'product__name').filter(product_id=product_id).first()
     if price:
         unit_price = price.price
+        if getattr(price, 'product', None) is not None:
+            product_name = price.product.name
     else:
-        from apps.catalog.models import Product
-        product = Product.objects.select_related('category').get(id=product_id)
+        product = Product.objects.select_related('category').only('id', 'name', 'category__price').get(id=product_id)
+        product_name = product.name
         if product.category.price:
             unit_price = product.category.price
         else:
@@ -160,7 +163,9 @@ def add_item(*, order: Order, product_id: int, qty: Decimal, weight_grams: int |
         total=total,
         notes=notes,
     )
-    recalc_order_totals(order)
+    increment_order_totals(order, subtotal_delta=total)
+    if product_name:
+        item.product = Product(id=product_id, name=product_name)
     return item
 
 
@@ -170,6 +175,17 @@ def recalc_order_totals(order: Order) -> None:
     order.subtotal = q2(subtotal)
     order.total = q2(order.subtotal - order.discount)
     order.save(update_fields=['subtotal', 'total'])
+
+
+def increment_order_totals(order: Order, *, subtotal_delta: Decimal, total_delta: Decimal | None = None) -> None:
+    subtotal_delta = q2(Decimal(subtotal_delta))
+    total_delta = subtotal_delta if total_delta is None else q2(Decimal(total_delta))
+    Order.objects.filter(pk=order.pk).update(
+        subtotal=models.F('subtotal') + subtotal_delta,
+        total=models.F('total') + total_delta,
+    )
+    order.subtotal = q2((order.subtotal or Decimal('0')) + subtotal_delta)
+    order.total = q2((order.total or Decimal('0')) + total_delta)
 
 
 @transaction.atomic

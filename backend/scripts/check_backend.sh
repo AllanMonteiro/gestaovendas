@@ -7,8 +7,12 @@ echo "== Check rapido backend =="
 [ -f "requirements.txt" ] && echo "[OK] requirements.txt encontrado" || echo "[ERRO] requirements.txt nao encontrado"
 [ -d "apps" ] && echo "[OK] pasta apps encontrada" || echo "[ERRO] pasta apps nao encontrada"
 
-if [ -d ".venv" ] && [ -d "venv" ]; then
-  echo "[ALERTA] ha duas virtualenvs: .venv e venv"
+if [ -d ".venv" ]; then
+  echo "[OK] virtualenv padrao encontrada: .venv"
+fi
+
+if [ -d "venv" ]; then
+  echo "[ALERTA] existe uma virtualenv legada em ./venv; padrao atual: .venv"
 fi
 
 if [ -f ".env.prod" ] && [ -f ".env.production" ]; then

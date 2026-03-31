@@ -29,7 +29,12 @@ HAS_VENV=0
 
 if [ "$HAS_DOT_VENV" -eq 1 ] && [ "$HAS_VENV" -eq 1 ]; then
   echo "ATENCAO: existem duas virtualenvs (.venv e venv)."
-  echo "Recomendado manter apenas uma."
+  echo "Padrao atual do projeto: manter apenas .venv."
+elif [ "$HAS_DOT_VENV" -eq 1 ]; then
+  echo "OK: virtualenv padrao encontrada em .venv."
+elif [ "$HAS_VENV" -eq 1 ]; then
+  echo "ATENCAO: apenas ./venv foi encontrada."
+  echo "Padrao atual do projeto: migrar para .venv."
 fi
 
 echo ""
@@ -157,8 +162,12 @@ echo "== Check rapido backend =="
 [ -f "requirements.txt" ] && echo "[OK] requirements.txt encontrado" || echo "[ERRO] requirements.txt nao encontrado"
 [ -d "apps" ] && echo "[OK] pasta apps encontrada" || echo "[ERRO] pasta apps nao encontrada"
 
-if [ -d ".venv" ] && [ -d "venv" ]; then
-  echo "[ALERTA] ha duas virtualenvs: .venv e venv"
+if [ -d ".venv" ]; then
+  echo "[OK] virtualenv padrao encontrada: .venv"
+fi
+
+if [ -d "venv" ]; then
+  echo "[ALERTA] existe uma virtualenv legada em ./venv; padrao atual: .venv"
 fi
 
 if [ -f ".env.prod" ] && [ -f ".env.production" ]; then

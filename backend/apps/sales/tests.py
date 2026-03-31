@@ -5,6 +5,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 from apps.accounts.models import User
 from apps.audit.models import AuditLog
+from apps.catalog.models import Category, Product, ProductPrice
 from apps.loyalty.models import Customer, LoyaltyAccount, LoyaltyMove
 from apps.sales.models import Order, StoreConfig
 from apps.sales import services
@@ -88,6 +89,44 @@ class LoyaltyEarnOnCloseOrderTests(TestCase):
         account.refresh_from_db()
         self.assertEqual(account.points_balance, 13)
         self.assertEqual(LoyaltyMove.objects.filter(order=order, type=LoyaltyMove.TYPE_EARN).count(), 1)
+
+
+class AddItemTotalsTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email='cash-item@test.com', password='test', name='Cash Item')
+        services.open_cash(user=self.user, initial_float=Decimal('100.00'))
+        self.category = Category.objects.create(name='Sorvetes', price=Decimal('7.50'))
+        self.product = Product.objects.create(category=self.category, name='Casquinha')
+        ProductPrice.objects.create(
+            product=self.product,
+            store_id=1,
+            price=Decimal('7.50'),
+            cost=Decimal('0'),
+            freight=Decimal('0'),
+            other=Decimal('0'),
+            tax_pct=Decimal('0'),
+            overhead_pct=Decimal('0'),
+            margin_pct=Decimal('0'),
+        )
+
+    def test_add_item_updates_order_totals_incrementally(self):
+        order = services.create_order_idempotent(
+            order_type='COUNTER',
+            table_label=None,
+            customer=None,
+            client_request_id=uuid4(),
+        )
+
+        first_item = services.add_item(order=order, product_id=self.product.id, qty=Decimal('1'), weight_grams=None, notes=None)
+        self.assertEqual(first_item.product.name, 'Casquinha')
+        order.refresh_from_db()
+        self.assertEqual(order.subtotal, Decimal('7.50'))
+        self.assertEqual(order.total, Decimal('7.50'))
+
+        services.add_item(order=order, product_id=self.product.id, qty=Decimal('2'), weight_grams=None, notes='duas bolas')
+        order.refresh_from_db()
+        self.assertEqual(order.subtotal, Decimal('22.50'))
+        self.assertEqual(order.total, Decimal('22.50'))
 
 
 class LoyaltyRedeemOnCloseOrderTests(TestCase):

@@ -14,7 +14,6 @@ urlpatterns = [
     path('api/', include('apps.kitchen.urls')),
     path('api/loyalty/', include('apps.loyalty.urls')),
     path('api/orders/', include('apps.orders.urls')),
-    path('api/whatsapp/', include('apps.integrations.whatsapp.urls')),
     path('api/', include('apps.reports.urls')),
     path('api/', include('apps.audit.urls')),
     path('media/<path:path>', serve, {'document_root': settings.MEDIA_ROOT}),

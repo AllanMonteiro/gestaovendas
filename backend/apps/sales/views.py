@@ -159,6 +159,18 @@ def _get_order_by_id_or_client_request_id(order_id, *, include_items=False):
     return qs.filter(client_request_id=order_id).first()
 
 
+def _orders_for_mutation():
+    return Order.objects.only('id', 'status', 'subtotal', 'discount', 'total', 'client_request_id')
+
+
+def _get_order_for_mutation(order_id):
+    qs = _orders_for_mutation()
+    order = qs.filter(id=order_id).first()
+    if order:
+        return order
+    return qs.filter(client_request_id=order_id).first()
+
+
 class OrdersCreateView(APIView):
     def post(self, request):
         if auth_is_required() and not user_has_permission(request.user, 'pdv.operate'):
@@ -212,7 +224,7 @@ class OrderItemsView(APIView):
         if auth_is_required() and not user_has_permission(request.user, 'pdv.operate'):
             return Response({'detail': 'Forbidden'}, status=403)
         data = request.data
-        order = _get_order_by_id_or_client_request_id(id)
+        order = _get_order_for_mutation(id)
         if not order:
             return Response({'detail': 'Order not found'}, status=404)
         try:
@@ -236,7 +248,7 @@ class OrderItemDeleteView(APIView):
             services.ensure_open_cash_session()
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=400)
-        order = _get_order_by_id_or_client_request_id(id)
+        order = _get_order_for_mutation(id)
         if not order:
             return Response({'detail': 'Order not found'}, status=404)
         item = OrderItem.objects.get(id=item_id, order=order)
@@ -265,7 +277,7 @@ class OrderItemDeleteView(APIView):
             services.ensure_open_cash_session()
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=400)
-        order = _get_order_by_id_or_client_request_id(id)
+        order = _get_order_for_mutation(id)
         if not order:
             return Response({'detail': 'Order not found'}, status=404)
         item = OrderItem.objects.get(id=item_id, order=order)
