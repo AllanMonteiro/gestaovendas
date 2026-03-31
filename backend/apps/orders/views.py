@@ -1,12 +1,15 @@
-from django.utils import timezone
+import unicodedata
+
 from django.db import transaction
+from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.accounts.permissions import auth_is_required, user_has_permission
 from apps.integrations.whatsapp.services_ai import create_delivery_order_from_parsed
-from apps.sales.models import DeliveryOrderMeta, Order, Payment
+from apps.sales import services
 from apps.sales.consumers import broadcast_delivery_event
+from apps.sales.models import DeliveryOrderMeta, Order, Payment
 
 from .serializers import OrderSerializer
 
@@ -23,24 +26,26 @@ PAYMENT_METHOD_ALIASES = {
     'pix': Payment.METHOD_PIX,
     'card': Payment.METHOD_CARD,
     'cartao': Payment.METHOD_CARD,
-    'cartão': Payment.METHOD_CARD,
     'credito': Payment.METHOD_CARD,
-    'crédito': Payment.METHOD_CARD,
     'debito': Payment.METHOD_CARD,
-    'débito': Payment.METHOD_CARD,
 }
 
 
+def _normalize_payment_token(raw_method):
+    text = unicodedata.normalize('NFKD', (raw_method or '').strip().lower())
+    return ''.join(ch for ch in text if not unicodedata.combining(ch))
+
+
 def _normalize_payment_method(raw_method):
-    normalized = (raw_method or '').strip().lower()
+    normalized = _normalize_payment_token(raw_method)
     return PAYMENT_METHOD_ALIASES.get(normalized, Payment.METHOD_PIX)
 
 
 def _build_delivery_payment_meta(raw_method):
-    normalized = (raw_method or '').strip().lower()
-    if normalized in {'credito', 'crédito'}:
+    normalized = _normalize_payment_token(raw_method)
+    if normalized == 'credito':
         return {'card_type': 'CREDIT'}
-    if normalized in {'debito', 'débito'}:
+    if normalized == 'debito':
         return {'card_type': 'DEBIT'}
     return None
 
@@ -148,9 +153,13 @@ class DeliveryOrderDetailView(APIView):
         new_status = (request.data.get('status') or '').strip().lower()
         if new_status not in STATUS_TO_CORE:
             return Response({'detail': 'Invalid status'}, status=400)
+        if new_status == DeliveryOrderMeta.STATUS_DELIVERED:
+            try:
+                services.ensure_open_cash_session()
+            except ValueError as exc:
+                return Response({'detail': str(exc)}, status=400)
 
         meta = order.delivery_meta
-        old_status = meta.status
         meta.status = new_status
         meta.save(update_fields=['status'])
 

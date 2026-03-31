@@ -555,7 +555,6 @@ class CashDashboardView(APIView):
         config = services.get_store_config()
         open_orders_count = Order.objects.filter(
             status__in=[Order.STATUS_OPEN, Order.STATUS_SENT, Order.STATUS_READY],
-            delivery_meta__isnull=True,
         ).aggregate(total=Count('id'))['total'] or 0
 
         payload = {

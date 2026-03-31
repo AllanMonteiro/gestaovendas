@@ -132,7 +132,6 @@ class StoreConfigUiSerializer(StoreConfigAssetSerializer):
             'printer',
             'receipt_header_lines',
             'receipt_footer_lines',
-            'pix_key',
         ]
 
 

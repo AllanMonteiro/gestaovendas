@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, Suspense, lazy } from 'react'
-import { createBrowserRouter, NavLink, Outlet, useNavigate, useRouteError } from 'react-router-dom'
+import { createBrowserRouter, NavLink, Outlet, useLocation, useNavigate, useRouteError } from 'react-router-dom'
 import { useOutboxSync } from './useSync'
 import { api } from '../api/client'
 import { type AuthSession } from './auth'
@@ -132,6 +132,7 @@ const RouteErrorBoundary: React.FC = () => {
 
 const Layout: React.FC = () => {
   useOutboxSync()
+  const location = useLocation()
   const navigate = useNavigate()
 
   const [storeName, setStoreName] = useState('Sorveteria POS')
@@ -208,6 +209,11 @@ const Layout: React.FC = () => {
   }, [])
 
   useEffect(() => {
+    if (location.pathname === '/delivery') {
+      setDeliveryAlerts([])
+      return
+    }
+
     const clearAlertTimeout = (id: string) => {
       const timeoutId = deliveryAlertTimeoutsRef.current[id]
       if (timeoutId !== undefined) {
@@ -294,7 +300,7 @@ const Layout: React.FC = () => {
       }
       Object.keys(deliveryAlertTimeoutsRef.current).forEach(clearAlertTimeout)
     }
-  }, [])
+  }, [location.pathname])
 
   return (
     <div className="app-shell">

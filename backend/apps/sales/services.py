@@ -405,7 +405,6 @@ def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_car
         raise ValueError('No open session')
     has_open_orders = Order.objects.filter(
         status__in=[Order.STATUS_OPEN, Order.STATUS_SENT, Order.STATUS_READY],
-        delivery_meta__isnull=True,
     ).exists()
     if has_open_orders:
         raise ValueError('Existem pedidos em aberto. Feche/cancele todos antes de fechar o caixa.')
