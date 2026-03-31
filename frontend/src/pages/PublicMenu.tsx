@@ -200,7 +200,9 @@ const PublicMenu: React.FC = () => {
           : `Pedido ${orderLabel} enviado com sucesso.`
       })
       if (whatsappUrl) {
-        window.open(whatsappUrl, '_blank', 'noopener,noreferrer')
+        window.setTimeout(() => {
+          window.location.assign(whatsappUrl)
+        }, 250)
       }
       resetForm()
     } catch (error: any) {
