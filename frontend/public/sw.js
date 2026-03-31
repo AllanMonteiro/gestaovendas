@@ -1,9 +1,34 @@
-const CACHE_NAME = 'sorveteria-pos-v7'
-const ASSETS = ['/', '/index.html', '/manifest.json']
+const CACHE_NAME = 'sorveteria-pos-v8'
+const ASSETS = ['/', '/index.html', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png']
+
+const extractAssetUrls = (html) => {
+  const assetUrls = new Set()
+  const matches = html.matchAll(/(?:src|href)=["'](\/[^"'?#]+\.(?:js|css|ico|png|svg|webmanifest))["']/gi)
+  for (const match of matches) {
+    if (match[1]) {
+      assetUrls.add(match[1])
+    }
+  }
+  return [...assetUrls]
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+    (async () => {
+      const cache = await caches.open(CACHE_NAME)
+      let dynamicAssets = []
+      try {
+        const indexResponse = await fetch('/index.html', { cache: 'reload' })
+        if (indexResponse.ok) {
+          const html = await indexResponse.text()
+          dynamicAssets = extractAssetUrls(html)
+          await cache.put('/index.html', new Response(html, { headers: { 'Content-Type': 'text/html' } }))
+        }
+      } catch {
+        // Se a rede falhar no install, seguimos com o shell minimo ja conhecido.
+      }
+      await cache.addAll([...new Set([...ASSETS, ...dynamicAssets])])
+    })()
   )
   self.skipWaiting()
 })

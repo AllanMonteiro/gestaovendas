@@ -7,6 +7,29 @@ import './styles.css'
 const root = document.getElementById('root')!
 const CHUNK_RELOAD_KEY = 'sorveteria.chunk-reload-at'
 
+const preloadOfflineRoutes = () => {
+  if (!window.navigator.onLine) {
+    return
+  }
+  const warmUp = () => {
+    void import('./pages/PDV')
+    void import('./pages/Caixa')
+    void import('./pages/Cozinha')
+    void import('./pages/Produtos')
+    void import('./pages/Configuracoes')
+    void import('./pages/Fidelidade')
+    void import('./pages/Relatorios')
+    void import('./pages/PedidosDelivery')
+    void import('./pages/PublicMenu')
+  }
+
+  if ('requestIdleCallback' in window) {
+    ;(window as Window & { requestIdleCallback: (callback: () => void) => number }).requestIdleCallback(warmUp)
+    return
+  }
+  window.setTimeout(warmUp, 1500)
+}
+
 const maybeRecoverFromChunkError = (reason: unknown) => {
   const message =
     typeof reason === 'string'
@@ -86,5 +109,7 @@ if ('serviceWorker' in navigator) {
 
       void registration.update()
     }).catch(() => undefined)
+
+    preloadOfflineRoutes()
   })
 }
