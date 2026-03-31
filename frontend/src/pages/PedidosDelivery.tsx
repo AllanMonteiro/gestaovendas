@@ -4,6 +4,10 @@ import { connectWS } from '../api/ws'
 import '../styles.css'
 
 interface Order {
+  items?: Array<{
+    product_name: string
+    quantity: string | number
+  }>
   id: string
   customer_name: string
   customer_phone: string
@@ -165,6 +169,18 @@ const PedidosDelivery: React.FC = () => {
                           <span className="opacity-50">End</span> {order.address}
                         </p>
                       </div>
+                      {order.items && order.items.length > 0 ? (
+                        <div className="mt-4 rounded-2xl bg-slate-50 p-3">
+                          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Itens do pedido</p>
+                          <div className="mt-2 space-y-1">
+                            {order.items.map((item, index) => (
+                              <p key={`${order.id}-${index}`} className="text-sm text-slate-600">
+                                {item.quantity}x {item.product_name}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 

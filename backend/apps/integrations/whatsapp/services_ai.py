@@ -128,18 +128,23 @@ def create_delivery_order_from_parsed(
 
     cep = parsed.get('cep')
     neighborhood = parsed.get('neighborhood')
-    delivery_fee = Decimal('0.00')
     if cep:
-        cep_data = get_address_from_cep(cep)
-        if cep_data:
-            neighborhood = cep_data.get('bairro', neighborhood)
-            delivery_fee = q2(calculate_delivery_fee(neighborhood))
+        try:
+            cep_data = get_address_from_cep(cep)
+            if cep_data:
+                neighborhood = cep_data.get('bairro', neighborhood)
+        except Exception:
+            logger.exception('Falha ao consultar CEP para delivery web')
+    delivery_fee = q2(calculate_delivery_fee(neighborhood)) if neighborhood else Decimal('0.00')
     total = q2(subtotal + delivery_fee)
 
     pix_payload = None
     config = get_store_config()
     if config.pix_key:
-        pix_payload = generate_static_pix(config.pix_key, float(total), config.store_name, 'Belem')
+        try:
+            pix_payload = generate_static_pix(config.pix_key, float(total), config.store_name, 'Belem')
+        except Exception:
+            logger.exception('Falha ao gerar PIX do pedido de delivery')
 
     customer = _resolve_customer(phone, parsed)
     business_date, daily_number = allocate_order_sequence()
