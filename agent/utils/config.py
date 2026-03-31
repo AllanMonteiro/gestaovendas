@@ -15,6 +15,8 @@ class Settings:
     printer_net_host = os.getenv('PRINTER_NET_HOST', '192.168.0.50')
     printer_net_port = int(os.getenv('PRINTER_NET_PORT', '9100'))
     receipt_width_mm = int(os.getenv('RECEIPT_WIDTH_MM', '80'))
+    printer_bold = os.getenv('PRINTER_BOLD', 'true').lower() == 'true'
+    printer_double_strike = os.getenv('PRINTER_DOUBLE_STRIKE', 'true').lower() == 'true'
     scale_enabled = os.getenv('SCALE_ENABLED', 'true').lower() == 'true'
     scale_port = os.getenv('SCALE_PORT', 'COM3')
     scale_baud = int(os.getenv('SCALE_BAUD', '9600'))

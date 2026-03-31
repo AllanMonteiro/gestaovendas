@@ -7,6 +7,26 @@ type LoginGateProps = {
 }
 
 const emptyBootstrap = { name: 'Administrador', email: 'admin@admin.com', password: 'admin123' }
+const sessionRetryDelaysMs = [0, 700, 1800]
+
+const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
+
+const getErrorStatus = (error: unknown) => {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error &&
+    typeof (error as { response?: { status?: unknown } }).response?.status === 'number'
+  ) {
+    return (error as { response: { status: number } }).response.status
+  }
+  return null
+}
+
+const isTemporarySessionError = (error: unknown) => {
+  const status = getErrorStatus(error)
+  return status === null || [408, 425, 429, 500, 502, 503, 504].includes(status)
+}
 
 export const LoginGate: React.FC<LoginGateProps> = ({ children }) => {
   const [loading, setLoading] = useState(true)
@@ -19,24 +39,41 @@ export const LoginGate: React.FC<LoginGateProps> = ({ children }) => {
 
   const loadSession = useCallback(async () => {
     setLoading(true)
-    try {
-      const response = await api.get<AuthSession>('/api/auth/session')
-      setSession(response.data)
-      setFeedback('')
-    } catch {
-      // Broken or expired local tokens should not bypass the login gate.
-      clearTokens()
+    setFeedback('')
+    let lastError: unknown = null
+
+    for (const delay of sessionRetryDelaysMs) {
+      if (delay > 0) {
+        setFeedback('Conectando ao servidor...')
+        await wait(delay)
+      }
+
       try {
         const response = await api.get<AuthSession>('/api/auth/session')
         setSession(response.data)
         setFeedback('')
-      } catch {
-        setSession(null)
-        setFeedback('Erro ao carregar sessao. Verifique se o servidor esta rodando.')
+        setLoading(false)
+        return
+      } catch (error) {
+        lastError = error
+        const status = getErrorStatus(error)
+        if (status === 401 || status === 403) {
+          clearTokens()
+          break
+        }
+        if (!isTemporarySessionError(error)) {
+          break
+        }
       }
-    } finally {
-      setLoading(false)
     }
+
+    setSession(null)
+    setFeedback(
+      isTemporarySessionError(lastError)
+        ? 'O servidor ainda nao respondeu como esperado. O sistema tentou novamente antes de mostrar este aviso.'
+        : 'Erro ao carregar sessao. Verifique se o servidor esta rodando.'
+    )
+    setLoading(false)
   }, [])
 
   useEffect(() => {
@@ -98,7 +135,7 @@ export const LoginGate: React.FC<LoginGateProps> = ({ children }) => {
         <section className="panel w-full p-6 sm:p-8">
           <h1 className="text-2xl font-semibold text-slate-900">Nao foi possivel validar a sessao</h1>
           <p className="mt-2 text-sm text-slate-500">
-            O sistema nao conseguiu confirmar o acesso agora. Tente novamente ou recarregue a pagina.
+            O sistema nao conseguiu confirmar o acesso agora. Tente novamente ou aguarde alguns segundos se o servidor ainda estiver iniciando.
           </p>
           {feedback ? <p className="mt-4 text-sm text-rose-600">{feedback}</p> : null}
           <div className="mt-6 flex flex-wrap gap-3">

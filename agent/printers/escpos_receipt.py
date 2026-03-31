@@ -17,6 +17,21 @@ def auto_discover_printer() -> str:
     return ""
 
 
+def _safe_raw(printer, command: bytes):
+    try:
+        printer._raw(command)
+    except Exception:
+        return
+
+
+def _set_emphasis(printer, enabled: bool):
+    value = b'\x01' if enabled else b'\x00'
+    if settings.printer_bold:
+        _safe_raw(printer, b'\x1bE' + value)
+    if settings.printer_double_strike:
+        _safe_raw(printer, b'\x1bG' + value)
+
+
 def print_escpos(lines: List[str], printer_name: str = None):
     printer = None
     if settings.printer_conn == 'net':
@@ -46,7 +61,14 @@ def print_escpos(lines: List[str], printer_name: str = None):
         print("Error: Printer not found or configured incorrectly.")
         return
 
+    try:
+        printer.hw('INIT')
+    except Exception:
+        pass
+
+    _set_emphasis(printer, True)
     for line in lines:
         printer.text(line + '\n')
+    _set_emphasis(printer, False)
     printer.cut()
     printer.close()

@@ -85,53 +85,76 @@ const buildHtml = (payload: ThermalReceiptPayload) => {
   <title>${escapeHtml(payload.title || 'Cupom')}</title>
   <style>
     @page { size: 80mm auto; margin: 4mm; }
+    * {
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+      box-sizing: border-box;
+    }
     body {
       margin: 0;
-      background: #f3f4f6;
-      font-family: "Courier New", monospace;
-      color: #111827;
+      background: #ffffff;
+      font-family: "Lucida Console", "Courier New", monospace;
+      color: #000000;
+      font-size: 12px;
+      font-weight: 600;
     }
     .receipt {
-      width: 72mm;
+      width: 76mm;
       margin: 0 auto;
-      background: #fff;
-      padding: 4mm 3mm 6mm;
-      box-sizing: border-box;
+      background: #ffffff;
+      padding: 3mm 2.5mm 5mm;
     }
     .center {
       text-align: center;
-      font-size: 11px;
-      line-height: 1.35;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.4;
     }
     .title {
       text-align: center;
-      font-weight: 700;
+      font-weight: 800;
       margin-top: 4px;
-      margin-bottom: 4px;
-      font-size: 13px;
+      margin-bottom: 6px;
+      font-size: 15px;
+      text-transform: uppercase;
     }
     .divider {
-      border-top: 1px dashed #111827;
-      margin: 8px 0;
+      border-top: 2px solid #000000;
+      margin: 7px 0;
     }
     .row {
       display: flex;
       justify-content: space-between;
       gap: 8px;
-      font-size: 11px;
+      font-size: 12px;
+      font-weight: 700;
       line-height: 1.4;
     }
     .item {
-      margin-bottom: 7px;
+      margin-bottom: 8px;
     }
     .item-name {
-      font-size: 11px;
-      font-weight: 700;
-      margin-bottom: 2px;
+      font-size: 12px;
+      font-weight: 800;
+      margin-bottom: 3px;
     }
     .notes {
-      font-size: 10px;
-      margin-top: 2px;
+      font-size: 11px;
+      font-weight: 600;
+      margin-top: 3px;
+    }
+    strong {
+      font-weight: 800;
+    }
+    @media print {
+      html, body {
+        background: #ffffff !important;
+        color: #000000 !important;
+      }
+      .receipt {
+        width: auto;
+        margin: 0;
+      }
     }
   </style>
 </head>
