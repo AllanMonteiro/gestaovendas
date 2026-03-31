@@ -135,7 +135,7 @@ def create_delivery_order_from_parsed(
                 neighborhood = cep_data.get('bairro', neighborhood)
         except Exception:
             logger.exception('Falha ao consultar CEP para delivery web')
-    delivery_fee = q2(calculate_delivery_fee(neighborhood)) if neighborhood else Decimal('0.00')
+    delivery_fee = q2(Decimal(str(calculate_delivery_fee(neighborhood)))) if neighborhood else Decimal('0.00')
     total = q2(subtotal + delivery_fee)
 
     pix_payload = None

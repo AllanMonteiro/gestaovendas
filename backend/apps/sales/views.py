@@ -481,7 +481,6 @@ class CashStatusView(APIView):
             method=Payment.METHOD_CASH,
             order__status=Order.STATUS_PAID,
             order__closed_at__gte=session.opened_at,
-            order__delivery_meta__isnull=True,
         ).aggregate(total=Sum('amount'))['total'] or Decimal('0')
         reforco = moves['reforco'] or Decimal('0')
         sangria = moves['sangria'] or Decimal('0')
@@ -544,7 +543,6 @@ class CashDashboardView(APIView):
         orders_qs = Order.objects.filter(
             status=Order.STATUS_PAID,
             closed_at__isnull=False,
-            delivery_meta__isnull=True,
         ).select_related('customer')
         orders_qs = _apply_range_filter_for_field(orders_qs, 'closed_at', from_date, to_date).order_by('-closed_at')[:orders_limit]
         moves_qs = CashMove.objects.select_related('session', 'user').order_by('-created_at')

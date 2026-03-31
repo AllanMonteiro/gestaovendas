@@ -45,15 +45,32 @@ const PedidosDelivery: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
   const wsRefreshTimerRef = useRef<number | null>(null)
+  const pollTimerRef = useRef<number | null>(null)
+  const knownOrderIdsRef = useRef<Set<string>>(new Set())
 
-  const fetchOrders = async () => {
+  const playNewOrderAlert = () => {
+    const audio = new Audio('/notification.mp3')
+    audio.play().catch(() => undefined)
+  }
+
+  const fetchOrders = async (options?: { silent?: boolean; notifyOnNew?: boolean }) => {
     try {
       const response = await api.get<OrdersResponse>('/api/orders/')
-      setOrders(normalizeOrders(response.data))
+      const nextOrders = normalizeOrders(response.data)
+      if (options?.notifyOnNew) {
+        const incomingOrder = nextOrders.find((order) => !knownOrderIdsRef.current.has(order.id))
+        if (incomingOrder) {
+          playNewOrderAlert()
+        }
+      }
+      knownOrderIdsRef.current = new Set(nextOrders.map((order) => order.id))
+      setOrders(nextOrders)
       setFeedback((current) => (current?.type === 'error' ? null : current))
     } catch (err: any) {
-      const msg = err.response?.data?.detail || 'Erro ao carregar pedidos de delivery.'
-      setFeedback({ type: 'error', text: msg })
+      if (!options?.silent) {
+        const msg = err.response?.data?.detail || 'Erro ao carregar pedidos de delivery.'
+        setFeedback({ type: 'error', text: msg })
+      }
     } finally {
       setLoading(false)
     }
@@ -62,16 +79,20 @@ const PedidosDelivery: React.FC = () => {
   useEffect(() => {
     void fetchOrders()
 
+    pollTimerRef.current = window.setInterval(() => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        void fetchOrders({ silent: true, notifyOnNew: true })
+      }
+    }, 3000)
+
     const ws = connectWS('/ws/pdv', (data) => {
       if (data?.event === 'order_created' && data?.source === 'delivery') {
         if (wsRefreshTimerRef.current !== null) {
           window.clearTimeout(wsRefreshTimerRef.current)
         }
         wsRefreshTimerRef.current = window.setTimeout(() => {
-          void fetchOrders()
+          void fetchOrders({ notifyOnNew: true })
         }, 120)
-        const audio = new Audio('/notification.mp3')
-        audio.play().catch(() => undefined)
       }
     })
 
@@ -79,6 +100,9 @@ const PedidosDelivery: React.FC = () => {
       ws.close()
       if (wsRefreshTimerRef.current !== null) {
         window.clearTimeout(wsRefreshTimerRef.current)
+      }
+      if (pollTimerRef.current !== null) {
+        window.clearInterval(pollTimerRef.current)
       }
     }
   }, [])

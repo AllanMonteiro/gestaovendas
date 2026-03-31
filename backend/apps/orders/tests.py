@@ -4,7 +4,8 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.catalog.models import Category, Product, ProductPrice
-from apps.sales.models import DeliveryOrderMeta, Order
+from apps.reports import queries as report_queries
+from apps.sales.models import DeliveryOrderMeta, Order, Payment
 
 
 class PublicDeliveryOrderCreateTests(TestCase):
@@ -51,3 +52,47 @@ class PublicDeliveryOrderCreateTests(TestCase):
         self.assertEqual(order.items.count(), 1)
         self.assertEqual(order.delivery_meta.source, DeliveryOrderMeta.SOURCE_WEB)
         self.assertEqual(order.delivery_meta.customer_name, 'Cliente Web')
+
+    def test_delivered_delivery_generates_payment_and_enters_reports(self):
+        create_response = self.client.post(
+            '/api/orders/public/',
+            {
+                'customer_name': 'Cliente Delivery',
+                'customer_phone': '91999990000',
+                'address': 'Rua das Flores, 10',
+                'neighborhood': 'Centro',
+                'payment_method': 'Dinheiro',
+                'items': [
+                    {
+                        'product_id': self.product.id,
+                        'product_name': 'Cascao',
+                        'quantity': 2,
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+
+        patch_response = self.client.patch(
+            f"/api/orders/{create_response.data['id']}/",
+            {'status': DeliveryOrderMeta.STATUS_DELIVERED},
+            format='json',
+        )
+
+        self.assertEqual(patch_response.status_code, 200)
+
+        order = Order.objects.get(id=create_response.data['id'])
+        payment = Payment.objects.get(order=order)
+
+        self.assertEqual(order.status, Order.STATUS_PAID)
+        self.assertEqual(order.delivery_meta.status, DeliveryOrderMeta.STATUS_DELIVERED)
+        self.assertEqual(payment.method, Payment.METHOD_CASH)
+        self.assertEqual(payment.amount, order.total)
+
+        summary = report_queries.summary()
+        by_payment = report_queries.by_payment()
+
+        self.assertEqual(summary['total_sales'], order.total)
+        self.assertTrue(any(row['payment_method'] == Payment.METHOD_CASH and row['total'] == order.total for row in by_payment))

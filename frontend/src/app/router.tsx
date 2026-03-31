@@ -22,6 +22,11 @@ type StoreHeaderConfig = {
   theme?: string
 }
 
+type BrandingDetail = {
+  store_name?: string
+  logo_url?: string | null
+}
+
 const CHUNK_RELOAD_KEY = 'sorveteria.chunk-reload-at'
 
 const normalizeTheme = (value?: string | null) => {
@@ -150,6 +155,16 @@ const Layout: React.FC = () => {
     }
     window.addEventListener('sorveteria:theme', handler as EventListener)
     return () => window.removeEventListener('sorveteria:theme', handler as EventListener)
+  }, [])
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const custom = event as CustomEvent<BrandingDetail>
+      setStoreName(custom.detail?.store_name || 'Sorveteria POS')
+      setLogoUrl(custom.detail?.logo_url || '')
+    }
+    window.addEventListener('sorveteria:branding', handler as EventListener)
+    return () => window.removeEventListener('sorveteria:branding', handler as EventListener)
   }, [])
 
   useEffect(() => {

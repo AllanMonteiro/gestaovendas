@@ -70,6 +70,10 @@ const normalizeTheme = (value?: string | null) => {
   return 'cream'
 }
 
+const dispatchBrandingUpdate = (store_name: string, logo_url: string | null) => {
+  window.dispatchEvent(new CustomEvent('sorveteria:branding', { detail: { store_name, logo_url } }))
+}
+
 const Configuracoes: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [feedback, setFeedback] = useState('')
@@ -324,10 +328,18 @@ const Configuracoes: React.FC = () => {
         category_images: normalizedCategoryImages
       })
       window.dispatchEvent(new CustomEvent('sorveteria:theme', { detail: normalizeTheme(theme) }))
+      dispatchBrandingUpdate(storeName, logoUrl.trim() || null)
       setFeedback('Configuracoes salvas com sucesso.')
     } catch {
       setFeedback('Falha ao salvar configuracoes.')
     }
+  }
+
+  const persistLogo = async (nextLogoUrl: string | null) => {
+    await api.put('/api/config', {
+      logo_url: nextLogoUrl,
+    })
+    dispatchBrandingUpdate(storeName, nextLogoUrl)
   }
 
   const handlePickLogo = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -359,8 +371,9 @@ const Configuracoes: React.FC = () => {
         }
       })
       if (slot === 'logo') {
+        await persistLogo(response.data.url)
         setLogoUrl(response.data.url)
-        setFeedback('Logo enviada com sucesso.')
+        setFeedback('Logo enviada e salva com sucesso.')
       } else if (categoryId) {
         setSelectedCategoryImage(response.data.url)
         handleCategoryImageChange(Number(categoryId), response.data.url)
@@ -379,6 +392,16 @@ const Configuracoes: React.FC = () => {
 
   const [printers, setPrinters] = useState<{ name: string, id: string }[]>([])
   const [selectedPrinter, setSelectedPrinter] = useState('auto')
+
+  const handleRemoveLogo = async () => {
+    try {
+      await persistLogo(null)
+      setLogoUrl('')
+      setFeedback('Logo removida com sucesso.')
+    } catch {
+      setFeedback('Falha ao remover logo.')
+    }
+  }
 
   const handleFetchPrinters = async () => {
     if (!agentUrl.trim()) {
@@ -541,7 +564,7 @@ const Configuracoes: React.FC = () => {
             <img src={logoUrl} alt="Logo da empresa" className="h-14 w-14 rounded-lg border border-brand-100 object-cover" />
             <button
               type="button"
-              onClick={() => setLogoUrl('')}
+              onClick={() => void handleRemoveLogo()}
               className="h-9 rounded-lg border border-rose-300 px-3 text-rose-700"
             >
               Remover logo

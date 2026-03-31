@@ -417,7 +417,6 @@ def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_car
         order__status=Order.STATUS_PAID,
         order__closed_at__gte=session.opened_at,
         order__closed_at__lte=session.closed_at,
-        order__delivery_meta__isnull=True,
     ).aggregate(
         cash=models.Sum('amount', filter=models.Q(method=Payment.METHOD_CASH)),
         pix=models.Sum('amount', filter=models.Q(method=Payment.METHOD_PIX)),
