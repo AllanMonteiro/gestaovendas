@@ -424,25 +424,20 @@ const PDV: React.FC = () => {
     try {
       const response = await api.get<Order>(`/api/orders/${orderId}/detail`)
       const order = normalizeOrder(response.data)
-      startTransition(() => {
-        setSelectedOrder(order)
-      })
-      void saveLocalOrder(order)
+      applyOrderSnapshot(order)
       setIsOnline(true)
       return order
     } catch {
       const localOrder = await getLocalOrder<Order>(orderId)
       if (localOrder) {
         const normalizedLocalOrder = normalizeOrder(localOrder)
-        startTransition(() => {
-          setSelectedOrder(normalizedLocalOrder)
-        })
+        applyOrderSnapshot(normalizedLocalOrder)
         return normalizedLocalOrder
       }
       setIsOnline(false)
       return null
     }
-  }, [])
+  }, [applyOrderSnapshot])
 
   const fetchCatalog = useCallback(async () => {
     try {
@@ -550,8 +545,8 @@ const PDV: React.FC = () => {
           setOpenOrders(localOrders.map((order) => toOrderSummary(order)))
         })
         let nextSelectedOrderId = selectedOrderId
-        if (typeof targetOrderId !== 'undefined') {
-          nextSelectedOrderId = targetOrderId
+        if (typeof options?.targetOrderId !== 'undefined') {
+          nextSelectedOrderId = options.targetOrderId
         }
         const fallbackOrder = nextSelectedOrderId ? localOrders.find((order) => order.id === nextSelectedOrderId) ?? null : null
         if (fallbackOrder) {
@@ -887,7 +882,6 @@ const PDV: React.FC = () => {
       setQtyProduct(null)
       setQtyInput('1')
       setIsOnline(true)
-      refreshOpenOrdersInBackground(orderId)
     } catch (error: any) {
       if (error.enqueued) {
         if (selectedOrder && selectedOrder.id === orderId) {
@@ -970,7 +964,6 @@ const PDV: React.FC = () => {
       setShowScaleModal(false)
       setScaleProduct(null)
       setIsOnline(true)
-      refreshOpenOrdersInBackground(orderId)
     } catch (error: any) {
       if (error.enqueued) {
         if (selectedOrder && selectedOrder.id === orderId) {
@@ -1058,7 +1051,6 @@ const PDV: React.FC = () => {
         notes: notesInput ?? item.notes ?? ''
       })
       applyOrderSnapshot(nextOrder)
-      refreshOpenOrdersInBackground(selectedOrder.id)
       setFeedback({ type: 'ok', text: 'Item atualizado.' })
     } catch (error: any) {
       if (error.enqueued) {
@@ -1089,7 +1081,6 @@ const PDV: React.FC = () => {
     try {
       await api.delete(`/api/orders/${selectedOrder.id}/items/${item.id}`)
       applyOrderSnapshot(nextOrder)
-      refreshOpenOrdersInBackground(selectedOrder.id)
       setFeedback({ type: 'ok', text: 'Item removido do pedido.' })
     } catch (error: any) {
       if (error.enqueued) {

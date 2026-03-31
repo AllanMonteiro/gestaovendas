@@ -143,7 +143,10 @@ class ProductListView(generics.ListCreateAPIView):
         return ProductSerializer
 
     def get_queryset(self):
-        qs = Product.objects.select_related('category').all()
+        compact = self.request.query_params.get('compact', '').strip().lower() in {'1', 'true', 'yes', 'on'}
+        qs = Product.objects.all()
+        if not compact:
+            qs = qs.select_related('category')
         category_id = self.request.query_params.get('category_id')
         query = self.request.query_params.get('q')
         if category_id:

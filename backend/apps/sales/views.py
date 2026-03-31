@@ -3,7 +3,7 @@ import logging
 import re
 from datetime import datetime, time, timedelta
 from django.core.files.storage import default_storage
-from django.db.models import Count, Sum, Q
+from django.db.models import Count, Sum, Q, Prefetch
 from rest_framework.response import Response
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.views import APIView
@@ -28,6 +28,42 @@ from apps.loyalty.models import Customer
 from apps.reports import queries as report_queries
 
 logger = logging.getLogger(__name__)
+
+ORDER_ONLY_FIELDS = (
+    'id',
+    'business_date',
+    'daily_number',
+    'status',
+    'type',
+    'customer_id',
+    'table_label',
+    'subtotal',
+    'discount',
+    'total',
+    'created_at',
+    'closed_at',
+    'canceled_reason',
+    'client_request_id',
+    'customer__id',
+    'customer__name',
+    'customer__last_name',
+    'customer__phone',
+)
+
+ORDER_ITEM_ONLY_FIELDS = (
+    'id',
+    'order_id',
+    'product_id',
+    'qty',
+    'weight_grams',
+    'unit_price',
+    'total',
+    'notes',
+    'product__id',
+    'product__name',
+)
+
+
 def _is_date_only(value: str) -> bool:
     return isinstance(value, str) and 'T' not in value and ' ' not in value and ':' not in value
 
@@ -97,10 +133,21 @@ def _serialize_orders(orders, include_items=True):
     return serializer_class(orders, many=True).data
 
 
+def _orders_base_queryset():
+    return Order.objects.select_related('customer').only(*ORDER_ONLY_FIELDS)
+
+
+def _order_items_prefetch():
+    return Prefetch(
+        'items',
+        queryset=OrderItem.objects.select_related('product').only(*ORDER_ITEM_ONLY_FIELDS),
+    )
+
+
 def _orders_with_customer(include_items=True):
-    qs = Order.objects.select_related('customer').filter(delivery_meta__isnull=True)
+    qs = _orders_base_queryset().filter(delivery_meta__isnull=True)
     if include_items:
-        qs = qs.prefetch_related('items__product')
+        qs = qs.prefetch_related(_order_items_prefetch())
     return qs
 
 
