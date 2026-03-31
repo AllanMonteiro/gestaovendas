@@ -8,6 +8,7 @@ type StoreConfig = {
   logo_url?: string | null
   cnpj?: string | null
   address?: string | null
+  whatsapp_number?: string | null
   theme?: string
   points_per_real?: number
   point_value_real?: string
@@ -93,6 +94,7 @@ const Configuracoes: React.FC = () => {
   const [logoUrl, setLogoUrl] = useState('')
   const [cnpj, setCnpj] = useState('')
   const [address, setAddress] = useState('')
+  const [whatsappNumber, setWhatsappNumber] = useState('')
   const [pixKey, setPixKey] = useState('')
   const [theme, setTheme] = useState('cream')
 
@@ -143,6 +145,7 @@ const Configuracoes: React.FC = () => {
       setLogoUrl(cfg.logo_url || '')
       setCnpj(cfg.cnpj || '')
       setAddress(cfg.address || '')
+      setWhatsappNumber(cfg.whatsapp_number || '')
       setPixKey(cfg.pix_key || '')
       setTheme(normalizeTheme(cfg.theme))
       setPointsPerReal(String(cfg.points_per_real ?? 1))
@@ -306,6 +309,7 @@ const Configuracoes: React.FC = () => {
         logo_url: logoUrl.trim() || null,
         cnpj,
         address,
+        whatsapp_number: whatsappNumber.trim() || null,
         pix_key: pixKey,
         theme: normalizeTheme(theme),
         points_per_real: Number(pointsPerReal) || 1,
@@ -550,6 +554,7 @@ const Configuracoes: React.FC = () => {
         <input value={cnpj} onChange={(event) => setCnpj(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="CNPJ" />
         <input value={companyName} onChange={(event) => setCompanyName(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Razao social" />
         <input value={address} onChange={(event) => setAddress(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Endereco" />
+        <input value={whatsappNumber} onChange={(event) => setWhatsappNumber(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="WhatsApp da empresa (com DDD)" />
         <label className="text-sm font-medium text-slate-700">Logo da empresa</label>
         <input
           type="file"

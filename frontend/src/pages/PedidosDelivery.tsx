@@ -46,25 +46,11 @@ const PedidosDelivery: React.FC = () => {
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
   const wsRefreshTimerRef = useRef<number | null>(null)
   const pollTimerRef = useRef<number | null>(null)
-  const knownOrderIdsRef = useRef<Set<string>>(new Set())
 
-  const playNewOrderAlert = () => {
-    const audio = new Audio('/notification.mp3')
-    audio.play().catch(() => undefined)
-  }
-
-  const fetchOrders = async (options?: { silent?: boolean; notifyOnNew?: boolean }) => {
+  const fetchOrders = async (options?: { silent?: boolean }) => {
     try {
       const response = await api.get<OrdersResponse>('/api/orders/')
-      const nextOrders = normalizeOrders(response.data)
-      if (options?.notifyOnNew) {
-        const incomingOrder = nextOrders.find((order) => !knownOrderIdsRef.current.has(order.id))
-        if (incomingOrder) {
-          playNewOrderAlert()
-        }
-      }
-      knownOrderIdsRef.current = new Set(nextOrders.map((order) => order.id))
-      setOrders(nextOrders)
+      setOrders(normalizeOrders(response.data))
       setFeedback((current) => (current?.type === 'error' ? null : current))
     } catch (err: any) {
       if (!options?.silent) {
@@ -81,7 +67,7 @@ const PedidosDelivery: React.FC = () => {
 
     pollTimerRef.current = window.setInterval(() => {
       if (document.visibilityState === 'visible' && navigator.onLine) {
-        void fetchOrders({ silent: true, notifyOnNew: true })
+        void fetchOrders({ silent: true })
       }
     }, 3000)
 
@@ -91,7 +77,7 @@ const PedidosDelivery: React.FC = () => {
           window.clearTimeout(wsRefreshTimerRef.current)
         }
         wsRefreshTimerRef.current = window.setTimeout(() => {
-          void fetchOrders({ notifyOnNew: true })
+          void fetchOrders()
         }, 120)
       }
     })

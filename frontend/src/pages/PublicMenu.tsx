@@ -22,6 +22,7 @@ type ProductPrice = {
 
 type StoreConfig = {
   store_name?: string
+  whatsapp_number?: string | null
 }
 
 type CartItem = {
@@ -36,6 +37,20 @@ type CreatedOrderResponse = {
 
 const formatBRL = (val: string | number) => Number(val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
+const normalizeWhatsAppNumber = (value?: string | null) => {
+  const digits = String(value || '').replace(/\D/g, '')
+  if (!digits) {
+    return ''
+  }
+  if (digits.startsWith('55')) {
+    return digits
+  }
+  if (digits.length === 10 || digits.length === 11) {
+    return `55${digits}`
+  }
+  return digits
+}
+
 const PublicMenu: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -43,6 +58,7 @@ const PublicMenu: React.FC = () => {
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null)
   const [cart, setCart] = useState<CartItem[]>([])
   const [storeName, setStoreName] = useState('Nossa Sorveteria')
+  const [storeWhatsAppNumber, setStoreWhatsAppNumber] = useState('')
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
   const [address, setAddress] = useState('')
@@ -53,6 +69,7 @@ const PublicMenu: React.FC = () => {
   const [submitting, setSubmitting] = useState(false)
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
   const [lastOrderId, setLastOrderId] = useState('')
+  const [lastWhatsAppUrl, setLastWhatsAppUrl] = useState('')
 
   useEffect(() => {
     const load = async () => {
@@ -77,6 +94,7 @@ const PublicMenu: React.FC = () => {
         setCategories(cats.data)
         setProducts(activeProducts)
         setStoreName(config.data.store_name || 'Nossa Sorveteria')
+        setStoreWhatsAppNumber(normalizeWhatsAppNumber(config.data.whatsapp_number))
         setPricesByProductId(nextPrices)
         if (cats.data.length > 0) {
           setSelectedCategoryId(cats.data[0].id)
@@ -162,8 +180,28 @@ const PublicMenu: React.FC = () => {
           quantity: item.qty,
         })),
       })
+      const orderLabel = response.data.id.slice(0, 8)
+      const whatsappMessage = [
+        `Ola! Acabei de fazer o pedido ${orderLabel} no cardapio online da ${storeName}.`,
+        `Cliente: ${customerName.trim()}.`,
+        `Forma de pagamento escolhida: ${paymentMethod}.`,
+        'Quero continuar por aqui para receber os dados de pagamento com mais seguranca.'
+      ].join(' ')
+      const whatsappUrl = storeWhatsAppNumber
+        ? `https://wa.me/${storeWhatsAppNumber}?text=${encodeURIComponent(whatsappMessage)}`
+        : ''
+
       setLastOrderId(response.data.id)
-      setFeedback({ type: 'ok', text: `Pedido enviado com sucesso. Numero ${response.data.id.slice(0, 8)}.` })
+      setLastWhatsAppUrl(whatsappUrl)
+      setFeedback({
+        type: 'ok',
+        text: whatsappUrl
+          ? `Pedido ${orderLabel} enviado com sucesso. Agora vamos continuar no WhatsApp da loja para combinar o pagamento.`
+          : `Pedido ${orderLabel} enviado com sucesso.`
+      })
+      if (whatsappUrl) {
+        window.open(whatsappUrl, '_blank', 'noopener,noreferrer')
+      }
       resetForm()
     } catch (error: any) {
       const message = error?.response?.data?.detail || 'Nao foi possivel enviar seu pedido agora.'
@@ -190,6 +228,18 @@ const PublicMenu: React.FC = () => {
             }`}
           >
             {feedback.text}
+            {feedback.type === 'ok' && lastWhatsAppUrl ? (
+              <div className="mt-3">
+                <a
+                  href={lastWhatsAppUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-700"
+                >
+                  Continuar no WhatsApp
+                </a>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}

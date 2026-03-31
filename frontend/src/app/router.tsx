@@ -1,9 +1,10 @@
-import React, { useEffect, useState, Suspense, lazy } from 'react'
-import { createBrowserRouter, NavLink, Outlet, useRouteError } from 'react-router-dom'
+import React, { useEffect, useRef, useState, Suspense, lazy } from 'react'
+import { createBrowserRouter, NavLink, Outlet, useNavigate, useRouteError } from 'react-router-dom'
 import { useOutboxSync } from './useSync'
 import { api } from '../api/client'
 import { type AuthSession } from './auth'
 import { LoginGate } from '../components/LoginGate'
+import { connectWS } from '../api/ws'
 
 // Lazy loading das paginas para reduzir o bundle inicial
 const PDV = lazy(() => import('../pages/PDV'))
@@ -26,6 +27,18 @@ type BrandingDetail = {
   store_name?: string
   logo_url?: string | null
 }
+
+type DeliveryAlert = {
+  id: string
+  customer_name?: string
+  total?: string
+}
+
+type DeliveryOrderPayload = DeliveryAlert & {
+  created_at?: string
+}
+
+type DeliveryOrdersResponse = DeliveryOrderPayload[] | { results?: DeliveryOrderPayload[] } | { data?: DeliveryOrderPayload[] }
 
 const CHUNK_RELOAD_KEY = 'sorveteria.chunk-reload-at'
 
@@ -65,6 +78,19 @@ const NavLoading: React.FC = () => (
     <div className="text-sm font-medium text-slate-400">Carregando modulo...</div>
   </div>
 )
+
+const normalizeDeliveryOrders = (payload: DeliveryOrdersResponse): DeliveryOrderPayload[] => {
+  if (Array.isArray(payload)) {
+    return payload
+  }
+  if (payload && Array.isArray(payload.results)) {
+    return payload.results
+  }
+  if (payload && Array.isArray(payload.data)) {
+    return payload.data
+  }
+  return []
+}
 
 const RouteErrorBoundary: React.FC = () => {
   const error = useRouteError()
@@ -106,11 +132,17 @@ const RouteErrorBoundary: React.FC = () => {
 
 const Layout: React.FC = () => {
   useOutboxSync()
+  const navigate = useNavigate()
 
   const [storeName, setStoreName] = useState('Sorveteria POS')
   const [logoUrl, setLogoUrl] = useState<string>('')
   const [theme, setTheme] = useState<string>('cream')
   const [currentUserName, setCurrentUserName] = useState('')
+  const [deliveryAlerts, setDeliveryAlerts] = useState<DeliveryAlert[]>([])
+  const knownDeliveryOrderIdsRef = useRef<Set<string>>(new Set())
+  const deliveryPollTimerRef = useRef<number | null>(null)
+  const deliveryRefreshTimerRef = useRef<number | null>(null)
+  const deliveryAlertTimeoutsRef = useRef<Record<string, number>>({})
 
   const links = [
     { to: '/', label: 'Caixa' },
@@ -175,6 +207,95 @@ const Layout: React.FC = () => {
     return () => window.removeEventListener('sorveteria:logout', handler)
   }, [])
 
+  useEffect(() => {
+    const clearAlertTimeout = (id: string) => {
+      const timeoutId = deliveryAlertTimeoutsRef.current[id]
+      if (timeoutId !== undefined) {
+        window.clearTimeout(timeoutId)
+        delete deliveryAlertTimeoutsRef.current[id]
+      }
+    }
+
+    const playDeliveryAlertSound = () => {
+      const audio = new Audio('/notification.mp3')
+      audio.play().catch(() => undefined)
+    }
+
+    const pushDeliveryAlerts = (orders: DeliveryOrderPayload[]) => {
+      if (!orders.length) {
+        return
+      }
+      playDeliveryAlertSound()
+      setDeliveryAlerts((current) => {
+        const next = [...current]
+        for (const order of orders) {
+          clearAlertTimeout(order.id)
+          next.unshift({
+            id: order.id,
+            customer_name: order.customer_name || 'Novo pedido delivery',
+            total: order.total,
+          })
+          deliveryAlertTimeoutsRef.current[order.id] = window.setTimeout(() => {
+            setDeliveryAlerts((items) => items.filter((item) => item.id !== order.id))
+            delete deliveryAlertTimeoutsRef.current[order.id]
+          }, 15000)
+        }
+        return next.filter((alert, index, source) => source.findIndex((item) => item.id === alert.id) === index).slice(0, 3)
+      })
+    }
+
+    const fetchDeliveryOrders = async (options?: { notifyOnNew?: boolean }) => {
+      try {
+        const response = await api.get<DeliveryOrdersResponse>('/api/orders/')
+        const nextOrders = normalizeDeliveryOrders(response.data)
+        if (options?.notifyOnNew) {
+          const newOrders = nextOrders.filter((order) => !knownDeliveryOrderIdsRef.current.has(order.id))
+          if (newOrders.length) {
+            const ordered = [...newOrders].sort((a, b) => {
+              const left = a.created_at ? new Date(a.created_at).getTime() : 0
+              const right = b.created_at ? new Date(b.created_at).getTime() : 0
+              return left - right
+            })
+            pushDeliveryAlerts(ordered)
+          }
+        }
+        knownDeliveryOrderIdsRef.current = new Set(nextOrders.map((order) => order.id))
+      } catch {
+        // Silently ignore; some roles may not have delivery access.
+      }
+    }
+
+    void fetchDeliveryOrders()
+
+    deliveryPollTimerRef.current = window.setInterval(() => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        void fetchDeliveryOrders({ notifyOnNew: true })
+      }
+    }, 3000)
+
+    const ws = connectWS('/ws/pdv', (data) => {
+      if (data?.event === 'order_created' && data?.source === 'delivery') {
+        if (deliveryRefreshTimerRef.current !== null) {
+          window.clearTimeout(deliveryRefreshTimerRef.current)
+        }
+        deliveryRefreshTimerRef.current = window.setTimeout(() => {
+          void fetchDeliveryOrders({ notifyOnNew: true })
+        }, 120)
+      }
+    })
+
+    return () => {
+      ws.close()
+      if (deliveryPollTimerRef.current !== null) {
+        window.clearInterval(deliveryPollTimerRef.current)
+      }
+      if (deliveryRefreshTimerRef.current !== null) {
+        window.clearTimeout(deliveryRefreshTimerRef.current)
+      }
+      Object.keys(deliveryAlertTimeoutsRef.current).forEach(clearAlertTimeout)
+    }
+  }, [])
+
   return (
     <div className="app-shell">
       <header className="sticky top-0 z-20 border-b border-brand-100 bg-white/80 backdrop-blur">
@@ -226,6 +347,47 @@ const Layout: React.FC = () => {
           </div>
         </div>
       </header>
+      {deliveryAlerts.length ? (
+        <div className="pointer-events-none fixed right-4 top-24 z-50 flex w-[min(92vw,24rem)] flex-col gap-3">
+          {deliveryAlerts.map((alert) => (
+            <div
+              key={alert.id}
+              className="pointer-events-auto rounded-2xl border border-emerald-200 bg-white/95 p-4 shadow-xl shadow-emerald-100 backdrop-blur"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-emerald-600">Novo Delivery</p>
+                  <h3 className="mt-1 text-base font-bold text-slate-900">{alert.customer_name || 'Novo pedido'}</h3>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Pedido recebido agora{alert.total ? ` • R$ ${alert.total}` : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const timeoutId = deliveryAlertTimeoutsRef.current[alert.id]
+                    if (timeoutId !== undefined) {
+                      window.clearTimeout(timeoutId)
+                      delete deliveryAlertTimeoutsRef.current[alert.id]
+                    }
+                    setDeliveryAlerts((current) => current.filter((item) => item.id !== alert.id))
+                  }}
+                  className="rounded-full border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-500"
+                >
+                  Fechar
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate('/delivery')}
+                className="mt-3 w-full rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
+              >
+                Abrir Delivery
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <main className="mx-auto max-w-[1500px] px-3 py-4 sm:px-4 md:px-6 md:py-6 lg:py-8">
         <Suspense fallback={<NavLoading />}>
           <Outlet />

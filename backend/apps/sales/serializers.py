@@ -125,6 +125,7 @@ class StoreConfigUiSerializer(StoreConfigAssetSerializer):
             'logo_url',
             'cnpj',
             'address',
+            'whatsapp_number',
             'theme',
             'point_value_real',
             'min_redeem_points',

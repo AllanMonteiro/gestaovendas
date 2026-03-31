@@ -184,6 +184,7 @@ class StoreConfig(models.Model):
     logo_url = models.TextField(null=True, blank=True)
     cnpj = models.CharField(max_length=32, null=True, blank=True)
     address = models.CharField(max_length=255, null=True, blank=True)
+    whatsapp_number = models.CharField(max_length=30, null=True, blank=True)
     theme = models.CharField(max_length=20, default='light')
     points_per_real = models.IntegerField(default=1)
     point_value_real = models.DecimalField(max_digits=10, decimal_places=2, default=0)
