@@ -22,6 +22,7 @@ export async function listOutbox() {
 export async function markOutboxError(id: number, error: string) {
   const item = await db.outbox.get(id)
   await db.outbox.update(id, { attempts: (item?.attempts ?? 0) + 1, last_error: error })
+  dispatchOutboxChanged()
 }
 
 export async function removeOutbox(id: number) {

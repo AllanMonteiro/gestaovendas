@@ -7,6 +7,7 @@ import { OrderPanel } from '../components/OrderPanel'
 import { ScaleProductModal } from '../components/ScaleProductModal'
 import { PaymentModal, type PaymentEntry, type PaymentMethod } from '../components/PaymentModal'
 import { getCategories, getProducts, getConfig, saveCategories, saveProducts, saveConfig } from '../offline/catalog'
+import type { OutboxItem } from '../offline/db'
 import { getLocalOrder, listLocalOrders, removeLocalOrder, saveLocalOrder, syncLocalOpenOrders } from '../offline/localOrders'
 import { enqueueOutbox, listOutbox, removeOutboxEntries } from '../offline/outbox'
 import { connectWS } from '../api/ws'
@@ -140,6 +141,14 @@ const getApiErrorText = (error: unknown, fallback: string) => {
   }
   return fallback
 }
+
+const isNetworkError = (error: unknown) =>
+  Boolean(
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error &&
+    !(error as { response?: unknown }).response
+  )
 
 const toOrderSummary = (order: Order | OrderSummary): OrderSummary => {
   const { items, ...summary } = order
@@ -285,6 +294,7 @@ const PDV: React.FC = () => {
   const [scaleProduct, setScaleProduct] = useState<Product | null>(null)
   const [isOnline, setIsOnline] = useState(window.navigator.onLine)
   const [outboxCount, setOutboxCount] = useState(0)
+  const [outboxPreview, setOutboxPreview] = useState<OutboxItem[]>([])
   const [pendingSyncOrderKeys, setPendingSyncOrderKeys] = useState<Set<string>>(new Set())
   const deferredProductSearchTerm = useDeferredValue(productSearchTerm)
   const wsRefreshTimerRef = useRef<number | null>(null)
@@ -344,6 +354,7 @@ const PDV: React.FC = () => {
     const items = await listOutbox()
     startTransition(() => {
       setOutboxCount(items.length)
+      setOutboxPreview(items.slice(0, 8))
       setPendingSyncOrderKeys(buildPendingOrderKeys(items))
     })
   }, [])
@@ -427,14 +438,16 @@ const PDV: React.FC = () => {
       applyOrderSnapshot(order)
       setIsOnline(true)
       return order
-    } catch {
+    } catch (error) {
       const localOrder = await getLocalOrder<Order>(orderId)
       if (localOrder) {
         const normalizedLocalOrder = normalizeOrder(localOrder)
         applyOrderSnapshot(normalizedLocalOrder)
         return normalizedLocalOrder
       }
-      setIsOnline(false)
+      if (isNetworkError(error)) {
+        setIsOnline(false)
+      }
       return null
     }
   }, [applyOrderSnapshot])
@@ -473,7 +486,7 @@ const PDV: React.FC = () => {
       void saveProducts(prods)
       void saveConfig(conf)
       setIsOnline(true)
-    } catch {
+    } catch (error) {
       const [localCats, localProds, localConf] = await Promise.all([
         getCategories(),
         getProducts(),
@@ -503,7 +516,9 @@ const PDV: React.FC = () => {
         })
         setFeedback({ type: 'ok', text: 'Modo offline: usando dados locais.' })
       }
-      setIsOnline(false)
+      if (isNetworkError(error)) {
+        setIsOnline(false)
+      }
     }
   }, [])
 
@@ -538,7 +553,7 @@ const PDV: React.FC = () => {
         }
         return
       }
-    } catch {
+    } catch (error) {
       const localOrders = (await listLocalOrders<Order | OrderSummary>()).map((order) => normalizeOrder(order as Order))
       if (localOrders.length > 0) {
         startTransition(() => {
@@ -561,7 +576,9 @@ const PDV: React.FC = () => {
           })
         }
       }
-      setIsOnline(false)
+      if (isNetworkError(error)) {
+        setIsOnline(false)
+      }
     }
   }, [fetchOrderDetail, mergeSelectedOrderSummary, selectedOrder?.id, selectedOrderId])
 
@@ -1377,6 +1394,7 @@ const PDV: React.FC = () => {
             openOrders={openOrders}
             selectedOrderId={selectedOrderId}
             outboxCount={outboxCount}
+            outboxPreview={outboxPreview}
             isOnline={isOnline}
             canOperateOrders={canOperateOrders}
             pendingSyncOrderKeys={pendingSyncOrderKeys}

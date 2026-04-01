@@ -174,3 +174,28 @@ class PublicDeliveryOrderCreateTests(TestCase):
 
         self.assertEqual(patch_response.status_code, 400)
         self.assertIn('Caixa fechado', patch_response.data['detail'])
+
+    def test_staff_can_delete_delivery_order(self):
+        create_response = self.client.post(
+            '/api/orders/public/',
+            {
+                'customer_name': 'Cliente Excluir',
+                'customer_phone': '91999990000',
+                'address': 'Rua das Flores, 10',
+                'neighborhood': 'Centro',
+                'payment_method': 'PIX',
+                'items': [
+                    {
+                        'product_id': self.product.id,
+                        'product_name': 'Cascao',
+                        'quantity': 1,
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        response = self.staff_client.delete(f"/api/orders/{create_response.data['id']}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Order.objects.filter(id=create_response.data['id']).exists())

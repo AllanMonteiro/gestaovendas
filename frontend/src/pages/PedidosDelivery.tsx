@@ -43,6 +43,7 @@ const sourceLabel: Record<string, string> = {
 const PedidosDelivery: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
+  const [busyOrderId, setBusyOrderId] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
   const wsRefreshTimerRef = useRef<number | null>(null)
   const pollTimerRef = useRef<number | null>(null)
@@ -94,8 +95,35 @@ const PedidosDelivery: React.FC = () => {
   }, [])
 
   const updateStatus = async (id: string, status: string) => {
-    await api.patch(`/api/orders/${id}/`, { status })
-    void fetchOrders()
+    setBusyOrderId(id)
+    try {
+      await api.patch(`/api/orders/${id}/`, { status })
+      setFeedback({ type: 'ok', text: 'Status do pedido atualizado.' })
+      void fetchOrders({ silent: true })
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || 'Nao foi possivel atualizar o status do pedido.'
+      setFeedback({ type: 'error', text: msg })
+    } finally {
+      setBusyOrderId((current) => (current === id ? null : current))
+    }
+  }
+
+  const handleDeleteOrder = async (order: Order) => {
+    const confirmed = window.confirm(`Excluir o pedido #${order.id}? Essa acao nao pode ser desfeita.`)
+    if (!confirmed) {
+      return
+    }
+    setBusyOrderId(order.id)
+    try {
+      await api.delete(`/api/orders/${order.id}/`)
+      setOrders((current) => current.filter((item) => item.id !== order.id))
+      setFeedback({ type: 'ok', text: 'Pedido excluido com sucesso.' })
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || 'Nao foi possivel excluir o pedido.'
+      setFeedback({ type: 'error', text: msg })
+    } finally {
+      setBusyOrderId((current) => (current === order.id ? null : current))
+    }
   }
 
   const publicMenuUrl = `${window.location.origin}/cardapio`
@@ -212,28 +240,38 @@ const PedidosDelivery: React.FC = () => {
 
                     <div className="flex flex-wrap gap-2">
                       <button
+                        disabled={busyOrderId === order.id}
                         onClick={() => void updateStatus(order.id, 'preparo')}
-                        className={`min-w-[80px] flex-1 rounded-2xl py-2 text-[10px] font-bold transition ${
+                        className={`min-w-[80px] flex-1 rounded-2xl py-2 text-[10px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                           order.status === 'preparo' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'bg-slate-100 text-slate-600'
                         }`}
                       >
                         Preparo
                       </button>
                       <button
+                        disabled={busyOrderId === order.id}
                         onClick={() => void updateStatus(order.id, 'despachado')}
-                        className={`min-w-[80px] flex-1 rounded-2xl py-2 text-[10px] font-bold transition ${
+                        className={`min-w-[80px] flex-1 rounded-2xl py-2 text-[10px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                           order.status === 'despachado' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-200' : 'bg-slate-100 text-slate-600'
                         }`}
                       >
                         Saiu
                       </button>
                       <button
+                        disabled={busyOrderId === order.id}
                         onClick={() => void updateStatus(order.id, 'entregue')}
-                        className={`min-w-[80px] flex-1 rounded-2xl py-2 text-[10px] font-bold transition ${
+                        className={`min-w-[80px] flex-1 rounded-2xl py-2 text-[10px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                           order.status === 'entregue' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200' : 'bg-slate-100 text-slate-600'
                         }`}
                       >
                         Entregue
+                      </button>
+                      <button
+                        disabled={busyOrderId === order.id}
+                        onClick={() => void handleDeleteOrder(order)}
+                        className="min-w-[80px] flex-1 rounded-2xl bg-rose-50 py-2 text-[10px] font-bold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {busyOrderId === order.id ? 'Excluindo...' : 'Excluir'}
                       </button>
                     </div>
                   </div>

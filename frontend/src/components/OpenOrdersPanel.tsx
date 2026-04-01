@@ -14,6 +14,13 @@ type OpenOrdersPanelProps = {
   openOrders: OrderSummary[]
   selectedOrderId: string | null
   outboxCount: number
+  outboxPreview: Array<{
+    id?: number
+    method: string
+    url: string
+    attempts: number
+    last_error?: string
+  }>
   isOnline: boolean
   canOperateOrders: boolean
   pendingSyncOrderKeys: Set<string>
@@ -29,6 +36,12 @@ const formatBRL = (value: string | number) => {
 
 const getOrderDisplayNumber = (order: Pick<OrderSummary, 'id' | 'display_number'>) => order.display_number || order.id.slice(0, 8)
 
+const formatOutboxUrl = (url: string) =>
+  url.replace(
+    /\/api\/orders\/([0-9a-f-]{36})/gi,
+    (_match, orderId: string) => `/api/orders/${orderId.slice(0, 8)}`
+  )
+
 const isOrderPendingSync = (order: OrderSummary, pendingSyncOrderKeys: Set<string>) =>
   Boolean(
     order.local_only ||
@@ -40,6 +53,7 @@ const OpenOrdersPanelComponent: React.FC<OpenOrdersPanelProps> = ({
   openOrders,
   selectedOrderId,
   outboxCount,
+  outboxPreview,
   isOnline,
   canOperateOrders,
   pendingSyncOrderKeys,
@@ -57,8 +71,24 @@ const OpenOrdersPanelComponent: React.FC<OpenOrdersPanelProps> = ({
       </div>
       {outboxCount > 0 ? (
         <div className="mt-2 rounded-lg bg-orange-50 p-2 text-[10px] text-orange-700">
-          {outboxCount} pedido(s) pendente(s) de sincronizacao.
+          {outboxCount} operacao(oes) pendente(s) de sincronizacao.
         </div>
+      ) : null}
+      {outboxPreview.length > 0 ? (
+        <details className="mt-2 rounded-lg border border-orange-100 bg-white/70 p-2 text-[10px] text-slate-600">
+          <summary className="cursor-pointer font-semibold text-orange-700">Ver pendencias</summary>
+          <div className="mt-2 space-y-2">
+            {outboxPreview.map((item) => (
+              <div key={`${item.id ?? item.url}-${item.method}`} className="rounded-lg bg-slate-50 p-2">
+                <div className="font-semibold text-slate-700">
+                  {item.method} {formatOutboxUrl(item.url)}
+                </div>
+                {item.attempts > 0 ? <div>Tentativas: {item.attempts}</div> : null}
+                {item.last_error ? <div>Ultimo erro: {item.last_error}</div> : null}
+              </div>
+            ))}
+          </div>
+        </details>
       ) : null}
       {!isOnline ? (
         <div className="mt-2 rounded-lg bg-red-50 p-2 text-[10px] text-red-700">

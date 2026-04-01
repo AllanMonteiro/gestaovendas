@@ -175,3 +175,20 @@ class DeliveryOrderDetailView(APIView):
         _sync_delivery_payment(order)
 
         return Response(OrderSerializer(order).data)
+
+    @transaction.atomic
+    def delete(self, request, id):
+        if not user_has_permission(request.user, 'order.delete'):
+            return Response({'detail': 'Forbidden'}, status=403)
+
+        try:
+            services.ensure_open_cash_session()
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=400)
+
+        order = _delivery_orders().filter(id=id).first()
+        if not order:
+            return Response({'detail': 'Order not found'}, status=404)
+
+        order.delete()
+        return Response({'status': 'deleted'})
