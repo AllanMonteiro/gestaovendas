@@ -5,6 +5,12 @@ type Product = {
   name: string
 }
 
+type ScaleStatusResponse = {
+  connected?: boolean
+  port?: string
+  last_error?: string | null
+}
+
 type ScaleProductModalProps = {
   product: Product | null
   agentUrl: string
@@ -60,6 +66,23 @@ const ScaleProductModalComponent: React.FC<ScaleProductModalProps> = ({
       const data = await response.json()
       const grams = Number(data.grams ?? 0)
       const nextWeight = Number.isFinite(grams) && grams > 0 ? Math.round(grams) : 0
+      if (nextWeight <= 0) {
+        try {
+          const statusResponse = await fetch(`${normalizedAgentUrl}/scale/status`)
+          if (statusResponse.ok) {
+            const status = (await statusResponse.json()) as ScaleStatusResponse
+            if (status.connected === false) {
+              const detail = status.last_error ? ` (${status.last_error})` : ''
+              onError(`Balanca sem comunicacao na porta ${status.port || 'configurada'}${detail}.`)
+              return
+            }
+          }
+        } catch {
+          // Keep the fallback message below when the status endpoint is unavailable.
+        }
+        onError('Nenhum peso foi lido da balanca. Confira cabo, porta COM e driver.')
+        return
+      }
       setWeightInput(nextWeight > 0 ? String(nextWeight) : '')
     } catch {
       onError('Falha ao ler balanca. Confira se o Agent esta rodando.')

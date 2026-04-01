@@ -50,6 +50,11 @@ async def get_weight():
     return {'grams': grams, 'stable': grams is not None}
 
 
+@app.get('/scale/status')
+async def get_scale_status():
+    return scale.status()
+
+
 @app.get('/printers')
 async def list_printers():
     import win32print

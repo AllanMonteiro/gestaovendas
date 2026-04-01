@@ -12,6 +12,8 @@ class SerialScale:
         self.timeout = timeout_ms / 1000
         self._lock = threading.Lock()
         self._last_grams: Optional[int] = None
+        self._last_error: Optional[str] = None
+        self._connected = False
         self._running = False
         self._thread: Optional[threading.Thread] = None
 
@@ -28,19 +30,29 @@ class SerialScale:
             self._thread.join(timeout=1)
 
     def _run(self):
-        try:
-            with serial.Serial(self.port, self.baud, timeout=self.timeout) as ser:
-                while self._running:
-                    line = ser.readline().decode(errors='ignore').strip()
-                    if not line:
-                        continue
-                    grams = self._parse_grams(line)
-                    if grams is not None:
-                        with self._lock:
-                            self._last_grams = grams
-        except Exception as e:
-            print(f"Serial Error on {self.port}: {e}")
-            time.sleep(2)
+        while self._running:
+            try:
+                with serial.Serial(self.port, self.baud, timeout=self.timeout) as ser:
+                    with self._lock:
+                        self._connected = True
+                        self._last_error = None
+                    while self._running:
+                        line = ser.readline().decode(errors='ignore').strip()
+                        if not line:
+                            continue
+                        grams = self._parse_grams(line)
+                        if grams is not None:
+                            with self._lock:
+                                self._last_grams = grams
+                                self._connected = True
+                                self._last_error = None
+            except Exception as e:
+                with self._lock:
+                    self._connected = False
+                    self._last_error = str(e)
+                print(f"Serial Error on {self.port}: {e}")
+                if self._running:
+                    time.sleep(2)
 
     def _parse_grams(self, line: str) -> Optional[int]:
         match = re.search(r'(\d+(?:\.\d+)?)', line)
@@ -55,6 +67,18 @@ class SerialScale:
         with self._lock:
             return self._last_grams
 
+    def status(self):
+        with self._lock:
+            return {
+                'connected': self._connected,
+                'port': self.port,
+                'baud': self.baud,
+                'last_grams': self._last_grams,
+                'last_error': self._last_error,
+            }
+
     def simulate(self, grams: int):
         with self._lock:
             self._last_grams = grams
+            self._connected = True
+            self._last_error = None
