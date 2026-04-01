@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { enqueueOutbox } from '../offline/outbox'
+import { enqueueOutbox, isOutboxUrlSupported } from '../offline/outbox'
 import { clearTokens, getAccessToken, getRefreshToken, saveTokens } from '../app/auth'
 import { getApiBaseUrl } from '../app/runtime'
 
@@ -57,7 +57,7 @@ api.interceptors.response.use(
       }
     }
     const isNetworkError = !error.response
-    if (isNetworkError && ['POST', 'PUT', 'DELETE'].includes(method)) {
+    if (isNetworkError && ['POST', 'PUT', 'DELETE'].includes(method) && isOutboxUrlSupported(config?.url)) {
       const clientRequestId = crypto.randomUUID()
       let payload = config.data || {}
       if (typeof config.data === 'string') {

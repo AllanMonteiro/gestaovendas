@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { clearTokens, getAccessToken, getRefreshToken, saveTokens } from '../app/auth'
-import { listOutbox, removeOutbox, markOutboxError } from './outbox'
+import { isOutboxUrlSupported, listOutbox, removeOutbox, markOutboxError } from './outbox'
 
 const buildSyncHeaders = (headers: Record<string, string> | undefined, accessToken: string | null) => {
   const nextHeaders: Record<string, string> = {}
@@ -37,9 +37,17 @@ const refreshAccessToken = async (baseURL: string) => {
   }
 }
 
+const shouldDiscardOnResponseStatus = (status?: number) => [400, 403, 404, 409, 422].includes(Number(status))
+
 export async function syncOutbox(baseURL: string) {
   const items = await listOutbox()
   for (const item of items) {
+    if (!isOutboxUrlSupported(item.url)) {
+      if (item.id) {
+        await removeOutbox(item.id)
+      }
+      continue
+    }
     try {
       let accessToken = getAccessToken()
       const send = () =>
@@ -69,6 +77,10 @@ export async function syncOutbox(baseURL: string) {
         await removeOutbox(item.id)
       }
     } catch (err: any) {
+      if (item.id && shouldDiscardOnResponseStatus(err?.response?.status)) {
+        await removeOutbox(item.id)
+        continue
+      }
       if (item.id) {
         await markOutboxError(item.id, err?.message || 'sync error')
       }

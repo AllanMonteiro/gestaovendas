@@ -1,10 +1,15 @@
 import { db, OutboxItem } from './db'
 
+const ORDER_OUTBOX_URL_PATTERN = /^\/api\/orders(?:\/|$)/i
+
 const dispatchOutboxChanged = () => {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event('sorveteria:outbox-changed'))
   }
 }
+
+export const isOutboxUrlSupported = (url?: string | null) =>
+  typeof url === 'string' && ORDER_OUTBOX_URL_PATTERN.test(url)
 
 export async function enqueueOutbox(item: Omit<OutboxItem, 'id' | 'created_at' | 'attempts'>) {
   await db.outbox.add({
