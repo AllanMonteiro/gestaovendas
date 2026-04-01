@@ -7,6 +7,9 @@ type Order = {
   id: string
   display_number?: string
   status: string
+  type?: string
+  customer_name?: string | null
+  source?: string | null
   total: string
   created_at: string
   closed_at?: string | null
@@ -99,6 +102,7 @@ type StoreConfigResponse = {
 type CashDashboardResponse = {
   cash_status: CashStatusResponse
   closed_orders: Order[]
+  open_orders: Order[]
   cash_moves: CashMove[]
   cash_history: CashHistoryEntry[]
   payments: PaymentAgg[]
@@ -113,6 +117,15 @@ const CASH_DASHBOARD_HISTORY_LIMIT = 30
 
 const formatBRL = (value: string | number) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const getOrderDisplayNumber = (order: Pick<Order, 'id' | 'display_number'>) => order.display_number || order.id.slice(0, 8)
+const getOpenOrderLabel = (order: Order) => {
+  if (order.type === 'DELIVERY') {
+    return `Delivery ${(order.source || 'app').toUpperCase()}`
+  }
+  if (order.type === 'TABLE') {
+    return 'Mesa'
+  }
+  return 'PDV'
+}
 const formatSignedBRL = (value: string | number) => {
   const numeric = Number(value || 0)
   const prefix = numeric > 0 ? '+' : numeric < 0 ? '-' : ''
@@ -141,6 +154,7 @@ const todayISO = () => {
 const Caixa: React.FC = () => {
   const [cashStatus, setCashStatus] = useState<CashStatusResponse>({ open: false })
   const [orders, setOrders] = useState<Order[]>([])
+  const [openOrders, setOpenOrders] = useState<Order[]>([])
   const [cashMoves, setCashMoves] = useState<CashMove[]>([])
   const [cashHistory, setCashHistory] = useState<CashHistoryEntry[]>([])
   const [paymentsAgg, setPaymentsAgg] = useState<PaymentAgg[]>([])
@@ -168,6 +182,7 @@ const Caixa: React.FC = () => {
       const payload = response.data
       setCashStatus(payload.cash_status)
       setOrders(payload.closed_orders.sort((a, b) => ((a.closed_at || a.created_at) < (b.closed_at || b.created_at) ? 1 : -1)))
+      setOpenOrders(payload.open_orders ?? [])
       setCashMoves(payload.cash_moves)
       setCashHistory(payload.cash_history)
       setPaymentsAgg(payload.payments)
@@ -578,6 +593,23 @@ const Caixa: React.FC = () => {
         <div className="rounded-xl border border-brand-100 bg-white px-3 py-2 text-sm text-slate-700">
           Pedidos em aberto: <span className="font-semibold">{openOrdersCount}</span>
         </div>
+        {openOrdersCount > 0 ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            <p className="font-semibold">Pedidos bloqueando o fechamento</p>
+            <div className="mt-2 space-y-2">
+              {openOrders.map((order) => (
+                <div key={order.id} className="rounded-lg bg-white/80 px-3 py-2">
+                  <div className="font-semibold">
+                    #{getOrderDisplayNumber(order)} | {getOpenOrderLabel(order)} | {order.status}
+                  </div>
+                  <div className="text-xs text-slate-600">
+                    Cliente: {order.customer_name || 'Nao informado'} | Criado em {new Date(order.created_at).toLocaleString('pt-BR')}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </section>
 
         <section className="panel p-5 space-y-4">

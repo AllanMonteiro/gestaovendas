@@ -133,6 +133,30 @@ def _serialize_orders(orders, include_items=True):
     return serializer_class(orders, many=True).data
 
 
+def _serialize_open_order_blockers(orders):
+    items = []
+    for order in orders:
+        delivery_meta = getattr(order, 'delivery_meta', None)
+        customer = getattr(order, 'customer', None)
+        customer_name = None
+        if customer is not None:
+            first = (customer.name or '').strip()
+            last = (customer.last_name or '').strip()
+            customer_name = f'{first} {last}'.strip() or None
+        if not customer_name and delivery_meta is not None:
+            customer_name = delivery_meta.customer_name or None
+        items.append({
+            'id': str(order.id),
+            'display_number': f'{order.daily_number:03d}' if order.business_date and order.daily_number else str(order.id)[:8],
+            'type': order.type,
+            'status': order.status,
+            'customer_name': customer_name,
+            'source': delivery_meta.source if delivery_meta is not None else None,
+            'created_at': order.created_at,
+        })
+    return items
+
+
 def _orders_base_queryset():
     return Order.objects.select_related('customer').only(*ORDER_ONLY_FIELDS)
 
@@ -553,9 +577,10 @@ class CashDashboardView(APIView):
         history_qs = history_qs[:history_limit]
 
         config = services.get_store_config()
-        open_orders_count = Order.objects.filter(
+        open_orders_qs = Order.objects.select_related('customer', 'delivery_meta').filter(
             status__in=[Order.STATUS_OPEN, Order.STATUS_SENT, Order.STATUS_READY],
-        ).aggregate(total=Count('id'))['total'] or 0
+        ).order_by('-created_at')
+        open_orders_count = open_orders_qs.aggregate(total=Count('id'))['total'] or 0
 
         payload = {
             'cash_status': status_response,
@@ -564,6 +589,7 @@ class CashDashboardView(APIView):
             'payments': report_queries.by_payment(from_date, to_date),
             'today_summary': report_queries.summary(today, today),
             'open_orders_count': open_orders_count,
+            'open_orders': _serialize_open_order_blockers(open_orders_qs[:12]),
             'config': StoreConfigUiSerializer(config).data,
             'cash_history': CashSessionSerializer(history_qs, many=True).data,
         }

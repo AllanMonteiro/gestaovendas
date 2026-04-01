@@ -238,11 +238,11 @@ const PedidosDelivery: React.FC = () => {
                       </div>
                     ) : null}
 
-                    <div className="flex flex-wrap gap-2">
+                    <div className="grid grid-cols-2 gap-2">
                       <button
                         disabled={busyOrderId === order.id}
                         onClick={() => void updateStatus(order.id, 'preparo')}
-                        className={`min-w-[80px] flex-1 rounded-2xl py-2 text-[10px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                        className={`rounded-2xl py-2 text-[10px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                           order.status === 'preparo' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'bg-slate-100 text-slate-600'
                         }`}
                       >
@@ -251,7 +251,7 @@ const PedidosDelivery: React.FC = () => {
                       <button
                         disabled={busyOrderId === order.id}
                         onClick={() => void updateStatus(order.id, 'despachado')}
-                        className={`min-w-[80px] flex-1 rounded-2xl py-2 text-[10px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                        className={`rounded-2xl py-2 text-[10px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                           order.status === 'despachado' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-200' : 'bg-slate-100 text-slate-600'
                         }`}
                       >
@@ -260,7 +260,7 @@ const PedidosDelivery: React.FC = () => {
                       <button
                         disabled={busyOrderId === order.id}
                         onClick={() => void updateStatus(order.id, 'entregue')}
-                        className={`min-w-[80px] flex-1 rounded-2xl py-2 text-[10px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                        className={`rounded-2xl py-2 text-[10px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                           order.status === 'entregue' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200' : 'bg-slate-100 text-slate-600'
                         }`}
                       >
@@ -269,7 +269,7 @@ const PedidosDelivery: React.FC = () => {
                       <button
                         disabled={busyOrderId === order.id}
                         onClick={() => void handleDeleteOrder(order)}
-                        className="min-w-[80px] flex-1 rounded-2xl bg-rose-50 py-2 text-[10px] font-bold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="rounded-2xl bg-rose-50 py-2 text-[10px] font-bold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {busyOrderId === order.id ? 'Excluindo...' : 'Excluir'}
                       </button>
