@@ -12,6 +12,12 @@ class OrderItemSerializer(serializers.ModelSerializer):
         fields = ['id', 'order', 'product', 'product_name', 'qty', 'weight_grams', 'unit_price', 'total', 'notes']
 
 
+class PaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Payment
+        fields = ['id', 'order', 'method', 'amount', 'meta', 'created_at']
+
+
 class OrderSerializer(serializers.ModelSerializer):
     customer = serializers.IntegerField(source='customer_id', allow_null=True, read_only=True)
     customer_name = serializers.SerializerMethodField()
@@ -68,12 +74,6 @@ class OrderSummarySerializer(serializers.ModelSerializer):
             'discount', 'total', 'created_at', 'closed_at', 'canceled_reason',
             'client_request_id', 'customer_name', 'customer_phone', 'display_number',
         ]
-
-
-class PaymentSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Payment
-        fields = ['id', 'order', 'method', 'amount', 'meta', 'created_at']
 
 
 class CashSessionSerializer(serializers.ModelSerializer):
