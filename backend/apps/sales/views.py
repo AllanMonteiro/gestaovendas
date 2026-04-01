@@ -195,6 +195,13 @@ def _get_order_for_mutation(order_id):
     return qs.filter(client_request_id=order_id).first()
 
 
+def _parse_local_datetime_value(raw_value):
+    parsed_datetime = parse_datetime(raw_value or '')
+    if parsed_datetime and timezone.is_naive(parsed_datetime):
+        parsed_datetime = timezone.make_aware(parsed_datetime, timezone.get_current_timezone())
+    return parsed_datetime
+
+
 class OrdersCreateView(APIView):
     def post(self, request):
         if auth_is_required() and not user_has_permission(request.user, 'pdv.operate'):
@@ -386,6 +393,35 @@ class OrderDeleteView(APIView):
         if not deleted:
             return Response({'detail': 'Order not found'}, status=404)
         return Response({'status': 'deleted'})
+
+
+class OrderAdjustSaleDateView(APIView):
+    def post(self, request, id):
+        if auth_is_required() and not user_has_permission(request.user, 'order.adjust.sale_date'):
+            if not request.user.is_superuser:
+                return Response({'detail': 'Forbidden'}, status=403)
+
+        password = request.data.get('password')
+        if not password:
+            return Response({'detail': 'Password required'}, status=400)
+
+        if auth_is_required() and not request.user.check_password(password):
+            return Response({'detail': 'Senha incorreta'}, status=403)
+
+        order = _get_order_by_id_or_client_request_id(id, include_items=False)
+        if not order:
+            return Response({'detail': 'Order not found'}, status=404)
+
+        closed_at = _parse_local_datetime_value(request.data.get('closed_at'))
+        if closed_at is None:
+            return Response({'detail': 'closed_at invalid'}, status=400)
+
+        try:
+            order = services.adjust_sale_date(order=order, closed_at=closed_at, user=request.user)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=400)
+
+        return Response(OrderSummarySerializer(order).data)
 
 
 class OrdersOpenView(APIView):

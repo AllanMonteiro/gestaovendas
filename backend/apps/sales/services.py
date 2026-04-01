@@ -341,6 +341,33 @@ def close_order(
 
 
 @transaction.atomic
+def adjust_sale_date(*, order: Order, closed_at, user=None):
+    if order.status != Order.STATUS_PAID or order.closed_at is None:
+        raise ValueError('Only paid orders can have the sale date adjusted')
+
+    if timezone.is_naive(closed_at):
+        closed_at = timezone.make_aware(closed_at, timezone.get_current_timezone())
+
+    if closed_at > timezone.now():
+        raise ValueError('Sale date cannot be in the future')
+
+    previous_closed_at = order.closed_at
+    order.closed_at = closed_at
+    order.save(update_fields=['closed_at'])
+    Payment.objects.filter(order=order).update(created_at=closed_at)
+
+    log_audit(
+        user=user,
+        action='order.adjust_sale_date',
+        entity='order',
+        entity_id=order.id,
+        before={'closed_at': previous_closed_at.isoformat() if previous_closed_at else None},
+        after={'closed_at': order.closed_at.isoformat() if order.closed_at else None},
+    )
+    return order
+
+
+@transaction.atomic
 def cancel_order(*, order: Order, reason: str, user=None):
     ensure_open_cash_session()
     normalized_reason = (reason or '').strip()

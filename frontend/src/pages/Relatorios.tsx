@@ -116,6 +116,12 @@ const formatSignedBRL = (value: string | number | null | undefined) => {
 const formatNumber = (value: number | null | undefined) => Number(value || 0).toLocaleString('pt-BR')
 const toISODate = (date: Date) => date.toISOString().slice(0, 10)
 const toMonthValue = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+const toDateTimeLocalValue = (value?: string | null) => {
+  if (!value) return ''
+  const date = new Date(value)
+  const pad = (part: number) => String(part).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
 const monthRange = (value: string) => {
   const [year, month] = value.split('-').map(Number)
   const start = new Date(year, month - 1, 1)
@@ -148,6 +154,10 @@ const Relatorios: React.FC = () => {
   const [orderDetails, setOrderDetails] = useState<Record<string, OrderRow>>({})
   const [feedback, setFeedback] = useState('')
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
+  const [editingSaleDateOrderId, setEditingSaleDateOrderId] = useState<string | null>(null)
+  const [saleDateInput, setSaleDateInput] = useState('')
+  const [saleDatePassword, setSaleDatePassword] = useState('')
+  const [savingSaleDateOrderId, setSavingSaleDateOrderId] = useState<string | null>(null)
 
   const loadReports = async (from = fromDate, to = toDate) => {
     try {
@@ -167,6 +177,9 @@ const Relatorios: React.FC = () => {
       setCanceledOrders(canceledResp.data)
       setOrderDetails({})
       setExpandedOrderId(null)
+      setEditingSaleDateOrderId(null)
+      setSaleDateInput('')
+      setSaleDatePassword('')
       setFeedback('')
     } catch {
       setFeedback('Falha ao carregar relatorios.')
@@ -176,6 +189,11 @@ const Relatorios: React.FC = () => {
   const toggleOrderExpansion = async (orderId: string) => {
     if (expandedOrderId === orderId) {
       setExpandedOrderId(null)
+      if (editingSaleDateOrderId === orderId) {
+        setEditingSaleDateOrderId(null)
+        setSaleDateInput('')
+        setSaleDatePassword('')
+      }
       return
     }
     setExpandedOrderId(orderId)
@@ -187,6 +205,45 @@ const Relatorios: React.FC = () => {
       setOrderDetails((current) => ({ ...current, [orderId]: response.data }))
     } catch {
       setFeedback('Falha ao carregar itens do pedido.')
+    }
+  }
+
+  const startSaleDateEdit = (order: OrderRow) => {
+    setEditingSaleDateOrderId(order.id)
+    setSaleDateInput(toDateTimeLocalValue(order.closed_at || order.created_at))
+    setSaleDatePassword('')
+    setFeedback('')
+  }
+
+  const cancelSaleDateEdit = () => {
+    setEditingSaleDateOrderId(null)
+    setSaleDateInput('')
+    setSaleDatePassword('')
+  }
+
+  const handleAdjustSaleDate = async (orderId: string) => {
+    if (!saleDateInput.trim()) {
+      setFeedback('Informe a nova data/hora da venda.')
+      return
+    }
+    if (!saleDatePassword.trim()) {
+      setFeedback('Informe sua senha para confirmar o ajuste.')
+      return
+    }
+    setSavingSaleDateOrderId(orderId)
+    try {
+      await api.post(`/api/orders/${orderId}/adjust-sale-date`, {
+        closed_at: new Date(saleDateInput).toISOString(),
+        password: saleDatePassword.trim(),
+      })
+      setFeedback('Data da venda atualizada com sucesso.')
+      cancelSaleDateEdit()
+      await loadReports()
+    } catch (error: any) {
+      const message = error?.response?.data?.detail || 'Nao foi possivel atualizar a data da venda.'
+      setFeedback(message)
+    } finally {
+      setSavingSaleDateOrderId(null)
     }
   }
 
@@ -509,6 +566,53 @@ const Relatorios: React.FC = () => {
                                 ))}
                               </tbody>
                             </table>
+                            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                              <p className="text-xs font-bold uppercase tracking-widest text-amber-700">Ajuste de data da venda</p>
+                              <p className="mt-1 text-xs text-amber-800">
+                                Use apenas para corrigir vendas de dias anteriores. A confirmacao exige sua senha.
+                              </p>
+                              {editingSaleDateOrderId === order.id ? (
+                                <div className="mt-3 grid gap-2 md:grid-cols-[1fr_220px_auto_auto]">
+                                  <input
+                                    type="datetime-local"
+                                    value={saleDateInput}
+                                    onChange={(event) => setSaleDateInput(event.target.value)}
+                                    className="rounded-lg border border-amber-200 px-3 py-2 text-sm"
+                                  />
+                                  <input
+                                    type="password"
+                                    value={saleDatePassword}
+                                    onChange={(event) => setSaleDatePassword(event.target.value)}
+                                    placeholder="Senha"
+                                    className="rounded-lg border border-amber-200 px-3 py-2 text-sm"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleAdjustSaleDate(order.id)}
+                                    disabled={savingSaleDateOrderId === order.id}
+                                    className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                                  >
+                                    {savingSaleDateOrderId === order.id ? 'Salvando...' : 'Salvar'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={cancelSaleDateEdit}
+                                    disabled={savingSaleDateOrderId === order.id}
+                                    className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-700 disabled:opacity-60"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => startSaleDateEdit(order)}
+                                  className="mt-3 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-700"
+                                >
+                                  Ajustar data da venda
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </td>
                       </tr>

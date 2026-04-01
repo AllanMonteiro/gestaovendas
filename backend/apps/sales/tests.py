@@ -1,13 +1,15 @@
 from uuid import uuid4
+from datetime import timedelta
 from decimal import Decimal
 import os
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 from apps.accounts.models import User
 from apps.audit.models import AuditLog
 from apps.catalog.models import Category, Product, ProductPrice
 from apps.loyalty.models import Customer, LoyaltyAccount, LoyaltyMove
-from apps.sales.models import Order, StoreConfig
+from apps.sales.models import Order, Payment, StoreConfig
 from apps.sales import services
 
 
@@ -263,3 +265,51 @@ class CancelOrderAuditTests(TestCase):
         self.assertEqual(audit.before['status'], Order.STATUS_OPEN)
         self.assertEqual(audit.after['status'], Order.STATUS_CANCELED)
         self.assertEqual(audit.after['canceled_reason'], 'Cliente desistiu da compra')
+
+
+class AdjustSaleDateApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_superuser(email='admin@test.com', password='test123', name='Admin')
+        self.client.force_authenticate(user=self.user)
+        services.open_cash(user=self.user, initial_float=Decimal('100.00'))
+        self.order = services.create_order_idempotent(order_type='COUNTER', table_label=None, customer=None, client_request_id=uuid4())
+        self.order.subtotal = Decimal('20.00')
+        self.order.total = Decimal('20.00')
+        self.order.save(update_fields=['subtotal', 'total'])
+        self.order = services.close_order(
+            order=self.order,
+            discount=Decimal('0'),
+            payments=[{'method': 'CASH', 'amount': '20.00'}],
+            use_loyalty_points=False,
+            client_request_id=uuid4(),
+            user=self.user,
+        )
+
+    def test_adjust_sale_date_updates_closed_at_and_payment_timestamp(self):
+        new_closed_at = (timezone.now() - timedelta(days=1)).replace(second=0, microsecond=0)
+
+        response = self.client.post(
+            f'/api/orders/{self.order.id}/adjust-sale-date',
+            {'closed_at': new_closed_at.isoformat(), 'password': 'test123'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.order.refresh_from_db()
+        payment = Payment.objects.get(order=self.order)
+        self.assertEqual(self.order.closed_at.replace(second=0, microsecond=0), new_closed_at)
+        self.assertEqual(payment.created_at.replace(second=0, microsecond=0), new_closed_at)
+        audit = AuditLog.objects.get(action='order.adjust_sale_date', entity='order', entity_id=str(self.order.id))
+        self.assertEqual(audit.after['closed_at'], self.order.closed_at.isoformat())
+
+    def test_adjust_sale_date_requires_correct_password(self):
+        new_closed_at = (timezone.now() - timedelta(days=1)).replace(second=0, microsecond=0)
+
+        response = self.client.post(
+            f'/api/orders/{self.order.id}/adjust-sale-date',
+            {'closed_at': new_closed_at.isoformat(), 'password': 'senha-errada'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 403)
