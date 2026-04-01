@@ -14,7 +14,7 @@ DEFAULT_PERMISSIONS = [
     ('system.users.manage', 'Cadastrar usuarios e definir permissoes'),
     ('order.cancel', 'Cancelar pedidos'),
     ('order.delete', 'Excluir pedidos'),
-    ('order.adjust.sale_date', 'Ajustar data de venda finalizada'),
+    ('order.adjust.finalized_sale', 'Ajustar valor e pagamento de venda finalizada'),
     ('order.discount.override', 'Autorizar desconto acima do limite'),
 ]
 
@@ -27,7 +27,7 @@ DEFAULT_ROLES: dict[str, list[str]] = {
         'catalog.manage',
         'reports.view',
         'order.cancel',
-        'order.adjust.sale_date',
+        'order.adjust.finalized_sale',
         'order.discount.override',
     ],
     'Operador de Caixa': [

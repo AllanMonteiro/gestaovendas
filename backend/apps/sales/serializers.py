@@ -18,6 +18,7 @@ class OrderSerializer(serializers.ModelSerializer):
     customer_phone = serializers.CharField(source='customer.phone', allow_null=True, read_only=True)
     display_number = serializers.SerializerMethodField()
     items = OrderItemSerializer(many=True, read_only=True)
+    payments = PaymentSerializer(many=True, read_only=True)
 
     def get_customer_name(self, obj):
         if not obj.customer_id:
@@ -37,7 +38,7 @@ class OrderSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'status', 'type', 'customer', 'table_label', 'subtotal',
             'discount', 'total', 'created_at', 'closed_at', 'canceled_reason',
-            'client_request_id', 'customer_name', 'customer_phone', 'display_number', 'items',
+            'client_request_id', 'customer_name', 'customer_phone', 'display_number', 'items', 'payments',
         ]
 
 

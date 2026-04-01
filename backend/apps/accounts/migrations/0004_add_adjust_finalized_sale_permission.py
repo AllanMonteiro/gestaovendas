@@ -7,8 +7,8 @@ def add_adjust_sale_date_permission(apps, schema_editor):
     RolePermission = apps.get_model('accounts', 'RolePermission')
 
     permission, _ = Permission.objects.get_or_create(
-        code='order.adjust.sale_date',
-        defaults={'description': 'Ajustar data de venda finalizada'},
+        code='order.adjust.finalized_sale',
+        defaults={'description': 'Ajustar valor e pagamento de venda finalizada'},
     )
 
     for role_name in ['Administrador', 'Gerente']:

@@ -195,13 +195,6 @@ def _get_order_for_mutation(order_id):
     return qs.filter(client_request_id=order_id).first()
 
 
-def _parse_local_datetime_value(raw_value):
-    parsed_datetime = parse_datetime(raw_value or '')
-    if parsed_datetime and timezone.is_naive(parsed_datetime):
-        parsed_datetime = timezone.make_aware(parsed_datetime, timezone.get_current_timezone())
-    return parsed_datetime
-
-
 class OrdersCreateView(APIView):
     def post(self, request):
         if auth_is_required() and not user_has_permission(request.user, 'pdv.operate'):
@@ -395,9 +388,9 @@ class OrderDeleteView(APIView):
         return Response({'status': 'deleted'})
 
 
-class OrderAdjustSaleDateView(APIView):
+class OrderAdjustFinalizedSaleView(APIView):
     def post(self, request, id):
-        if auth_is_required() and not user_has_permission(request.user, 'order.adjust.sale_date'):
+        if auth_is_required() and not user_has_permission(request.user, 'order.adjust.finalized_sale'):
             if not request.user.is_superuser:
                 return Response({'detail': 'Forbidden'}, status=403)
 
@@ -412,12 +405,20 @@ class OrderAdjustSaleDateView(APIView):
         if not order:
             return Response({'detail': 'Order not found'}, status=404)
 
-        closed_at = _parse_local_datetime_value(request.data.get('closed_at'))
-        if closed_at is None:
-            return Response({'detail': 'closed_at invalid'}, status=400)
+        total = request.data.get('total')
+        payment_method = (request.data.get('payment_method') or '').strip().upper()
+        if total in (None, ''):
+            return Response({'detail': 'total required'}, status=400)
+        if not payment_method:
+            return Response({'detail': 'payment_method required'}, status=400)
 
         try:
-            order = services.adjust_sale_date(order=order, closed_at=closed_at, user=request.user)
+            order = services.adjust_finalized_sale(
+                order=order,
+                total=Decimal(str(total)),
+                payment_method=payment_method,
+                user=request.user,
+            )
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=400)
 

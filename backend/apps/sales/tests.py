@@ -1,9 +1,7 @@
 from uuid import uuid4
-from datetime import timedelta
 from decimal import Decimal
 import os
 from django.test import TestCase
-from django.utils import timezone
 from rest_framework.test import APIClient
 from apps.accounts.models import User
 from apps.audit.models import AuditLog
@@ -267,7 +265,7 @@ class CancelOrderAuditTests(TestCase):
         self.assertEqual(audit.after['canceled_reason'], 'Cliente desistiu da compra')
 
 
-class AdjustSaleDateApiTests(TestCase):
+class AdjustFinalizedSaleApiTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.user = User.objects.create_superuser(email='admin@test.com', password='test123', name='Admin')
@@ -286,29 +284,28 @@ class AdjustSaleDateApiTests(TestCase):
             user=self.user,
         )
 
-    def test_adjust_sale_date_updates_closed_at_and_payment_timestamp(self):
-        new_closed_at = (timezone.now() - timedelta(days=1)).replace(second=0, microsecond=0)
+    def test_adjust_finalized_sale_updates_total_and_payment(self):
 
         response = self.client.post(
-            f'/api/orders/{self.order.id}/adjust-sale-date',
-            {'closed_at': new_closed_at.isoformat(), 'password': 'test123'},
+            f'/api/orders/{self.order.id}/adjust-finalized-sale',
+            {'total': '15.50', 'payment_method': 'PIX', 'password': 'test123'},
             format='json',
         )
 
         self.assertEqual(response.status_code, 200)
         self.order.refresh_from_db()
         payment = Payment.objects.get(order=self.order)
-        self.assertEqual(self.order.closed_at.replace(second=0, microsecond=0), new_closed_at)
-        self.assertEqual(payment.created_at.replace(second=0, microsecond=0), new_closed_at)
-        audit = AuditLog.objects.get(action='order.adjust_sale_date', entity='order', entity_id=str(self.order.id))
-        self.assertEqual(audit.after['closed_at'], self.order.closed_at.isoformat())
+        self.assertEqual(self.order.total, Decimal('15.50'))
+        self.assertEqual(self.order.discount, Decimal('4.50'))
+        self.assertEqual(payment.method, Payment.METHOD_PIX)
+        self.assertEqual(payment.amount, Decimal('15.50'))
+        audit = AuditLog.objects.get(action='order.adjust_finalized_sale', entity='order', entity_id=str(self.order.id))
+        self.assertEqual(audit.after['total'], '15.50')
 
-    def test_adjust_sale_date_requires_correct_password(self):
-        new_closed_at = (timezone.now() - timedelta(days=1)).replace(second=0, microsecond=0)
-
+    def test_adjust_finalized_sale_requires_correct_password(self):
         response = self.client.post(
-            f'/api/orders/{self.order.id}/adjust-sale-date',
-            {'closed_at': new_closed_at.isoformat(), 'password': 'senha-errada'},
+            f'/api/orders/{self.order.id}/adjust-finalized-sale',
+            {'total': '15.50', 'payment_method': 'PIX', 'password': 'senha-errada'},
             format='json',
         )
 

@@ -82,6 +82,15 @@ type OrderItem = {
   total: string
 }
 
+type OrderPayment = {
+  id: string
+  method: 'CASH' | 'PIX' | 'CARD'
+  amount: string
+  meta?: {
+    card_type?: 'CREDIT' | 'DEBIT'
+  } | null
+}
+
 type OrderRow = {
   id: string
   display_number?: string
@@ -92,6 +101,7 @@ type OrderRow = {
   customer_phone?: string | null
   canceled_reason?: string | null
   items?: OrderItem[]
+  payments?: OrderPayment[]
 }
 
 type ReportsDashboardResponse = {
@@ -116,11 +126,11 @@ const formatSignedBRL = (value: string | number | null | undefined) => {
 const formatNumber = (value: number | null | undefined) => Number(value || 0).toLocaleString('pt-BR')
 const toISODate = (date: Date) => date.toISOString().slice(0, 10)
 const toMonthValue = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-const toDateTimeLocalValue = (value?: string | null) => {
-  if (!value) return ''
-  const date = new Date(value)
-  const pad = (part: number) => String(part).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+const getPaymentMethodOption = (payment?: OrderPayment | null) => {
+  if (!payment) return 'CASH'
+  if (payment.method === 'CARD' && payment.meta?.card_type === 'CREDIT') return 'CARD_CREDIT'
+  if (payment.method === 'CARD' && payment.meta?.card_type === 'DEBIT') return 'CARD_DEBIT'
+  return payment.method
 }
 const monthRange = (value: string) => {
   const [year, month] = value.split('-').map(Number)
@@ -155,7 +165,8 @@ const Relatorios: React.FC = () => {
   const [feedback, setFeedback] = useState('')
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
   const [editingSaleDateOrderId, setEditingSaleDateOrderId] = useState<string | null>(null)
-  const [saleDateInput, setSaleDateInput] = useState('')
+  const [saleAmountInput, setSaleAmountInput] = useState('')
+  const [salePaymentMethod, setSalePaymentMethod] = useState<'CASH' | 'PIX' | 'CARD_CREDIT' | 'CARD_DEBIT'>('CASH')
   const [saleDatePassword, setSaleDatePassword] = useState('')
   const [savingSaleDateOrderId, setSavingSaleDateOrderId] = useState<string | null>(null)
 
@@ -178,7 +189,8 @@ const Relatorios: React.FC = () => {
       setOrderDetails({})
       setExpandedOrderId(null)
       setEditingSaleDateOrderId(null)
-      setSaleDateInput('')
+      setSaleAmountInput('')
+      setSalePaymentMethod('CASH')
       setSaleDatePassword('')
       setFeedback('')
     } catch {
@@ -191,7 +203,8 @@ const Relatorios: React.FC = () => {
       setExpandedOrderId(null)
       if (editingSaleDateOrderId === orderId) {
         setEditingSaleDateOrderId(null)
-        setSaleDateInput('')
+        setSaleAmountInput('')
+        setSalePaymentMethod('CASH')
         setSaleDatePassword('')
       }
       return
@@ -210,20 +223,23 @@ const Relatorios: React.FC = () => {
 
   const startSaleDateEdit = (order: OrderRow) => {
     setEditingSaleDateOrderId(order.id)
-    setSaleDateInput(toDateTimeLocalValue(order.closed_at || order.created_at))
+    const detail = orderDetails[order.id]
+    setSaleAmountInput(String(order.total || '0'))
+    setSalePaymentMethod(getPaymentMethodOption(detail?.payments?.[0]) as 'CASH' | 'PIX' | 'CARD_CREDIT' | 'CARD_DEBIT')
     setSaleDatePassword('')
     setFeedback('')
   }
 
   const cancelSaleDateEdit = () => {
     setEditingSaleDateOrderId(null)
-    setSaleDateInput('')
+    setSaleAmountInput('')
+    setSalePaymentMethod('CASH')
     setSaleDatePassword('')
   }
 
   const handleAdjustSaleDate = async (orderId: string) => {
-    if (!saleDateInput.trim()) {
-      setFeedback('Informe a nova data/hora da venda.')
+    if (!saleAmountInput.trim()) {
+      setFeedback('Informe o novo valor da venda.')
       return
     }
     if (!saleDatePassword.trim()) {
@@ -232,15 +248,16 @@ const Relatorios: React.FC = () => {
     }
     setSavingSaleDateOrderId(orderId)
     try {
-      await api.post(`/api/orders/${orderId}/adjust-sale-date`, {
-        closed_at: new Date(saleDateInput).toISOString(),
+      await api.post(`/api/orders/${orderId}/adjust-finalized-sale`, {
+        total: saleAmountInput.replace(',', '.'),
+        payment_method: salePaymentMethod,
         password: saleDatePassword.trim(),
       })
-      setFeedback('Data da venda atualizada com sucesso.')
+      setFeedback('Valor e pagamento da venda atualizados com sucesso.')
       cancelSaleDateEdit()
       await loadReports()
     } catch (error: any) {
-      const message = error?.response?.data?.detail || 'Nao foi possivel atualizar a data da venda.'
+      const message = error?.response?.data?.detail || 'Nao foi possivel atualizar valor e pagamento da venda.'
       setFeedback(message)
     } finally {
       setSavingSaleDateOrderId(null)
@@ -567,18 +584,30 @@ const Relatorios: React.FC = () => {
                               </tbody>
                             </table>
                             <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
-                              <p className="text-xs font-bold uppercase tracking-widest text-amber-700">Ajuste de data da venda</p>
+                              <p className="text-xs font-bold uppercase tracking-widest text-amber-700">Ajuste de valor e pagamento</p>
                               <p className="mt-1 text-xs text-amber-800">
-                                Use apenas para corrigir vendas de dias anteriores. A confirmacao exige sua senha.
+                                Use apenas para corrigir erro de digitacao no fechamento. O ajuste substitui o pagamento atual e exige sua senha.
                               </p>
                               {editingSaleDateOrderId === order.id ? (
-                                <div className="mt-3 grid gap-2 md:grid-cols-[1fr_220px_auto_auto]">
+                                <div className="mt-3 grid gap-2 md:grid-cols-[180px_220px_180px_auto_auto]">
                                   <input
-                                    type="datetime-local"
-                                    value={saleDateInput}
-                                    onChange={(event) => setSaleDateInput(event.target.value)}
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={saleAmountInput}
+                                    onChange={(event) => setSaleAmountInput(event.target.value)}
+                                    placeholder="Valor"
                                     className="rounded-lg border border-amber-200 px-3 py-2 text-sm"
                                   />
+                                  <select
+                                    value={salePaymentMethod}
+                                    onChange={(event) => setSalePaymentMethod(event.target.value as 'CASH' | 'PIX' | 'CARD_CREDIT' | 'CARD_DEBIT')}
+                                    className="rounded-lg border border-amber-200 px-3 py-2 text-sm"
+                                  >
+                                    <option value="CASH">Dinheiro</option>
+                                    <option value="PIX">PIX</option>
+                                    <option value="CARD_CREDIT">Cartao credito</option>
+                                    <option value="CARD_DEBIT">Cartao debito</option>
+                                  </select>
                                   <input
                                     type="password"
                                     value={saleDatePassword}
@@ -609,7 +638,7 @@ const Relatorios: React.FC = () => {
                                   onClick={() => startSaleDateEdit(order)}
                                   className="mt-3 rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-700"
                                 >
-                                  Ajustar data da venda
+                                  Ajustar valor e pagamento
                                 </button>
                               )}
                             </div>

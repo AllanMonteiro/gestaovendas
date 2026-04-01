@@ -340,29 +340,64 @@ def close_order(
     return order
 
 
+def _build_adjusted_payment(method_code: str, amount: Decimal) -> dict:
+    if method_code == 'CARD_CREDIT':
+        return {'method': Payment.METHOD_CARD, 'amount': amount, 'meta': {'card_type': 'CREDIT'}}
+    if method_code == 'CARD_DEBIT':
+        return {'method': Payment.METHOD_CARD, 'amount': amount, 'meta': {'card_type': 'DEBIT'}}
+    if method_code == Payment.METHOD_CASH:
+        return {'method': Payment.METHOD_CASH, 'amount': amount, 'meta': None}
+    if method_code == Payment.METHOD_PIX:
+        return {'method': Payment.METHOD_PIX, 'amount': amount, 'meta': None}
+    raise ValueError('Invalid payment method')
+
+
 @transaction.atomic
-def adjust_sale_date(*, order: Order, closed_at, user=None):
+def adjust_finalized_sale(*, order: Order, total: Decimal, payment_method: str, user=None):
     if order.status != Order.STATUS_PAID or order.closed_at is None:
-        raise ValueError('Only paid orders can have the sale date adjusted')
+        raise ValueError('Only paid orders can be adjusted')
 
-    if timezone.is_naive(closed_at):
-        closed_at = timezone.make_aware(closed_at, timezone.get_current_timezone())
+    adjusted_total = q2(Decimal(total))
+    if adjusted_total < 0:
+        raise ValueError('Total cannot be negative')
+    if adjusted_total > order.subtotal:
+        raise ValueError('Total cannot be greater than subtotal')
 
-    if closed_at > timezone.now():
-        raise ValueError('Sale date cannot be in the future')
+    previous_total = order.total
+    previous_discount = order.discount
+    previous_payments = list(
+        Payment.objects.filter(order=order).values('method', 'amount', 'meta')
+    )
 
-    previous_closed_at = order.closed_at
-    order.closed_at = closed_at
-    order.save(update_fields=['closed_at'])
-    Payment.objects.filter(order=order).update(created_at=closed_at)
+    order.total = adjusted_total
+    order.discount = q2(order.subtotal - adjusted_total)
+    order.save(update_fields=['total', 'discount'])
+
+    Payment.objects.filter(order=order).delete()
+    if adjusted_total > 0:
+        payment_payload = _build_adjusted_payment(payment_method, adjusted_total)
+        Payment.objects.create(
+            order=order,
+            method=payment_payload['method'],
+            amount=payment_payload['amount'],
+            meta=payment_payload['meta'],
+        )
 
     log_audit(
         user=user,
-        action='order.adjust_sale_date',
+        action='order.adjust_finalized_sale',
         entity='order',
         entity_id=order.id,
-        before={'closed_at': previous_closed_at.isoformat() if previous_closed_at else None},
-        after={'closed_at': order.closed_at.isoformat() if order.closed_at else None},
+        before={
+            'total': str(previous_total),
+            'discount': str(previous_discount),
+            'payments': previous_payments,
+        },
+        after={
+            'total': str(order.total),
+            'discount': str(order.discount),
+            'payments': list(Payment.objects.filter(order=order).values('method', 'amount', 'meta')),
+        },
     )
     return order
 

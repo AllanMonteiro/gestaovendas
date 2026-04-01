@@ -12,7 +12,7 @@ urlpatterns = [
     path('orders/<uuid:id>/send-kitchen', views.OrderSendKitchenView.as_view()),
     path('orders/<uuid:id>/close', views.OrderCloseView.as_view()),
     path('orders/<uuid:id>/cancel', views.OrderCancelView.as_view()),
-    path('orders/<uuid:id>/adjust-sale-date', views.OrderAdjustSaleDateView.as_view()),
+    path('orders/<uuid:id>/adjust-finalized-sale', views.OrderAdjustFinalizedSaleView.as_view()),
     path('orders/<uuid:id>', views.OrderDeleteView.as_view()),
     path('cash/open', views.CashOpenView.as_view()),
     path('cash/dashboard', views.CashDashboardView.as_view()),
