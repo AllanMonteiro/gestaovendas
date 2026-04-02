@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
+import { resolveAssetUrl } from '../app/runtime'
 
 type Product = {
   id: number
@@ -344,7 +345,7 @@ const PublicMenu: React.FC = () => {
             <div key={product.id} className="flex gap-3 rounded-2xl border border-brand-50 bg-white p-3 shadow-sm">
               <div className="h-20 w-20 shrink-0 rounded-xl bg-slate-100">
                 {product.image_url ? (
-                  <img src={product.image_url} alt={product.name} className="h-full w-full rounded-xl object-cover" />
+                  <img src={resolveAssetUrl(product.image_url)} alt={product.name} className="h-full w-full rounded-xl object-cover" />
                 ) : (
                   <div className="flex h-full w-full items-center justify-center text-2xl">SG</div>
                 )}

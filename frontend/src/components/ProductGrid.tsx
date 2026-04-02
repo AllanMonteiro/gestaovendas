@@ -1,4 +1,5 @@
 import React, { useMemo, useRef } from 'react'
+import { resolveAssetUrl } from '../app/runtime'
 
 type Category = {
   id: number
@@ -136,7 +137,7 @@ const ProductGridComponent: React.FC<ProductGridProps> = ({
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-brand-100 bg-slate-100 text-sm font-bold text-slate-500">
                   {categoryImages[String(category.id)] ? (
                     <img
-                      src={categoryImages[String(category.id)]}
+                      src={resolveAssetUrl(categoryImages[String(category.id)])}
                       alt={category.name}
                       className="h-full w-full object-cover"
                       loading="lazy"
