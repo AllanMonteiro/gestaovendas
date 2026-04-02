@@ -3,6 +3,7 @@ import { createBrowserRouter, NavLink, Outlet, useLocation, useNavigate, useRout
 import { useOutboxSync } from './useSync'
 import { api } from '../api/client'
 import { type AuthSession } from './auth'
+import { resolveAssetUrl } from './runtime'
 import { LoginGate } from '../components/LoginGate'
 import { connectWS } from '../api/ws'
 
@@ -310,7 +311,7 @@ const Layout: React.FC = () => {
             <div className="flex items-start justify-between gap-3 sm:items-center">
               <div className="flex min-w-0 items-center gap-3">
                 {logoUrl ? (
-                  <img src={logoUrl} alt="Logo da empresa" className="h-11 w-11 shrink-0 rounded-xl border border-brand-100 object-cover sm:h-12 sm:w-12" />
+                  <img src={resolveAssetUrl(logoUrl)} alt="Logo da empresa" className="h-11 w-11 shrink-0 rounded-xl border border-brand-100 object-cover sm:h-12 sm:w-12" />
                 ) : null}
                 <div className="min-w-0">
                   <h1 className="truncate text-xl font-display tracking-wide text-brand-700 sm:text-2xl lg:text-3xl">{storeName}</h1>

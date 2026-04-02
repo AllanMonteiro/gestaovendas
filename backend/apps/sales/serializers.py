@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+from django.conf import settings
 from rest_framework import serializers
 from apps.sales.models import Order, OrderItem, Payment, CashSession, CashMove, StoreConfig
 
@@ -89,7 +91,26 @@ class CashMoveSerializer(serializers.ModelSerializer):
 
 
 class StoreConfigAssetSerializer(serializers.ModelSerializer):
+    def _normalize_media_asset_value(self, value):
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip()
+        if not normalized:
+            return ''
+        if normalized.startswith('data:'):
+            return normalized
+        parsed = urlparse(normalized)
+        if (parsed.scheme or parsed.netloc) and parsed.path.startswith(settings.MEDIA_URL):
+            suffix = parsed.path
+            if parsed.query:
+                suffix = f'{suffix}?{parsed.query}'
+            if parsed.fragment:
+                suffix = f'{suffix}#{parsed.fragment}'
+            return suffix
+        return normalized
+
     def _resolve_asset_url(self, value):
+        value = self._normalize_media_asset_value(value)
         if not isinstance(value, str) or not value:
             return value
         if value.startswith('http://') or value.startswith('https://') or value.startswith('data:'):
@@ -98,6 +119,17 @@ class StoreConfigAssetSerializer(serializers.ModelSerializer):
         if value.startswith('/') and request is not None:
             return request.build_absolute_uri(value)
         return value
+
+    def validate_logo_url(self, value):
+        return self._normalize_media_asset_value(value)
+
+    def validate_category_images(self, value):
+        if not isinstance(value, dict):
+            return value
+        return {
+            key: self._normalize_media_asset_value(item)
+            for key, item in value.items()
+        }
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

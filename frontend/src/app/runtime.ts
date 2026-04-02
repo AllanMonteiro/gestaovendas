@@ -38,3 +38,26 @@ export const getWebSocketBaseUrl = () => {
   }
   return 'ws://127.0.0.1:8000'
 }
+
+export const resolveAssetUrl = (value?: string | null) => {
+  const trimmed = value?.trim()
+  if (!trimmed) {
+    return ''
+  }
+  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
+    return trimmed
+  }
+
+  try {
+    const parsed = new URL(trimmed)
+    if (parsed.pathname.startsWith('/media/')) {
+      return new URL(`${parsed.pathname}${parsed.search}${parsed.hash}`, `${getApiBaseUrl()}/`).toString()
+    }
+    return trimmed
+  } catch {
+    // Relative paths are resolved against the API base below.
+  }
+
+  const normalizedPath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
+  return new URL(normalizedPath, `${getApiBaseUrl()}/`).toString()
+}

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { type AuthSession } from '../app/auth'
+import { resolveAssetUrl } from '../app/runtime'
 
 type StoreConfig = {
   store_name?: string
@@ -375,12 +376,12 @@ const Configuracoes: React.FC = () => {
         }
       })
       if (slot === 'logo') {
-        await persistLogo(response.data.url)
-        setLogoUrl(response.data.url)
+        await persistLogo(response.data.relative_url)
+        setLogoUrl(response.data.relative_url)
         setFeedback('Logo enviada e salva com sucesso.')
       } else if (categoryId) {
-        setSelectedCategoryImage(response.data.url)
-        handleCategoryImageChange(Number(categoryId), response.data.url)
+        setSelectedCategoryImage(response.data.relative_url)
+        handleCategoryImageChange(Number(categoryId), response.data.relative_url)
         setFeedback('Imagem da categoria enviada com sucesso.')
       }
     } catch {
@@ -566,7 +567,7 @@ const Configuracoes: React.FC = () => {
         {uploadingLogo ? <p className="text-xs text-slate-500">Enviando logo...</p> : null}
         {logoUrl ? (
           <div className="flex items-center gap-3">
-            <img src={logoUrl} alt="Logo da empresa" className="h-14 w-14 rounded-lg border border-brand-100 object-cover" />
+            <img src={resolveAssetUrl(logoUrl)} alt="Logo da empresa" className="h-14 w-14 rounded-lg border border-brand-100 object-cover" />
             <button
               type="button"
               onClick={() => void handleRemoveLogo()}
@@ -716,7 +717,7 @@ const Configuracoes: React.FC = () => {
 
         <div className="rounded-lg border border-brand-100 p-3">
           {selectedCategoryImage ? (
-            <img src={selectedCategoryImage} alt="Preview da categoria" className="h-24 w-24 rounded-lg object-cover" />
+            <img src={resolveAssetUrl(selectedCategoryImage)} alt="Preview da categoria" className="h-24 w-24 rounded-lg object-cover" />
           ) : (
             <p className="text-sm text-slate-500">Nenhuma imagem selecionada para a categoria.</p>
           )}

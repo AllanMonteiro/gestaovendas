@@ -310,3 +310,34 @@ class AdjustFinalizedSaleApiTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+
+
+class StoreConfigAssetUrlTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_superuser(email='config@test.com', password='test123', name='Config Admin')
+        self.client.force_authenticate(user=self.user)
+
+    def test_get_config_ui_rewrites_stale_absolute_media_logo_to_current_origin(self):
+        StoreConfig.objects.update_or_create(
+            id=1,
+            defaults={'logo_url': 'http://127.0.0.1:8000/media/store-config/logo.png'},
+        )
+
+        response = self.client.get('/api/config/ui', HTTP_HOST='pdv.exemplo.com')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['logo_url'], 'http://pdv.exemplo.com/media/store-config/logo.png')
+
+    def test_put_config_normalizes_media_logo_url_before_saving(self):
+        response = self.client.put(
+            '/api/config',
+            {'logo_url': 'http://127.0.0.1:8000/media/store-config/logo.png'},
+            format='json',
+            HTTP_HOST='pdv.exemplo.com',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        config = StoreConfig.objects.get(id=1)
+        self.assertEqual(config.logo_url, '/media/store-config/logo.png')
+        self.assertEqual(response.data['logo_url'], 'http://pdv.exemplo.com/media/store-config/logo.png')
