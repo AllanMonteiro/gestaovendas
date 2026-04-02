@@ -20,9 +20,17 @@ type ProductPrice = {
   price: string
 }
 
+type DeliveryFeeRule = {
+  label?: string
+  neighborhood?: string
+  fee?: string
+}
+
 type StoreConfig = {
   store_name?: string
   whatsapp_number?: string | null
+  delivery_fee_default?: string
+  delivery_fee_rules?: DeliveryFeeRule[]
 }
 
 type CartItem = {
@@ -33,6 +41,11 @@ type CartItem = {
 type CreatedOrderResponse = {
   id: string
   total: string
+}
+
+type DeliveryFeeEstimate = {
+  fee: number
+  matchedRuleLabel: string | null
 }
 
 const formatBRL = (val: string | number) => Number(val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -51,6 +64,43 @@ const normalizeWhatsAppNumber = (value?: string | null) => {
   return digits
 }
 
+const normalizeNeighborhood = (value?: string | null) =>
+  String(value || '')
+    .trim()
+    .toUpperCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+
+const parseFee = (value?: string | number | null, fallback = 0) => {
+  const parsed = Number(String(value ?? '').replace(',', '.'))
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+const resolveEstimatedDeliveryFee = (
+  neighborhood: string,
+  defaultFee: string | number,
+  rules: DeliveryFeeRule[]
+): DeliveryFeeEstimate => {
+  const fallback = parseFee(defaultFee, 10)
+  const normalizedNeighborhood = normalizeNeighborhood(neighborhood)
+
+  if (!normalizedNeighborhood) {
+    return { fee: fallback, matchedRuleLabel: null }
+  }
+
+  for (const rule of rules) {
+    const label = String(rule.label || rule.neighborhood || '').trim()
+    if (normalizeNeighborhood(label) === normalizedNeighborhood) {
+      return {
+        fee: parseFee(rule.fee, fallback),
+        matchedRuleLabel: label || null,
+      }
+    }
+  }
+
+  return { fee: fallback, matchedRuleLabel: null }
+}
+
 const PublicMenu: React.FC = () => {
   const [categories, setCategories] = useState<Category[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -59,6 +109,8 @@ const PublicMenu: React.FC = () => {
   const [cart, setCart] = useState<CartItem[]>([])
   const [storeName, setStoreName] = useState('Nossa Sorveteria')
   const [storeWhatsAppNumber, setStoreWhatsAppNumber] = useState('')
+  const [deliveryFeeDefault, setDeliveryFeeDefault] = useState('10.00')
+  const [deliveryFeeRules, setDeliveryFeeRules] = useState<DeliveryFeeRule[]>([])
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
   const [address, setAddress] = useState('')
@@ -95,6 +147,8 @@ const PublicMenu: React.FC = () => {
         setProducts(activeProducts)
         setStoreName(config.data.store_name || 'Nossa Sorveteria')
         setStoreWhatsAppNumber(normalizeWhatsAppNumber(config.data.whatsapp_number))
+        setDeliveryFeeDefault(String(config.data.delivery_fee_default ?? '10.00'))
+        setDeliveryFeeRules(Array.isArray(config.data.delivery_fee_rules) ? config.data.delivery_fee_rules : [])
         setPricesByProductId(nextPrices)
         if (cats.data.length > 0) {
           setSelectedCategoryId(cats.data[0].id)
@@ -114,10 +168,34 @@ const PublicMenu: React.FC = () => {
     [products, selectedCategoryId]
   )
 
-  const total = useMemo(
+  const subtotal = useMemo(
     () => cart.reduce((sum, item) => sum + getProductPrice(item.product.id) * item.qty, 0),
     [cart, pricesByProductId]
   )
+
+  const deliveryFeeEstimate = useMemo(
+    () => resolveEstimatedDeliveryFee(neighborhood, deliveryFeeDefault, deliveryFeeRules),
+    [neighborhood, deliveryFeeDefault, deliveryFeeRules]
+  )
+
+  const knownNeighborhoods = useMemo(() => {
+    const seen = new Set<string>()
+    return deliveryFeeRules
+      .map((rule) => String(rule.label || rule.neighborhood || '').trim())
+      .filter((label) => {
+        if (!label) {
+          return false
+        }
+        const normalized = normalizeNeighborhood(label)
+        if (seen.has(normalized)) {
+          return false
+        }
+        seen.add(normalized)
+        return true
+      })
+  }, [deliveryFeeRules])
+
+  const total = subtotal + deliveryFeeEstimate.fee
 
   const addToCart = (product: Product) => {
     setCart((prev) => {
@@ -294,7 +372,7 @@ const PublicMenu: React.FC = () => {
           <div className="rounded-3xl border border-brand-100 bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Seu pedido</p>
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Total estimado</p>
                 <p className="text-2xl font-bold text-slate-900">{formatBRL(total)}</p>
               </div>
               {lastOrderId ? (
@@ -337,6 +415,28 @@ const PublicMenu: React.FC = () => {
                 ))
               )}
             </div>
+
+            <div className="mt-4 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-sm">
+              <div className="flex items-center justify-between text-slate-600">
+                <span>Subtotal dos itens</span>
+                <span>{formatBRL(subtotal)}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-slate-600">
+                <span>Taxa de entrega estimada</span>
+                <span>{formatBRL(deliveryFeeEstimate.fee)}</span>
+              </div>
+              <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-3 font-bold text-slate-900">
+                <span>Total com entrega</span>
+                <span>{formatBRL(total)}</span>
+              </div>
+              <p className="mt-3 text-xs text-slate-500">
+                {neighborhood.trim()
+                  ? deliveryFeeEstimate.matchedRuleLabel
+                    ? `Taxa estimada para o bairro ${deliveryFeeEstimate.matchedRuleLabel}.`
+                    : 'Bairro fora da lista cadastrada. A taxa padrao da loja foi aplicada.'
+                  : 'Informe seu bairro para confirmar a taxa. Enquanto isso, mostramos a taxa padrao da loja.'}
+              </p>
+            </div>
           </div>
 
           <div className="rounded-3xl border border-brand-100 bg-white p-5 shadow-sm">
@@ -364,6 +464,7 @@ const PublicMenu: React.FC = () => {
                 <input
                   value={neighborhood}
                   onChange={(event) => setNeighborhood(event.target.value)}
+                  list={knownNeighborhoods.length > 0 ? 'delivery-neighborhoods' : undefined}
                   placeholder="Bairro"
                   className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-400"
                 />
@@ -374,6 +475,18 @@ const PublicMenu: React.FC = () => {
                   className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-400"
                 />
               </div>
+              {knownNeighborhoods.length > 0 ? (
+                <>
+                  <datalist id="delivery-neighborhoods">
+                    {knownNeighborhoods.map((label) => (
+                      <option key={label} value={label} />
+                    ))}
+                  </datalist>
+                  <p className="text-xs text-slate-500">
+                    Comece a digitar seu bairro para selecionar um dos bairros cadastrados pela loja.
+                  </p>
+                </>
+              ) : null}
               <select
                 value={paymentMethod}
                 onChange={(event) => setPaymentMethod(event.target.value)}

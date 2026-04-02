@@ -38,6 +38,12 @@ type StoreConfig = {
   }>
 }
 
+type DeliveryFeeRuleForm = {
+  id: string
+  label: string
+  fee: string
+}
+
 type Category = {
   id: number
   name: string
@@ -82,34 +88,30 @@ const dispatchBrandingUpdate = (store_name: string, logo_url: string | null) => 
   window.dispatchEvent(new CustomEvent('sorveteria:branding', { detail: { store_name, logo_url } }))
 }
 
-const formatDeliveryFeeRules = (rules?: Array<{ label?: string; neighborhood?: string; fee?: string }>) =>
-  (rules ?? [])
+const createDeliveryFeeRule = (label = '', fee = ''): DeliveryFeeRuleForm => ({
+  id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  label,
+  fee,
+})
+
+const normalizeDeliveryFeeRules = (rules?: Array<{ label?: string; neighborhood?: string; fee?: string }>) => {
+  const normalized = (rules ?? [])
     .map((rule) => {
       const label = String(rule.label || rule.neighborhood || '').trim()
       const fee = String(rule.fee || '').trim()
-      return label && fee ? `${label}=${fee}` : ''
+      return label || fee ? createDeliveryFeeRule(label, fee) : null
     })
-    .filter(Boolean)
-    .join('\n')
+    .filter((item): item is DeliveryFeeRuleForm => item !== null)
+  return normalized.length > 0 ? normalized : [createDeliveryFeeRule()]
+}
 
-const parseDeliveryFeeRules = (value: string) =>
-  value
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const separatorIndex = line.search(/[:=]/)
-      if (separatorIndex === -1) {
-        return null
-      }
-      const label = line.slice(0, separatorIndex).trim()
-      const fee = line.slice(separatorIndex + 1).trim().replace(',', '.')
-      if (!label || !fee) {
-        return null
-      }
-      return { label, fee }
-    })
-    .filter((item): item is { label: string; fee: string } => item !== null)
+const buildDeliveryFeeRulesPayload = (rules: DeliveryFeeRuleForm[]) =>
+  rules
+    .map((rule) => ({
+      label: rule.label.trim(),
+      fee: rule.fee.trim().replace(',', '.'),
+    }))
+    .filter((rule) => rule.label && rule.fee)
 
 const Configuracoes: React.FC = () => {
   const [loading, setLoading] = useState(true)
@@ -134,7 +136,7 @@ const Configuracoes: React.FC = () => {
   const [pixKey, setPixKey] = useState('')
   const [theme, setTheme] = useState('cream')
   const [deliveryFeeDefault, setDeliveryFeeDefault] = useState('10.00')
-  const [deliveryFeeRulesText, setDeliveryFeeRulesText] = useState('')
+  const [deliveryFeeRules, setDeliveryFeeRules] = useState<DeliveryFeeRuleForm[]>([createDeliveryFeeRule()])
 
   const [agentUrl, setAgentUrl] = useState('http://127.0.0.1:9876')
   const [autoPrintReceipt, setAutoPrintReceipt] = useState(true)
@@ -187,7 +189,7 @@ const Configuracoes: React.FC = () => {
       setPixKey(cfg.pix_key || '')
       setTheme(normalizeTheme(cfg.theme))
       setDeliveryFeeDefault(String(cfg.delivery_fee_default ?? '10.00'))
-      setDeliveryFeeRulesText(formatDeliveryFeeRules(cfg.delivery_fee_rules))
+      setDeliveryFeeRules(normalizeDeliveryFeeRules(cfg.delivery_fee_rules))
       setPointsPerReal(String(cfg.points_per_real ?? 1))
       setPointValueReal(String(cfg.point_value_real ?? '0.10'))
       setMinRedeemPoints(String(cfg.min_redeem_points ?? 10))
@@ -352,7 +354,7 @@ const Configuracoes: React.FC = () => {
         whatsapp_number: whatsappNumber.trim() || null,
         pix_key: pixKey,
         delivery_fee_default: deliveryFeeDefault.replace(',', '.') || '0',
-        delivery_fee_rules: parseDeliveryFeeRules(deliveryFeeRulesText),
+        delivery_fee_rules: buildDeliveryFeeRulesPayload(deliveryFeeRules),
         theme: normalizeTheme(theme),
         points_per_real: Number(pointsPerReal) || 1,
         point_value_real: pointValueReal.replace(',', '.'),
@@ -560,6 +562,25 @@ const Configuracoes: React.FC = () => {
     }
   }
 
+  const updateDeliveryFeeRule = (ruleId: string, field: 'label' | 'fee', value: string) => {
+    setDeliveryFeeRules((current) =>
+      current.map((rule) => (rule.id === ruleId ? { ...rule, [field]: value } : rule))
+    )
+  }
+
+  const addDeliveryFeeRule = () => {
+    setDeliveryFeeRules((current) => [...current, createDeliveryFeeRule()])
+  }
+
+  const removeDeliveryFeeRule = (ruleId: string) => {
+    setDeliveryFeeRules((current) => {
+      if (current.length === 1) {
+        return [createDeliveryFeeRule()]
+      }
+      return current.filter((rule) => rule.id !== ruleId)
+    })
+  }
+
   const handleResetSales = async () => {
     const password = window.prompt(
       'ATENÇÃO: Isso irá apagar todo o histórico de vendas, caixas e pontos de fidelidade. ' +
@@ -703,15 +724,40 @@ const Configuracoes: React.FC = () => {
           className="w-full rounded-lg border border-brand-100 px-3 py-2"
           placeholder="Taxa padrao para bairros sem regra"
         />
-        <textarea
-          value={deliveryFeeRulesText}
-          onChange={(event) => setDeliveryFeeRulesText(event.target.value)}
-          rows={8}
-          className="w-full rounded-lg border border-brand-100 px-3 py-2 text-sm"
-          placeholder={'Uma regra por linha\nCentro=5.00\nBatista Campos=6.00'}
-        />
+        <div className="space-y-2">
+          {deliveryFeeRules.map((rule) => (
+            <div key={rule.id} className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_180px_auto]">
+              <input
+                value={rule.label}
+                onChange={(event) => updateDeliveryFeeRule(rule.id, 'label', event.target.value)}
+                className="w-full rounded-lg border border-brand-100 px-3 py-2"
+                placeholder="Bairro"
+              />
+              <input
+                value={rule.fee}
+                onChange={(event) => updateDeliveryFeeRule(rule.id, 'fee', event.target.value)}
+                className="w-full rounded-lg border border-brand-100 px-3 py-2"
+                placeholder="Taxa"
+              />
+              <button
+                type="button"
+                onClick={() => removeDeliveryFeeRule(rule.id)}
+                className="rounded-lg border border-rose-300 px-3 py-2 text-rose-700"
+              >
+                Remover
+              </button>
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={addDeliveryFeeRule}
+          className="rounded-lg border border-brand-200 px-3 py-2 text-sm font-semibold text-brand-700"
+        >
+          Adicionar bairro
+        </button>
         <p className="text-xs text-slate-500">
-          Cadastre uma regra por linha no formato `Bairro=Taxa`. Quando o bairro nao estiver listado, o sistema usa a taxa padrao acima.
+          Cadastre os bairros atendidos e a taxa de cada um. Quando o bairro nao estiver listado, o sistema usa a taxa padrao acima.
         </p>
       </div>
 
