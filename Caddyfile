@@ -1,6 +1,17 @@
+(media_files) {
+  handle_path /media/* {
+    root * /srv/media
+    header Cache-Control "public, max-age=2592000, stale-while-revalidate=86400"
+    file_server
+  }
+}
+
 http://{$API_DOMAIN} {
   encode zstd gzip
-  reverse_proxy backend:8000
+  import media_files
+  handle {
+    reverse_proxy backend:8000
+  }
 }
 
 http://{$APP_DOMAIN} {
@@ -15,11 +26,7 @@ http://{$APP_DOMAIN} {
       header_up Host {$API_DOMAIN}
     }
   }
-  handle /media/* {
-    reverse_proxy backend:8000 {
-      header_up Host {$API_DOMAIN}
-    }
-  }
+  import media_files
   handle /health {
     reverse_proxy backend:8000 {
       header_up Host {$API_DOMAIN}
@@ -40,9 +47,7 @@ http://{$APP_DOMAIN} {
     handle /ws/* {
       reverse_proxy backend:8000
     }
-    handle /media/* {
-      reverse_proxy backend:8000
-    }
+    import media_files
     handle /health {
       reverse_proxy backend:8000
     }

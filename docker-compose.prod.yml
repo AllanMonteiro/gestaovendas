@@ -40,6 +40,8 @@ services:
     restart: unless-stopped
     env_file:
       - ./backend/.env.production
+    volumes:
+      - media_data:/app/media
     environment:
       DJANGO_LOG_LEVEL: INFO
       REQUIRE_AUTH: ${REQUIRE_AUTH:-1}
@@ -92,6 +94,7 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile
+      - media_data:/srv/media:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
@@ -143,6 +146,7 @@ services:
 
 volumes:
   pgdata:
+  media_data:
   caddy_data:
   caddy_config:
   db_backups:

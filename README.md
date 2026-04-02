@@ -58,6 +58,18 @@ Esse script:
 - testa `/health`
 - roda smoke test basico (pode usar `-SkipSmoke` para pular)
 
+### Migrar uploads antigos para o novo volume de media
+Se a instalacao atual ja tem arquivos em `/app/media` dentro do container antigo do backend, faca a migracao antes de recriar a stack com a nova configuracao do Caddy:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/migrate_media_to_volume.ps1
+```
+
+Observacoes:
+- o backend atual precisa estar rodando para o script copiar os arquivos
+- o script copia a pasta atual de media do container para o volume Docker `sorveteria-pos_media_data`
+- se o volume ja tiver arquivos e voce quiser sobrescrever, rode com `-Force`
+
 ### 5) Verificar
 - Backend health: `http://127.0.0.1:8000/health`
 - App: `https://app.seudominio.com`
