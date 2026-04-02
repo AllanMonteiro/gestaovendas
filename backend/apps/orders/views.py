@@ -72,13 +72,39 @@ def _sync_delivery_payment(order):
     Payment.objects.filter(order=order).exclude(method=method).delete()
 
 
-def _delivery_orders():
-    return (
+def _wants_items(request, default=True):
+    raw = request.query_params.get('include_items')
+    if raw is None:
+        return default
+    return raw.strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _get_positive_int_param(request, name, default=None, *, maximum=None):
+    raw = request.query_params.get(name)
+    if raw in (None, ''):
+        return default
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    if value < 1:
+        return default
+    if maximum is not None:
+        value = min(value, maximum)
+    return value
+
+
+def _delivery_orders(*, include_items=True, limit=None):
+    qs = (
         Order.objects.filter(type=Order.TYPE_DELIVERY, delivery_meta__isnull=False)
         .select_related('customer', 'delivery_meta')
-        .prefetch_related('items__product')
         .order_by('-created_at')
     )
+    if include_items:
+        qs = qs.prefetch_related('items__product')
+    if limit is not None:
+        qs = qs[:limit]
+    return qs
 
 
 def _forbidden(request):
@@ -89,7 +115,10 @@ class DeliveryOrdersView(APIView):
     def get(self, request):
         if _forbidden(request):
             return Response({'detail': 'Forbidden'}, status=403)
-        return Response(OrderSerializer(_delivery_orders(), many=True).data)
+        include_items = _wants_items(request, default=True)
+        limit = _get_positive_int_param(request, 'limit', default=None, maximum=100)
+        orders = _delivery_orders(include_items=include_items, limit=limit)
+        return Response(OrderSerializer(orders, many=True, context={'include_items': include_items}).data)
 
 
 class PublicDeliveryOrderCreateView(APIView):

@@ -155,7 +155,7 @@ def cash_history(from_date=None, to_date=None):
     return history
 
 
-def cash_summary(from_date=None, to_date=None):
+def cash_summary_from_history(history):
     totals = {
         'sessions_count': 0,
         'initial_float_total': Decimal('0'),
@@ -179,3 +179,7 @@ def cash_summary(from_date=None, to_date=None):
         totals['divergence_cash_total'] += Decimal(str(breakdown.get('divergence_cash', 0) or 0))
 
     return totals
+
+
+def cash_summary(from_date=None, to_date=None):
+    return cash_summary_from_history(cash_history(from_date, to_date))

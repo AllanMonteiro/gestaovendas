@@ -160,6 +160,8 @@ const Caixa: React.FC = () => {
   const [paymentsAgg, setPaymentsAgg] = useState<PaymentAgg[]>([])
   const [fromDate, setFromDate] = useState(todayISO())
   const [toDate, setToDate] = useState(todayISO())
+  const [appliedFromDate, setAppliedFromDate] = useState(todayISO())
+  const [appliedToDate, setAppliedToDate] = useState(todayISO())
   const [feedback, setFeedback] = useState<string>('')
   const [reconciliation, setReconciliation] = useState<Reconciliation | null>(null)
   const [dailySummary, setDailySummary] = useState<Summary | null>(null)
@@ -177,7 +179,7 @@ const Caixa: React.FC = () => {
   const loadData = useCallback(async () => {
     try {
       const response = await api.get<CashDashboardResponse>(
-        `/api/cash/dashboard?from=${fromDate}&to=${toDate}&orders_limit=${CASH_DASHBOARD_ORDERS_LIMIT}&moves_limit=${CASH_DASHBOARD_MOVES_LIMIT}&history_limit=${CASH_DASHBOARD_HISTORY_LIMIT}`
+        `/api/cash/dashboard?from=${appliedFromDate}&to=${appliedToDate}&orders_limit=${CASH_DASHBOARD_ORDERS_LIMIT}&moves_limit=${CASH_DASHBOARD_MOVES_LIMIT}&history_limit=${CASH_DASHBOARD_HISTORY_LIMIT}`
       )
       const payload = response.data
       setCashStatus(payload.cash_status)
@@ -196,7 +198,7 @@ const Caixa: React.FC = () => {
     } catch {
       setFeedback('Alguns dados do caixa falharam ao atualizar. Tente novamente.')
     }
-  }, [fromDate, toDate])
+  }, [appliedFromDate, appliedToDate])
 
   const postToAgent = useCallback(async (payload: ThermalReceiptPayload) => {
     const normalizedAgentUrl = agentUrl.trim().replace(/\/$/, '')
@@ -228,6 +230,11 @@ const Caixa: React.FC = () => {
   useEffect(() => {
     void loadData()
   }, [loadData])
+
+  const applyDateFilter = () => {
+    setAppliedFromDate(fromDate)
+    setAppliedToDate(toDate)
+  }
 
   useEffect(() => {
     const ws = connectWS('/ws/pdv', (data) => {
@@ -675,7 +682,7 @@ const Caixa: React.FC = () => {
           <div className="flex flex-wrap items-center gap-2">
             <input value={fromDate} onChange={(event) => setFromDate(event.target.value)} type="date" className="rounded-lg border border-brand-200 px-2 py-1 text-sm" />
             <input value={toDate} onChange={(event) => setToDate(event.target.value)} type="date" className="rounded-lg border border-brand-200 px-2 py-1 text-sm" />
-            <button onClick={() => void loadData()} className="text-sm font-semibold text-brand-700">Filtrar periodo</button>
+            <button onClick={applyDateFilter} className="text-sm font-semibold text-brand-700">Filtrar periodo</button>
           </div>
         </div>
 

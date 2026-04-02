@@ -525,7 +525,7 @@ const Produtos: React.FC = () => {
             Nova Categoria
           </button>
           <button onClick={openDeleteCategoryModal} className="px-3 py-2 rounded-lg border border-rose-300 text-rose-700">
-            Apagar Categoria
+            Excluir Categoria
           </button>
           <button onClick={() => openCreateProductModal()} className="px-3 py-2 rounded-lg bg-brand-600 text-white">
             Novo Produto
@@ -872,7 +872,7 @@ const Produtos: React.FC = () => {
       {showDeleteCategoryModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4">
           <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl space-y-4">
-            <h3 className="text-lg font-semibold text-rose-700">Apagar categoria</h3>
+            <h3 className="text-lg font-semibold text-rose-700">Excluir categoria</h3>
 
             <div className="space-y-3">
               <div>

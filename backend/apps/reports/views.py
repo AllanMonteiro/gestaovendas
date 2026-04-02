@@ -81,14 +81,15 @@ class DashboardView(ReportPermissionView):
         cached_payload = cache.get(cache_key)
         if cached_payload is not None:
             return Response(cached_payload)
+        cash_history = queries.cash_history(from_date, to_date)
         payload = {
             'summary': queries.summary(from_date, to_date),
             'categories': queries.by_category(from_date, to_date),
             'products': queries.by_product(from_date, to_date, limit=limit),
             'daily_sales': queries.daily_sales(from_date, to_date),
             'payments': queries.by_payment(from_date, to_date),
-            'cash_summary': queries.cash_summary(from_date, to_date),
-            'cash_history': queries.cash_history(from_date, to_date),
+            'cash_summary': queries.cash_summary_from_history(cash_history),
+            'cash_history': cash_history,
         }
         cache.set(cache_key, payload, REPORT_DASHBOARD_CACHE_TTL)
         return Response(payload)

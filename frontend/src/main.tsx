@@ -12,15 +12,12 @@ const preloadOfflineRoutes = () => {
     return
   }
   const warmUp = () => {
+    // Keep first navigation snappy for the core operational screens without eagerly loading heavy secondary pages.
     void import('./pages/PDV')
     void import('./pages/Caixa')
     void import('./pages/Cozinha')
     void import('./pages/Produtos')
     void import('./pages/Configuracoes')
-    void import('./pages/Fidelidade')
-    void import('./pages/Relatorios')
-    void import('./pages/PedidosDelivery')
-    void import('./pages/PublicMenu')
   }
 
   if ('requestIdleCallback' in window) {

@@ -41,6 +41,9 @@ class OrderSerializer(serializers.Serializer):
     def _meta(self, obj):
         return getattr(obj, 'delivery_meta', None)
 
+    def _include_items(self):
+        return self.context.get('include_items', True)
+
     def get_customer_name(self, obj):
         meta = self._meta(obj)
         if meta and meta.customer_name:
@@ -92,6 +95,8 @@ class OrderSerializer(serializers.Serializer):
         return getattr(meta, 'neighborhood', None)
 
     def get_items(self, obj):
+        if not self._include_items():
+            return []
         items = []
         for item in obj.items.all():
             product_name = item.product.name if getattr(item, 'product', None) is not None else None

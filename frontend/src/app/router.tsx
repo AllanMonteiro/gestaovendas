@@ -253,7 +253,7 @@ const Layout: React.FC = () => {
 
     const fetchDeliveryOrders = async (options?: { notifyOnNew?: boolean }) => {
       try {
-        const response = await api.get<DeliveryOrdersResponse>('/api/orders/')
+        const response = await api.get<DeliveryOrdersResponse>('/api/orders/?include_items=0&limit=20')
         const nextOrders = normalizeDeliveryOrders(response.data)
         if (options?.notifyOnNew) {
           const newOrders = nextOrders.filter((order) => !knownDeliveryOrderIdsRef.current.has(order.id))
