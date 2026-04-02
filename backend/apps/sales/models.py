@@ -5,6 +5,19 @@ from apps.catalog.models import Product
 from apps.loyalty.models import Customer
 
 
+def default_delivery_fee_rules():
+    return [
+        {'label': 'CENTRO', 'fee': '5.00'},
+        {'label': 'BATISTA CAMPOS', 'fee': '6.00'},
+        {'label': 'NAZARE', 'fee': '6.00'},
+        {'label': 'UMARIZAL', 'fee': '7.00'},
+        {'label': 'MARCO', 'fee': '8.00'},
+        {'label': 'PEDREIRA', 'fee': '8.00'},
+        {'label': 'TILEGUA', 'fee': '10.00'},
+        {'label': 'COQUEIRO', 'fee': '12.00'},
+    ]
+
+
 class Order(models.Model):
     STATUS_OPEN = 'OPEN'
     STATUS_SENT = 'SENT'
@@ -196,6 +209,8 @@ class StoreConfig(models.Model):
     receipt_header_lines = models.JSONField(default=list)
     receipt_footer_lines = models.JSONField(default=list)
     pix_key = models.CharField(max_length=100, null=True, blank=True)
+    delivery_fee_default = models.DecimalField(max_digits=10, decimal_places=2, default=10)
+    delivery_fee_rules = models.JSONField(default=default_delivery_fee_rules)
 
     class Meta:
         verbose_name = 'Store Config'

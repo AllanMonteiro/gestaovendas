@@ -30,6 +30,12 @@ type StoreConfig = {
   }
   category_images?: Record<string, string>
   pix_key?: string
+  delivery_fee_default?: string
+  delivery_fee_rules?: Array<{
+    label?: string
+    neighborhood?: string
+    fee?: string
+  }>
 }
 
 type Category = {
@@ -76,6 +82,35 @@ const dispatchBrandingUpdate = (store_name: string, logo_url: string | null) => 
   window.dispatchEvent(new CustomEvent('sorveteria:branding', { detail: { store_name, logo_url } }))
 }
 
+const formatDeliveryFeeRules = (rules?: Array<{ label?: string; neighborhood?: string; fee?: string }>) =>
+  (rules ?? [])
+    .map((rule) => {
+      const label = String(rule.label || rule.neighborhood || '').trim()
+      const fee = String(rule.fee || '').trim()
+      return label && fee ? `${label}=${fee}` : ''
+    })
+    .filter(Boolean)
+    .join('\n')
+
+const parseDeliveryFeeRules = (value: string) =>
+  value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const separatorIndex = line.search(/[:=]/)
+      if (separatorIndex === -1) {
+        return null
+      }
+      const label = line.slice(0, separatorIndex).trim()
+      const fee = line.slice(separatorIndex + 1).trim().replace(',', '.')
+      if (!label || !fee) {
+        return null
+      }
+      return { label, fee }
+    })
+    .filter((item): item is { label: string; fee: string } => item !== null)
+
 const Configuracoes: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [feedback, setFeedback] = useState('')
@@ -98,6 +133,8 @@ const Configuracoes: React.FC = () => {
   const [whatsappNumber, setWhatsappNumber] = useState('')
   const [pixKey, setPixKey] = useState('')
   const [theme, setTheme] = useState('cream')
+  const [deliveryFeeDefault, setDeliveryFeeDefault] = useState('10.00')
+  const [deliveryFeeRulesText, setDeliveryFeeRulesText] = useState('')
 
   const [agentUrl, setAgentUrl] = useState('http://127.0.0.1:9876')
   const [autoPrintReceipt, setAutoPrintReceipt] = useState(true)
@@ -149,6 +186,8 @@ const Configuracoes: React.FC = () => {
       setWhatsappNumber(cfg.whatsapp_number || '')
       setPixKey(cfg.pix_key || '')
       setTheme(normalizeTheme(cfg.theme))
+      setDeliveryFeeDefault(String(cfg.delivery_fee_default ?? '10.00'))
+      setDeliveryFeeRulesText(formatDeliveryFeeRules(cfg.delivery_fee_rules))
       setPointsPerReal(String(cfg.points_per_real ?? 1))
       setPointValueReal(String(cfg.point_value_real ?? '0.10'))
       setMinRedeemPoints(String(cfg.min_redeem_points ?? 10))
@@ -312,6 +351,8 @@ const Configuracoes: React.FC = () => {
         address,
         whatsapp_number: whatsappNumber.trim() || null,
         pix_key: pixKey,
+        delivery_fee_default: deliveryFeeDefault.replace(',', '.') || '0',
+        delivery_fee_rules: parseDeliveryFeeRules(deliveryFeeRulesText),
         theme: normalizeTheme(theme),
         points_per_real: Number(pointsPerReal) || 1,
         point_value_real: pointValueReal.replace(',', '.'),
@@ -652,6 +693,26 @@ const Configuracoes: React.FC = () => {
         <input value={pointsPerReal} onChange={(event) => setPointsPerReal(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Pontos por R$1" />
         <input value={pointValueReal} onChange={(event) => setPointValueReal(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Valor do ponto" />
         <input value={minRedeemPoints} onChange={(event) => setMinRedeemPoints(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Minimo resgate" />
+      </div>
+
+      <div className="panel space-y-3 p-4">
+        <h2 className="font-semibold">Taxa de entrega</h2>
+        <input
+          value={deliveryFeeDefault}
+          onChange={(event) => setDeliveryFeeDefault(event.target.value)}
+          className="w-full rounded-lg border border-brand-100 px-3 py-2"
+          placeholder="Taxa padrao para bairros sem regra"
+        />
+        <textarea
+          value={deliveryFeeRulesText}
+          onChange={(event) => setDeliveryFeeRulesText(event.target.value)}
+          rows={8}
+          className="w-full rounded-lg border border-brand-100 px-3 py-2 text-sm"
+          placeholder={'Uma regra por linha\nCentro=5.00\nBatista Campos=6.00'}
+        />
+        <p className="text-xs text-slate-500">
+          Cadastre uma regra por linha no formato `Bairro=Taxa`. Quando o bairro nao estiver listado, o sistema usa a taxa padrao acima.
+        </p>
       </div>
 
       <div className="panel space-y-3 p-4 lg:col-span-2">

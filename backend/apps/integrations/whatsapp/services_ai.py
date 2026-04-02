@@ -93,6 +93,7 @@ def create_delivery_order_from_parsed(
     source: str = DeliveryOrderMeta.SOURCE_WHATSAPP,
     default_customer_name: str = 'Cliente Delivery',
 ) -> Order:
+    config = get_store_config()
     subtotal = Decimal('0.00')
     raw_items = []
     order_items = []
@@ -116,6 +117,8 @@ def create_delivery_order_from_parsed(
         raw_items.append({
             'product_name': product.name if product else name,
             'quantity': _serialize_quantity(qty),
+            'unit_price': str(unit_price),
+            'total': str(line_total),
         })
 
         if product is not None:
@@ -135,11 +138,10 @@ def create_delivery_order_from_parsed(
                 neighborhood = cep_data.get('bairro', neighborhood)
         except Exception:
             logger.exception('Falha ao consultar CEP para delivery web')
-    delivery_fee = q2(Decimal(str(calculate_delivery_fee(neighborhood)))) if neighborhood else Decimal('0.00')
+    delivery_fee = q2(Decimal(str(calculate_delivery_fee(neighborhood, config=config))))
     total = q2(subtotal + delivery_fee)
 
     pix_payload = None
-    config = get_store_config()
     if config.pix_key:
         try:
             pix_payload = generate_static_pix(config.pix_key, float(total), config.store_name, 'Belem')

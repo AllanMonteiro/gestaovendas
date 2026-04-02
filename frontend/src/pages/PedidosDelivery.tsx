@@ -7,11 +7,15 @@ interface Order {
   items?: Array<{
     product_name: string
     quantity: string | number
+    unit_price?: string
+    total?: string
   }>
   id: string
   customer_name: string
   customer_phone: string
   address: string
+  subtotal: string
+  delivery_fee: string
   total: string
   status: string
   created_at: string
@@ -39,6 +43,9 @@ const sourceLabel: Record<string, string> = {
   pdv: 'PDV',
   whatsapp: 'WHATSAPP',
 }
+
+const formatBRL = (value: string | number) =>
+  Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
 const PedidosDelivery: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([])
@@ -191,7 +198,10 @@ const PedidosDelivery: React.FC = () => {
                       <span className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-700">
                         {sourceLabel[order.source] || order.source}
                       </span>
-                      <p className="text-xl font-black text-slate-800">R$ {order.total}</p>
+                      <div className="text-right">
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Total</p>
+                        <p className="text-xl font-black text-slate-800">{formatBRL(order.total)}</p>
+                      </div>
                     </div>
 
                     <div className="mb-6">
@@ -210,11 +220,15 @@ const PedidosDelivery: React.FC = () => {
                       {order.items && order.items.length > 0 ? (
                         <div className="mt-4 rounded-2xl bg-slate-50 p-3">
                           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Itens do pedido</p>
-                          <div className="mt-2 space-y-1">
+                          <div className="mt-2 space-y-2">
                             {order.items.map((item, index) => (
-                              <p key={`${order.id}-${index}`} className="text-sm text-slate-600">
-                                {item.quantity}x {item.product_name}
-                              </p>
+                              <div key={`${order.id}-${index}`} className="flex items-start justify-between gap-3 text-sm text-slate-600">
+                                <p>
+                                  {item.quantity}x {item.product_name}
+                                  {item.unit_price ? ` • ${formatBRL(item.unit_price)} un.` : ''}
+                                </p>
+                                {item.total ? <p className="whitespace-nowrap font-semibold text-slate-700">{formatBRL(item.total)}</p> : null}
+                              </div>
                             ))}
                           </div>
                         </div>
@@ -223,6 +237,21 @@ const PedidosDelivery: React.FC = () => {
                   </div>
 
                   <div className="space-y-4">
+                    <div className="rounded-2xl border border-slate-100 bg-white p-4">
+                      <div className="flex items-center justify-between text-sm text-slate-600">
+                        <span>Subtotal dos itens</span>
+                        <span className="font-semibold text-slate-800">{formatBRL(order.subtotal)}</span>
+                      </div>
+                      <div className="mt-2 flex items-center justify-between text-sm text-slate-600">
+                        <span>Taxa de entrega</span>
+                        <span className="font-semibold text-slate-800">{formatBRL(order.delivery_fee)}</span>
+                      </div>
+                      <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-3">
+                        <span className="text-sm font-bold uppercase tracking-wider text-slate-500">Total</span>
+                        <span className="text-base font-black text-slate-900">{formatBRL(order.total)}</span>
+                      </div>
+                    </div>
+
                     {order.pix_payload ? (
                       <div className="rounded-2xl bg-slate-50 p-4">
                         <div className="mb-2 flex items-center justify-between">

@@ -92,6 +92,8 @@ def get_store_config() -> StoreConfig:
         'category_images': {},
         'receipt_header_lines': [],
         'receipt_footer_lines': [],
+        'delivery_fee_default': Decimal('10.00'),
+        'delivery_fee_rules': StoreConfig._meta.get_field('delivery_fee_rules').get_default(),
     })
     return normalize_store_config_assets(config)
 

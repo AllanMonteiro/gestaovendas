@@ -7,7 +7,7 @@ from apps.accounts.models import User
 from apps.catalog.models import Category, Product, ProductPrice
 from apps.reports import queries as report_queries
 from apps.sales import services
-from apps.sales.models import DeliveryOrderMeta, Order, Payment
+from apps.sales.models import DeliveryOrderMeta, Order, Payment, StoreConfig
 
 
 class PublicDeliveryOrderCreateTests(TestCase):
@@ -29,6 +29,16 @@ class PublicDeliveryOrderCreateTests(TestCase):
             tax_pct=Decimal('0'),
             overhead_pct=Decimal('0'),
             margin_pct=Decimal('0'),
+        )
+        StoreConfig.objects.update_or_create(
+            id=1,
+            defaults={
+                'delivery_fee_default': Decimal('10.00'),
+                'delivery_fee_rules': [
+                    {'label': 'CENTRO', 'fee': '5.00'},
+                    {'label': 'BATISTA CAMPOS', 'fee': '6.00'},
+                ],
+            },
         )
 
     def test_public_menu_creates_delivery_order(self):
@@ -52,12 +62,46 @@ class PublicDeliveryOrderCreateTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['subtotal'], '16.00')
+        self.assertEqual(response.data['delivery_fee'], '5.00')
+        self.assertEqual(response.data['items'][0]['unit_price'], '8.00')
+        self.assertEqual(response.data['items'][0]['total'], '16.00')
         order = Order.objects.get(id=response.data['id'])
         self.assertEqual(order.type, Order.TYPE_DELIVERY)
         self.assertEqual(order.total, Decimal('21.00'))
         self.assertEqual(order.items.count(), 1)
         self.assertEqual(order.delivery_meta.source, DeliveryOrderMeta.SOURCE_WEB)
         self.assertEqual(order.delivery_meta.customer_name, 'Cliente Web')
+
+    def test_delivery_list_returns_breakdown_for_operator_conference(self):
+        create_response = self.client.post(
+            '/api/orders/public/',
+            {
+                'customer_name': 'Cliente Conferencia',
+                'customer_phone': '91999990000',
+                'address': 'Rua das Flores, 10',
+                'neighborhood': 'Centro',
+                'payment_method': 'PIX',
+                'items': [
+                    {
+                        'product_id': self.product.id,
+                        'product_name': 'Cascao',
+                        'quantity': 2,
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        response = self.staff_client.get('/api/orders/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['subtotal'], '16.00')
+        self.assertEqual(response.data[0]['delivery_fee'], '5.00')
+        self.assertEqual(response.data[0]['total'], '21.00')
+        self.assertEqual(response.data[0]['items'][0]['unit_price'], '8.00')
+        self.assertEqual(response.data[0]['items'][0]['total'], '16.00')
 
     def test_delivered_delivery_generates_payment_and_enters_reports(self):
         create_response = self.client.post(
@@ -199,3 +243,38 @@ class PublicDeliveryOrderCreateTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Order.objects.filter(id=create_response.data['id']).exists())
+
+    def test_delivery_fee_uses_store_config_rules(self):
+        StoreConfig.objects.update_or_create(
+            id=1,
+            defaults={
+                'delivery_fee_default': Decimal('13.00'),
+                'delivery_fee_rules': [
+                    {'label': 'CENTRO', 'fee': '7.50'},
+                ],
+            },
+        )
+
+        response = self.client.post(
+            '/api/orders/public/',
+            {
+                'customer_name': 'Cliente Taxa',
+                'customer_phone': '91999990000',
+                'address': 'Rua das Flores, 10',
+                'neighborhood': 'Centro',
+                'payment_method': 'PIX',
+                'items': [
+                    {
+                        'product_id': self.product.id,
+                        'product_name': 'Cascao',
+                        'quantity': 1,
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['subtotal'], '8.00')
+        self.assertEqual(response.data['delivery_fee'], '7.50')
+        self.assertEqual(response.data['total'], '15.50')

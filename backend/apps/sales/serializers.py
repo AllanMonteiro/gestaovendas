@@ -165,6 +165,8 @@ class StoreConfigUiSerializer(StoreConfigAssetSerializer):
             'printer',
             'receipt_header_lines',
             'receipt_footer_lines',
+            'delivery_fee_default',
+            'delivery_fee_rules',
         ]
 
 

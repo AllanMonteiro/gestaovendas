@@ -15,6 +15,8 @@ def _serialize_quantity(value):
 class OrderItemSerializer(serializers.Serializer):
     product_name = serializers.CharField()
     quantity = serializers.JSONField()
+    unit_price = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    total = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
 
 
 class OrderSerializer(serializers.Serializer):
@@ -96,6 +98,8 @@ class OrderSerializer(serializers.Serializer):
             items.append({
                 'product_name': product_name or 'Item',
                 'quantity': _serialize_quantity(item.qty),
+                'unit_price': item.unit_price,
+                'total': item.total,
             })
         if items:
             return OrderItemSerializer(items, many=True).data
@@ -106,6 +110,8 @@ class OrderSerializer(serializers.Serializer):
             {
                 'product_name': item.get('product_name', 'Item'),
                 'quantity': item.get('quantity', 1),
+                'unit_price': item.get('unit_price'),
+                'total': item.get('total'),
             }
             for item in raw_items
         ]
