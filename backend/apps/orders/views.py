@@ -207,13 +207,8 @@ class DeliveryOrderDetailView(APIView):
 
     @transaction.atomic
     def delete(self, request, id):
-        if not user_has_permission(request.user, 'order.delete'):
+        if _forbidden(request):
             return Response({'detail': 'Forbidden'}, status=403)
-
-        try:
-            services.ensure_open_cash_session()
-        except ValueError as exc:
-            return Response({'detail': str(exc)}, status=400)
 
         order = _delivery_orders().filter(id=id).first()
         if not order:

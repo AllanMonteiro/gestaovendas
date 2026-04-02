@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.test import TestCase
 from rest_framework.test import APIClient
 
-from apps.accounts.models import User
+from apps.accounts.models import Permission, Role, RolePermission, User, UserRole
 from apps.catalog.models import Category, Product, ProductPrice
 from apps.reports import queries as report_queries
 from apps.sales import services
@@ -240,6 +240,72 @@ class PublicDeliveryOrderCreateTests(TestCase):
         )
 
         response = self.staff_client.delete(f"/api/orders/{create_response.data['id']}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Order.objects.filter(id=create_response.data['id']).exists())
+
+    def test_staff_can_delete_delivery_order_with_closed_cash(self):
+        services.close_cash(
+            user=self.user,
+            counted_cash=Decimal('100.00'),
+            counted_pix=Decimal('0.00'),
+            counted_card=Decimal('0.00'),
+        )
+
+        create_response = self.client.post(
+            '/api/orders/public/',
+            {
+                'customer_name': 'Cliente Excluir Caixa Fechado',
+                'customer_phone': '91999990000',
+                'address': 'Rua das Flores, 10',
+                'neighborhood': 'Centro',
+                'payment_method': 'PIX',
+                'items': [
+                    {
+                        'product_id': self.product.id,
+                        'product_name': 'Cascao',
+                        'quantity': 1,
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        response = self.staff_client.delete(f"/api/orders/{create_response.data['id']}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Order.objects.filter(id=create_response.data['id']).exists())
+
+    def test_operator_with_pdv_permission_can_delete_delivery_order(self):
+        operator = User.objects.create_user(email='operador@test.com', password='test', name='Operador Delivery')
+        role = Role.objects.create(name='Operador Delivery Teste')
+        permission = Permission.objects.create(code='pdv.operate', description='Operar pedidos e vendas no PDV')
+        RolePermission.objects.create(role=role, permission=permission)
+        UserRole.objects.create(user=operator, role=role)
+
+        operator_client = APIClient()
+        operator_client.force_authenticate(user=operator)
+
+        create_response = self.client.post(
+            '/api/orders/public/',
+            {
+                'customer_name': 'Cliente Excluir Operador',
+                'customer_phone': '91999990000',
+                'address': 'Rua das Flores, 10',
+                'neighborhood': 'Centro',
+                'payment_method': 'PIX',
+                'items': [
+                    {
+                        'product_id': self.product.id,
+                        'product_name': 'Cascao',
+                        'quantity': 1,
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        response = operator_client.delete(f"/api/orders/{create_response.data['id']}/")
 
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Order.objects.filter(id=create_response.data['id']).exists())
