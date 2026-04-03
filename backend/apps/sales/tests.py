@@ -38,12 +38,39 @@ class OrderApiValidationTests(TestCase):
     def setUp(self):
         self.client = APIClient()
         self.user = User.objects.create_user(email='cash3@test.com', password='test', name='Cash User 3')
+        self.client.force_authenticate(user=self.user)
         services.open_cash(user=self.user, initial_float=Decimal('50.00'))
 
     def test_create_counter_order_requires_customer_phone(self):
         response = self.client.post('/api/orders', {'type': 'COUNTER'}, format='json')
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data.get('detail'), 'customer_phone required')
+
+    def test_close_order_with_loyalty_points_requires_bound_customer(self):
+        order = services.create_order_idempotent(
+            order_type='COUNTER',
+            table_label=None,
+            customer=None,
+            client_request_id=uuid4(),
+        )
+        order.subtotal = Decimal('10.00')
+        order.total = Decimal('10.00')
+        order.save(update_fields=['subtotal', 'total'])
+
+        response = self.client.post(
+            f'/api/orders/{order.id}/close',
+            {
+                'discount': '0',
+                'payments': [{'method': 'CASH', 'amount': '5.00'}],
+                'use_loyalty_points': True,
+                'points_to_redeem': 50,
+                'client_request_id': str(uuid4()),
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data.get('detail'), 'Order customer required for loyalty redemption')
 
 
 class LoyaltyEarnOnCloseOrderTests(TestCase):

@@ -345,8 +345,10 @@ class OrderCloseView(APIView):
                 user=request.user,
             )
         except ValueError as exc:
+            logger.warning('Order close rejected for %s: %s', order.id, exc)
             return Response({'detail': str(exc)}, status=400)
         except PermissionError as exc:
+            logger.warning('Order close forbidden for %s: %s', order.id, exc)
             return Response({'detail': str(exc)}, status=403)
         try:
             broadcast_pdv_event('order_paid', {'order_id': str(order.id)})

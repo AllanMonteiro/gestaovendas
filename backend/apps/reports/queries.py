@@ -167,7 +167,7 @@ def cash_summary_from_history(history):
         'divergence_cash_total': Decimal('0'),
     }
 
-    for session in cash_history(from_date, to_date):
+    for session in history or []:
         breakdown = session.get('cash_breakdown') or {}
         totals['sessions_count'] += 1
         totals['initial_float_total'] += Decimal(str(breakdown.get('initial_float', 0) or 0))

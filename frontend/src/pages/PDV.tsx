@@ -720,22 +720,15 @@ const PDV: React.FC = () => {
 
   useEffect(() => {
     const loadLoyalty = async () => {
-      if (!selectedOrder?.customer && !selectedOrder?.customer_phone) {
+      if (!selectedOrder?.customer) {
         setLoyaltyBalance(0)
         setPointsToRedeem('0')
         return
       }
       try {
-        let response
-        if (selectedOrder?.customer) {
-          response = await api.get<CustomerLookupResponse>(
-            `/api/loyalty/customer?customer_id=${selectedOrder.customer}`
-          )
-        } else {
-          response = await api.get<CustomerLookupResponse>(
-            `/api/loyalty/customer?phone=${encodeURIComponent(selectedOrder.customer_phone || '')}`
-          )
-        }
+        const response = await api.get<CustomerLookupResponse>(
+          `/api/loyalty/customer?customer_id=${selectedOrder.customer}`
+        )
         setLoyaltyBalance(Number(response.data.account?.points_balance ?? 0))
       } catch {
         setLoyaltyBalance(0)
@@ -743,7 +736,7 @@ const PDV: React.FC = () => {
       setPointsToRedeem('0')
     }
     void loadLoyalty()
-  }, [selectedOrder?.id, selectedOrder?.customer, selectedOrder?.customer_phone])
+  }, [selectedOrder?.id, selectedOrder?.customer])
 
   const resetNewOrderModal = () => {
     setNewOrderStep('phone')
@@ -1122,7 +1115,7 @@ const PDV: React.FC = () => {
       setFeedback({ type: 'error', text: 'Adicione itens ao pedido antes de fechar.' })
       return
     }
-    const suggestedPoints = Math.min(loyaltyBalance, maxPointsByTotal)
+    const suggestedPoints = selectedOrder.customer ? Math.min(loyaltyBalance, maxPointsByTotal) : 0
     if (suggestedPoints > 0 && suggestedPoints >= minRedeemPoints) {
       setPointsToRedeem(String(suggestedPoints))
     } else {
@@ -1608,7 +1601,7 @@ const PDV: React.FC = () => {
         total={selectedOrder?.total ?? '0'}
         orderLabel={selectedOrder ? `#${getOrderDisplayNumber(selectedOrder)}` : undefined}
         customerLabel={selectedOrder?.customer_name ?? selectedOrder?.customer_phone ?? undefined}
-        canUsePoints={Boolean(selectedOrder?.customer || selectedOrder?.customer_phone)}
+        canUsePoints={Boolean(selectedOrder?.customer)}
         pointsBalance={loyaltyBalance}
         pointValueReal={pointValueReal}
         minRedeemPoints={minRedeemPoints}
