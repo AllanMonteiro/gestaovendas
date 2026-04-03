@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { resolveAssetUrl } from '../app/runtime'
 
 type Category = {
@@ -41,6 +41,11 @@ const ProductGridComponent: React.FC<ProductGridProps> = ({
   onAddProduct
 }) => {
   const productsSectionRef = useRef<HTMLDivElement | null>(null)
+  const [failedCategoryImages, setFailedCategoryImages] = useState<Record<string, boolean>>({})
+
+  useEffect(() => {
+    setFailedCategoryImages({})
+  }, [categoryImages])
 
   const categorySummaries = useMemo(() => {
     const summaries = new Map<number, { count: number; stock: string | number }>()
@@ -89,6 +94,13 @@ const ProductGridComponent: React.FC<ProductGridProps> = ({
     })
   }
 
+  const handleCategoryImageError = (categoryId: number) => {
+    setFailedCategoryImages((prev) => ({
+      ...prev,
+      [String(categoryId)]: true,
+    }))
+  }
+
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-brand-100 bg-white p-3 shadow-sm">
@@ -135,12 +147,13 @@ const ProductGridComponent: React.FC<ProductGridProps> = ({
             >
               <div className="flex items-center gap-2">
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-brand-100 bg-slate-100 text-sm font-bold text-slate-500">
-                  {categoryImages[String(category.id)] ? (
+                  {categoryImages[String(category.id)] && !failedCategoryImages[String(category.id)] ? (
                     <img
                       src={resolveAssetUrl(categoryImages[String(category.id)])}
                       alt={category.name}
                       className="h-full w-full object-cover"
                       loading="lazy"
+                      onError={() => handleCategoryImageError(category.id)}
                     />
                   ) : (
                     getCategoryInitials(category.name)

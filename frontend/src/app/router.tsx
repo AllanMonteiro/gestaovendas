@@ -50,6 +50,14 @@ const normalizeTheme = (value?: string | null) => {
   return 'cream'
 }
 
+const getStoreInitials = (value?: string | null) =>
+  String(value || 'Sorveteria POS')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || '')
+    .join('') || 'SP'
+
 const readBrandingCache = () => {
   if (typeof window === 'undefined') {
     return null
@@ -178,6 +186,7 @@ const Layout: React.FC = () => {
 
   const [storeName, setStoreName] = useState(cachedBranding?.store_name || 'Sorveteria POS')
   const [logoUrl, setLogoUrl] = useState<string>(cachedBranding?.logo_url || '')
+  const [logoLoadFailed, setLogoLoadFailed] = useState(false)
   const [theme, setTheme] = useState<string>(cachedBranding?.theme || 'cream')
   const [currentUserName, setCurrentUserName] = useState('')
   const [deliveryAlerts, setDeliveryAlerts] = useState<DeliveryAlert[]>([])
@@ -224,6 +233,10 @@ const Layout: React.FC = () => {
     document.documentElement.setAttribute('data-theme', theme)
     writeBrandingCache({ store_name: storeName, logo_url: logoUrl, theme })
   }, [theme])
+
+  useEffect(() => {
+    setLogoLoadFailed(false)
+  }, [logoUrl])
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -358,9 +371,18 @@ const Layout: React.FC = () => {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start justify-between gap-3 sm:items-center">
               <div className="flex min-w-0 items-center gap-3">
-                {logoUrl ? (
-                  <img src={resolveAssetUrl(logoUrl)} alt="Logo da empresa" className="h-14 w-14 shrink-0 rounded-xl border border-brand-100 object-cover sm:h-16 sm:w-16 lg:h-20 lg:w-20" />
-                ) : null}
+                {logoUrl && !logoLoadFailed ? (
+                  <img
+                    src={resolveAssetUrl(logoUrl)}
+                    alt="Logo da empresa"
+                    className="h-14 w-14 shrink-0 rounded-xl border border-brand-100 object-cover sm:h-16 sm:w-16 lg:h-20 lg:w-20"
+                    onError={() => setLogoLoadFailed(true)}
+                  />
+                ) : (
+                  <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-brand-100 bg-brand-50 text-base font-bold text-brand-700 sm:h-16 sm:w-16 sm:text-lg lg:h-20 lg:w-20 lg:text-xl">
+                    {getStoreInitials(storeName)}
+                  </div>
+                )}
                 <div className="min-w-0">
                   <h1 className="truncate text-xl font-display tracking-wide text-brand-700 sm:text-2xl lg:text-3xl">{storeName}</h1>
                   <p className="text-xs text-slate-500 sm:text-sm">Operacao local com modo offline-first</p>

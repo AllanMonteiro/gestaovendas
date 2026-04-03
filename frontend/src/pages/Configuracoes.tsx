@@ -124,6 +124,7 @@ const Configuracoes: React.FC = () => {
   const [selectedCategoryPrice, setSelectedCategoryPrice] = useState<string>('')
   const [savingCategoryId, setSavingCategoryId] = useState<string>('')
   const [applyingCategoryId, setApplyingCategoryId] = useState<string>('')
+  const [deletingCategoryId, setDeletingCategoryId] = useState<string>('')
   const [uploadingLogo, setUploadingLogo] = useState(false)
   const [uploadingCategoryImage, setUploadingCategoryImage] = useState(false)
 
@@ -338,6 +339,53 @@ const Configuracoes: React.FC = () => {
       setFeedback('Falha ao aplicar o preco da categoria nos produtos.')
     } finally {
       setApplyingCategoryId('')
+    }
+  }
+
+  const handleDeleteCategory = async (categoryId: string) => {
+    const category = categories.find((item) => String(item.id) === categoryId)
+    if (!category) {
+      setFeedback('Categoria nao encontrada.')
+      return
+    }
+    const confirmed = window.confirm(`Excluir a categoria "${category.name}"? Essa acao nao pode ser desfeita.`)
+    if (!confirmed) {
+      return
+    }
+
+    try {
+      setDeletingCategoryId(categoryId)
+      await api.delete(`/api/categories/${categoryId}`)
+
+      const nextCategories = categories.filter((item) => String(item.id) !== categoryId)
+      const nextCategoryPrices = { ...categoryPrices }
+      delete nextCategoryPrices[categoryId]
+      const nextCategoryImages = { ...categoryImages }
+      delete nextCategoryImages[categoryId]
+
+      setCategories(nextCategories)
+      setCategoryPrices(nextCategoryPrices)
+      setCategoryImages(nextCategoryImages)
+
+      if (selectedCategoryId === categoryId) {
+        const nextSelectedCategoryId = nextCategories[0] ? String(nextCategories[0].id) : ''
+        setSelectedCategoryId(nextSelectedCategoryId)
+        setSelectedCategoryImage(nextSelectedCategoryId ? nextCategoryImages[nextSelectedCategoryId] ?? '' : '')
+        setSelectedCategoryPrice(nextSelectedCategoryId ? nextCategoryPrices[nextSelectedCategoryId] ?? '' : '')
+      }
+
+      setFeedback('Categoria excluida com sucesso.')
+    } catch (error: unknown) {
+      const message =
+        typeof error === 'object' &&
+        error !== null &&
+        'response' in error &&
+        typeof (error as { response?: { data?: { detail?: unknown } } }).response?.data?.detail === 'string'
+          ? (error as { response: { data: { detail: string } } }).response.data.detail
+          : 'Falha ao excluir categoria.'
+      setFeedback(message)
+    } finally {
+      setDeletingCategoryId('')
     }
   }
 
@@ -870,6 +918,7 @@ const Configuracoes: React.FC = () => {
                 const categoryId = String(category.id)
                 const savingThisRow = savingCategoryId === categoryId
                 const applyingThisRow = applyingCategoryId === categoryId
+                const deletingThisRow = deletingCategoryId === categoryId
                 return (
                   <tr key={category.id} className="border-t border-brand-100">
                     <td className="px-3 py-3 font-medium text-slate-800">{category.name}</td>
@@ -894,10 +943,18 @@ const Configuracoes: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => void handleApplyCategoryPrice(categoryId)}
-                          disabled={applyingThisRow}
+                          disabled={applyingThisRow || deletingThisRow}
                           className="rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
                         >
                           {applyingThisRow ? 'Aplicando...' : 'Aplicar aos produtos'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteCategory(categoryId)}
+                          disabled={deletingThisRow || savingThisRow || applyingThisRow}
+                          className="rounded-lg border border-rose-300 px-3 py-2 text-xs font-semibold text-rose-700 disabled:opacity-50"
+                        >
+                          {deletingThisRow ? 'Excluindo...' : 'Excluir categoria'}
                         </button>
                       </div>
                     </td>
