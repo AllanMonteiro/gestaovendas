@@ -155,6 +155,38 @@ class AddItemTotalsTests(TestCase):
         self.assertEqual(order.subtotal, Decimal('22.50'))
         self.assertEqual(order.total, Decimal('22.50'))
 
+    def test_add_item_is_idempotent_when_client_request_id_repeats(self):
+        order = services.create_order_idempotent(
+            order_type='COUNTER',
+            table_label=None,
+            customer=None,
+            client_request_id=uuid4(),
+        )
+        client_request_id = uuid4()
+
+        first_item = services.add_item(
+            order=order,
+            product_id=self.product.id,
+            qty=Decimal('1'),
+            weight_grams=None,
+            notes='primeira tentativa',
+            client_request_id=client_request_id,
+        )
+        second_item = services.add_item(
+            order=order,
+            product_id=self.product.id,
+            qty=Decimal('1'),
+            weight_grams=None,
+            notes='retry da mesma requisicao',
+            client_request_id=client_request_id,
+        )
+
+        self.assertEqual(first_item.id, second_item.id)
+        self.assertEqual(Order.objects.get(id=order.id).items.count(), 1)
+        order.refresh_from_db()
+        self.assertEqual(order.subtotal, Decimal('7.50'))
+        self.assertEqual(order.total, Decimal('7.50'))
+
 
 class LoyaltyRedeemOnCloseOrderTests(TestCase):
     def setUp(self):
@@ -367,4 +399,15 @@ class StoreConfigAssetUrlTests(TestCase):
         self.assertEqual(response.status_code, 200)
         config = StoreConfig.objects.get(id=1)
         self.assertEqual(config.logo_url, '/media/store-config/logo.png')
+        self.assertEqual(response.data['logo_url'], 'http://pdv.exemplo.com/media/store-config/logo.png')
+
+    def test_get_config_pdv_includes_logo_url_with_current_origin(self):
+        StoreConfig.objects.update_or_create(
+            id=1,
+            defaults={'logo_url': '/media/store-config/logo.png'},
+        )
+
+        response = self.client.get('/api/config/pdv', HTTP_HOST='pdv.exemplo.com')
+
+        self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['logo_url'], 'http://pdv.exemplo.com/media/store-config/logo.png')

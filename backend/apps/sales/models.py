@@ -118,6 +118,7 @@ class OrderItem(models.Model):
     unit_price = models.DecimalField(max_digits=10, decimal_places=2)
     total = models.DecimalField(max_digits=10, decimal_places=2)
     notes = models.TextField(null=True, blank=True)
+    client_request_id = models.UUIDField(null=True, blank=True, unique=True)
 
     class Meta:
         indexes = [

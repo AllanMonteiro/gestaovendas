@@ -58,7 +58,6 @@ api.interceptors.response.use(
     }
     const isNetworkError = !error.response
     if (isNetworkError && ['POST', 'PUT', 'DELETE'].includes(method) && isOutboxUrlSupported(config?.url)) {
-      const clientRequestId = crypto.randomUUID()
       let payload = config.data || {}
       if (typeof config.data === 'string') {
         try {
@@ -67,6 +66,11 @@ api.interceptors.response.use(
           payload = {}
         }
       }
+      const existingClientRequestId =
+        payload && typeof payload === 'object' && typeof payload.client_request_id === 'string'
+          ? payload.client_request_id
+          : undefined
+      const clientRequestId = existingClientRequestId || crypto.randomUUID()
       const body = { ...payload, client_request_id: clientRequestId }
       await enqueueOutbox({
         method,

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 
 export type PaymentMethod = 'CASH' | 'PIX' | 'CARD_CREDIT' | 'CARD_DEBIT'
 
@@ -67,6 +67,8 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const [method1, setMethod1] = useState<PaymentMethod>('CASH')
   const [method2, setMethod2] = useState<PaymentMethod>('PIX')
   const [amount1, setAmount1] = useState('')
+  const [submitLocked, setSubmitLocked] = useState(false)
+  const submitLockedRef = useRef(false)
 
   const computedPayable = typeof payableTotal === 'number' ? payableTotal : Number(total || 0)
   const amount1Num = round2(Number(amount1.replace(',', '.')) || 0)
@@ -79,12 +81,26 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
       setMethod1('CASH')
       setMethod2('PIX')
       setAmount1('')
+      submitLockedRef.current = false
+      setSubmitLocked(false)
     }
   }, [open])
+
+  useEffect(() => {
+    if (!loading) {
+      submitLockedRef.current = false
+      setSubmitLocked(false)
+    }
+  }, [loading])
 
   if (!open) return null
 
   const handleConfirm = () => {
+    if (loading || submitLockedRef.current) {
+      return
+    }
+    submitLockedRef.current = true
+    setSubmitLocked(true)
     if (computedPayable <= 0) {
       onConfirm([])
       return
@@ -273,7 +289,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           </button>
           <button
             onClick={handleConfirm}
-            disabled={loading || splitInvalid}
+            disabled={loading || submitLocked || splitInvalid}
             className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? 'Fechando...' : 'Confirmar pagamento'}

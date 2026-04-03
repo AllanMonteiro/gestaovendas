@@ -59,6 +59,7 @@ ORDER_ITEM_ONLY_FIELDS = (
     'unit_price',
     'total',
     'notes',
+    'client_request_id',
     'product__id',
     'product__name',
 )
@@ -258,6 +259,7 @@ class OrderItemsView(APIView):
                 qty=Decimal(str(data.get('qty', '1'))),
                 weight_grams=data.get('weight_grams'),
                 notes=data.get('notes'),
+                client_request_id=data.get('client_request_id'),
             )
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=400)

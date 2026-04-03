@@ -42,11 +42,50 @@ type DeliveryOrderPayload = DeliveryAlert & {
 type DeliveryOrdersResponse = DeliveryOrderPayload[] | { results?: DeliveryOrderPayload[] } | { data?: DeliveryOrderPayload[] }
 
 const CHUNK_RELOAD_KEY = 'sorveteria.chunk-reload-at'
+const BRANDING_CACHE_KEY = 'sorveteria.branding-cache'
 
 const normalizeTheme = (value?: string | null) => {
   if (!value || value === 'light') return 'cream'
   if (value === 'green' || value === 'blue' || value === 'cream') return value
   return 'cream'
+}
+
+const readBrandingCache = () => {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  try {
+    const raw = window.localStorage.getItem(BRANDING_CACHE_KEY)
+    if (!raw) {
+      return null
+    }
+    const parsed = JSON.parse(raw) as StoreHeaderConfig
+    return {
+      store_name: parsed.store_name || 'Sorveteria POS',
+      logo_url: parsed.logo_url || '',
+      theme: normalizeTheme(parsed.theme),
+    }
+  } catch {
+    return null
+  }
+}
+
+const writeBrandingCache = (branding: StoreHeaderConfig) => {
+  if (typeof window === 'undefined') {
+    return
+  }
+  try {
+    window.localStorage.setItem(
+      BRANDING_CACHE_KEY,
+      JSON.stringify({
+        store_name: branding.store_name || 'Sorveteria POS',
+        logo_url: branding.logo_url || '',
+        theme: normalizeTheme(branding.theme),
+      })
+    )
+  } catch {
+    // Ignore storage failures and keep runtime state only.
+  }
 }
 
 const isChunkLoadError = (error: unknown) => {
@@ -135,10 +174,11 @@ const Layout: React.FC = () => {
   useOutboxSync()
   const location = useLocation()
   const navigate = useNavigate()
+  const cachedBranding = readBrandingCache()
 
-  const [storeName, setStoreName] = useState('Sorveteria POS')
-  const [logoUrl, setLogoUrl] = useState<string>('')
-  const [theme, setTheme] = useState<string>('cream')
+  const [storeName, setStoreName] = useState(cachedBranding?.store_name || 'Sorveteria POS')
+  const [logoUrl, setLogoUrl] = useState<string>(cachedBranding?.logo_url || '')
+  const [theme, setTheme] = useState<string>(cachedBranding?.theme || 'cream')
   const [currentUserName, setCurrentUserName] = useState('')
   const [deliveryAlerts, setDeliveryAlerts] = useState<DeliveryAlert[]>([])
   const knownDeliveryOrderIdsRef = useRef<Set<string>>(new Set())
@@ -167,11 +207,13 @@ const Layout: React.FC = () => {
         setStoreName(configResponse.data.store_name || 'Sorveteria POS')
         setLogoUrl(configResponse.data.logo_url || '')
         setTheme(normalizeTheme(configResponse.data.theme))
+        writeBrandingCache(configResponse.data)
         setCurrentUserName(sessionResponse.data?.user?.name || sessionResponse.data?.user?.email || '')
       } catch {
-        setStoreName('Sorveteria POS')
-        setLogoUrl('')
-        setTheme('cream')
+        const fallbackBranding = readBrandingCache()
+        setStoreName(fallbackBranding?.store_name || 'Sorveteria POS')
+        setLogoUrl(fallbackBranding?.logo_url || '')
+        setTheme(fallbackBranding?.theme || 'cream')
         setCurrentUserName('')
       }
     }
@@ -180,26 +222,32 @@ const Layout: React.FC = () => {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
+    writeBrandingCache({ store_name: storeName, logo_url: logoUrl, theme })
   }, [theme])
 
   useEffect(() => {
     const handler = (event: Event) => {
       const custom = event as CustomEvent<string>
-      setTheme(normalizeTheme(custom.detail))
+      const nextTheme = normalizeTheme(custom.detail)
+      setTheme(nextTheme)
+      writeBrandingCache({ store_name: storeName, logo_url: logoUrl, theme: nextTheme })
     }
     window.addEventListener('sorveteria:theme', handler as EventListener)
     return () => window.removeEventListener('sorveteria:theme', handler as EventListener)
-  }, [])
+  }, [logoUrl, storeName])
 
   useEffect(() => {
     const handler = (event: Event) => {
       const custom = event as CustomEvent<BrandingDetail>
-      setStoreName(custom.detail?.store_name || 'Sorveteria POS')
-      setLogoUrl(custom.detail?.logo_url || '')
+      const nextStoreName = custom.detail?.store_name || 'Sorveteria POS'
+      const nextLogoUrl = custom.detail?.logo_url || ''
+      setStoreName(nextStoreName)
+      setLogoUrl(nextLogoUrl)
+      writeBrandingCache({ store_name: nextStoreName, logo_url: nextLogoUrl, theme })
     }
     window.addEventListener('sorveteria:branding', handler as EventListener)
     return () => window.removeEventListener('sorveteria:branding', handler as EventListener)
-  }, [])
+  }, [theme])
 
   useEffect(() => {
     const handler = () => {
@@ -311,7 +359,7 @@ const Layout: React.FC = () => {
             <div className="flex items-start justify-between gap-3 sm:items-center">
               <div className="flex min-w-0 items-center gap-3">
                 {logoUrl ? (
-                  <img src={resolveAssetUrl(logoUrl)} alt="Logo da empresa" className="h-11 w-11 shrink-0 rounded-xl border border-brand-100 object-cover sm:h-12 sm:w-12" />
+                  <img src={resolveAssetUrl(logoUrl)} alt="Logo da empresa" className="h-14 w-14 shrink-0 rounded-xl border border-brand-100 object-cover sm:h-16 sm:w-16 lg:h-20 lg:w-20" />
                 ) : null}
                 <div className="min-w-0">
                   <h1 className="truncate text-xl font-display tracking-wide text-brand-700 sm:text-2xl lg:text-3xl">{storeName}</h1>

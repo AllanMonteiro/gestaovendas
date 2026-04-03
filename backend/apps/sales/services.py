@@ -136,7 +136,19 @@ def create_order_idempotent(*, order_type: str, table_label: str | None, custome
 
 
 @transaction.atomic
-def add_item(*, order: Order, product_id: int, qty: Decimal, weight_grams: int | None, notes: str | None) -> OrderItem:
+def add_item(
+    *,
+    order: Order,
+    product_id: int,
+    qty: Decimal,
+    weight_grams: int | None,
+    notes: str | None,
+    client_request_id=None,
+) -> OrderItem:
+    if client_request_id:
+        existing = OrderItem.objects.select_related('product').filter(client_request_id=client_request_id).first()
+        if existing:
+            return existing
     ensure_open_cash_session()
     if qty <= 0:
         raise ValueError('qty must be > 0')
@@ -164,6 +176,7 @@ def add_item(*, order: Order, product_id: int, qty: Decimal, weight_grams: int |
         unit_price=unit_price,
         total=total,
         notes=notes,
+        client_request_id=client_request_id,
     )
     increment_order_totals(order, subtotal_delta=total)
     if product_name:

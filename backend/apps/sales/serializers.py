@@ -11,7 +11,7 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = OrderItem
-        fields = ['id', 'order', 'product', 'product_name', 'qty', 'weight_grams', 'unit_price', 'total', 'notes']
+        fields = ['id', 'order', 'product', 'product_name', 'qty', 'weight_grams', 'unit_price', 'total', 'notes', 'client_request_id']
 
 
 class PaymentSerializer(serializers.ModelSerializer):
@@ -176,6 +176,7 @@ class StoreConfigPdvSerializer(StoreConfigAssetSerializer):
         fields = [
             'store_name',
             'company_name',
+            'logo_url',
             'cnpj',
             'address',
             'point_value_real',

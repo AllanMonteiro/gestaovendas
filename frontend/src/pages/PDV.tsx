@@ -274,6 +274,8 @@ const PDV: React.FC = () => {
   const [showQtyModal, setShowQtyModal] = useState(false)
   const [qtyProduct, setQtyProduct] = useState<Product | null>(null)
   const [qtyInput, setQtyInput] = useState('1')
+  const [addingQtyItem, setAddingQtyItem] = useState(false)
+  const [addingScaleItem, setAddingScaleItem] = useState(false)
   const [cashOpen, setCashOpen] = useState(false)
   const [loyaltyBalance, setLoyaltyBalance] = useState(0)
   const [pointsToRedeem, setPointsToRedeem] = useState('0')
@@ -299,6 +301,8 @@ const PDV: React.FC = () => {
   const deferredProductSearchTerm = useDeferredValue(productSearchTerm)
   const wsRefreshTimerRef = useRef<number | null>(null)
   const lastCashValidationAtRef = useRef(0)
+  const addingQtyItemRef = useRef(false)
+  const addingScaleItemRef = useRef(false)
 
   const productsById = useMemo(() => {
     const map = new Map<number, Product>()
@@ -856,63 +860,73 @@ const PDV: React.FC = () => {
   }
 
   const handleConfirmAddProduct = async () => {
-    if (!qtyProduct) {
+    if (addingQtyItemRef.current) {
       return
     }
-    if (!(await ensureCashOpen())) {
-      return
-    }
-    const qty = Number(qtyInput.replace(',', '.'))
-    if (!Number.isFinite(qty) || qty <= 0) {
-      setFeedback({ type: 'error', text: 'Quantidade invalida.' })
-      return
-    }
-
-    const orderId = selectedOrderId
-    if (!orderId) {
-      setShowQtyModal(false)
-      setQtyProduct(null)
-      setQtyInput('1')
-      setFeedback({ type: 'error', text: 'Crie/selecione um pedido antes de adicionar itens.' })
-      return
-    }
-
-    const payload = {
-      product_id: qtyProduct.id,
-      qty,
-      client_request_id: crypto.randomUUID()
-    }
+    addingQtyItemRef.current = true
+    setAddingQtyItem(true)
     try {
-      const response = await api.post<OrderItem>(`/api/orders/${orderId}/items`, payload)
-      if (selectedOrder && selectedOrder.id === orderId) {
-        applyOrderSnapshot(addItemToOrder(selectedOrder, response.data))
+      if (!qtyProduct) {
+        return
       }
-      setFeedback({ type: 'ok', text: 'Item adicionado ao pedido.' })
-      setShowQtyModal(false)
-      setQtyProduct(null)
-      setQtyInput('1')
-      setIsOnline(true)
-    } catch (error: any) {
-      if (error.enqueued) {
-        if (selectedOrder && selectedOrder.id === orderId) {
-          applyOrderSnapshot(
-            addItemToOrder(selectedOrder, {
-              id: Math.floor(Math.random() * 1000000),
-              product: qtyProduct.id,
-              qty,
-              client_request_id: payload.client_request_id,
-              total: 0,
-            })
-          )
-        }
-        setFeedback({ type: 'ok', text: 'Modo Offline: Item adicionado localmente.' })
+      if (!(await ensureCashOpen())) {
+        return
+      }
+      const qty = Number(qtyInput.replace(',', '.'))
+      if (!Number.isFinite(qty) || qty <= 0) {
+        setFeedback({ type: 'error', text: 'Quantidade invalida.' })
+        return
+      }
+
+      const orderId = selectedOrderId
+      if (!orderId) {
         setShowQtyModal(false)
         setQtyProduct(null)
         setQtyInput('1')
-        setIsOnline(false)
+        setFeedback({ type: 'error', text: 'Crie/selecione um pedido antes de adicionar itens.' })
         return
       }
-      setFeedback({ type: 'error', text: getApiErrorText(error, 'Nao foi possivel adicionar o item no pedido.') })
+
+      const payload = {
+        product_id: qtyProduct.id,
+        qty,
+        client_request_id: crypto.randomUUID()
+      }
+      try {
+        const response = await api.post<OrderItem>(`/api/orders/${orderId}/items`, payload)
+        if (selectedOrder && selectedOrder.id === orderId) {
+          applyOrderSnapshot(addItemToOrder(selectedOrder, response.data))
+        }
+        setFeedback({ type: 'ok', text: 'Item adicionado ao pedido.' })
+        setShowQtyModal(false)
+        setQtyProduct(null)
+        setQtyInput('1')
+        setIsOnline(true)
+      } catch (error: any) {
+        if (error.enqueued) {
+          if (selectedOrder && selectedOrder.id === orderId) {
+            applyOrderSnapshot(
+              addItemToOrder(selectedOrder, {
+                id: Math.floor(Math.random() * 1000000),
+                product: qtyProduct.id,
+                qty,
+                client_request_id: payload.client_request_id,
+                total: 0,
+              })
+            )
+          }
+          setFeedback({ type: 'ok', text: 'Modo Offline: Item adicionado localmente.' })
+          setShowQtyModal(false)
+          setQtyProduct(null)
+          setQtyInput('1')
+          setIsOnline(false)
+          return
+        }
+        setFeedback({ type: 'error', text: getApiErrorText(error, 'Nao foi possivel adicionar o item no pedido.') })
+      }
+    } finally {
+      addingQtyItemRef.current = false
+      setAddingQtyItem(false)
     }
   }
 
@@ -943,58 +957,68 @@ const PDV: React.FC = () => {
   }, [handleAddProduct])
 
   const handleConfirmScaleProduct = async (weightGrams: number) => {
-    if (!scaleProduct) {
+    if (addingScaleItemRef.current) {
       return
     }
-    if (!(await ensureCashOpen())) {
-      return
-    }
-
-    const orderId = selectedOrderId
-    if (!orderId) {
-      setShowScaleModal(false)
-      setScaleProduct(null)
-      setFeedback({ type: 'error', text: 'Crie/selecione um pedido antes de adicionar itens.' })
-      return
-    }
-
-    const payload = {
-      product_id: scaleProduct.id,
-      qty: round3(weightGrams / 1000),
-      weight_grams: weightGrams,
-      client_request_id: crypto.randomUUID()
-    }
-
+    addingScaleItemRef.current = true
+    setAddingScaleItem(true)
     try {
-      const response = await api.post<OrderItem>(`/api/orders/${orderId}/items`, payload)
-      if (selectedOrder && selectedOrder.id === orderId) {
-        applyOrderSnapshot(addItemToOrder(selectedOrder, response.data))
-      }
-      setFeedback({ type: 'ok', text: 'Item adicionado ao pedido.' })
-      setShowScaleModal(false)
-      setScaleProduct(null)
-      setIsOnline(true)
-    } catch (error: any) {
-      if (error.enqueued) {
-        if (selectedOrder && selectedOrder.id === orderId) {
-          applyOrderSnapshot(
-            addItemToOrder(selectedOrder, {
-              id: Math.floor(Math.random() * 1000000),
-              product: scaleProduct.id,
-              qty: payload.qty,
-              client_request_id: payload.client_request_id,
-              weight_grams: weightGrams,
-              total: 0,
-            })
-          )
-        }
-        setFeedback({ type: 'ok', text: 'Modo Offline: Item de balanca adicionado localmente.' })
-        setShowScaleModal(false)
-        setScaleProduct(null)
-        setIsOnline(false)
+      if (!scaleProduct) {
         return
       }
-      setFeedback({ type: 'error', text: getApiErrorText(error, 'Nao foi possivel adicionar o item no pedido.') })
+      if (!(await ensureCashOpen())) {
+        return
+      }
+
+      const orderId = selectedOrderId
+      if (!orderId) {
+        setShowScaleModal(false)
+        setScaleProduct(null)
+        setFeedback({ type: 'error', text: 'Crie/selecione um pedido antes de adicionar itens.' })
+        return
+      }
+
+      const payload = {
+        product_id: scaleProduct.id,
+        qty: round3(weightGrams / 1000),
+        weight_grams: weightGrams,
+        client_request_id: crypto.randomUUID()
+      }
+
+      try {
+        const response = await api.post<OrderItem>(`/api/orders/${orderId}/items`, payload)
+        if (selectedOrder && selectedOrder.id === orderId) {
+          applyOrderSnapshot(addItemToOrder(selectedOrder, response.data))
+        }
+        setFeedback({ type: 'ok', text: 'Item adicionado ao pedido.' })
+        setShowScaleModal(false)
+        setScaleProduct(null)
+        setIsOnline(true)
+      } catch (error: any) {
+        if (error.enqueued) {
+          if (selectedOrder && selectedOrder.id === orderId) {
+            applyOrderSnapshot(
+              addItemToOrder(selectedOrder, {
+                id: Math.floor(Math.random() * 1000000),
+                product: scaleProduct.id,
+                qty: payload.qty,
+                client_request_id: payload.client_request_id,
+                weight_grams: weightGrams,
+                total: 0,
+              })
+            )
+          }
+          setFeedback({ type: 'ok', text: 'Modo Offline: Item de balanca adicionado localmente.' })
+          setShowScaleModal(false)
+          setScaleProduct(null)
+          setIsOnline(false)
+          return
+        }
+        setFeedback({ type: 'error', text: getApiErrorText(error, 'Nao foi possivel adicionar o item no pedido.') })
+      }
+    } finally {
+      addingScaleItemRef.current = false
+      setAddingScaleItem(false)
     }
   }
 
@@ -1218,6 +1242,9 @@ const PDV: React.FC = () => {
   )
 
   const handleCloseSale = async (entries: PaymentEntry[]) => {
+    if (closingSale) {
+      return
+    }
     if (!selectedOrder) {
       setFeedback({ type: 'error', text: 'Selecione um pedido.' })
       setShowPaymentModal(false)
@@ -1642,8 +1669,12 @@ const PDV: React.FC = () => {
               >
                 Cancelar
               </button>
-              <button onClick={() => void handleConfirmAddProduct()} className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white">
-                Confirmar
+              <button
+                onClick={() => void handleConfirmAddProduct()}
+                disabled={addingQtyItem}
+                className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {addingQtyItem ? 'Adicionando...' : 'Confirmar'}
               </button>
             </div>
           </div>
