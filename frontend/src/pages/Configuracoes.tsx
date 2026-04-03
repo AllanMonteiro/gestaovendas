@@ -57,7 +57,7 @@ type CategoryPriceApplyResponse = {
 type UploadImageResponse = {
   url: string
   relative_url: string
-  slot: 'logo' | 'category'
+  slot: 'category'
   category_id?: string | null
 }
 
@@ -125,7 +125,6 @@ const Configuracoes: React.FC = () => {
   const [savingCategoryId, setSavingCategoryId] = useState<string>('')
   const [applyingCategoryId, setApplyingCategoryId] = useState<string>('')
   const [deletingCategoryId, setDeletingCategoryId] = useState<string>('')
-  const [uploadingLogo, setUploadingLogo] = useState(false)
   const [uploadingCategoryImage, setUploadingCategoryImage] = useState(false)
 
   const [storeName, setStoreName] = useState('')
@@ -276,7 +275,7 @@ const Configuracoes: React.FC = () => {
     if (!file || !selectedCategoryId) {
       return
     }
-    void uploadConfigImage(file, 'category', selectedCategoryId)
+    void uploadConfigImage(file, selectedCategoryId)
   }
 
   const handleClearCategoryImage = async () => {
@@ -402,7 +401,6 @@ const Configuracoes: React.FC = () => {
       await api.put('/api/config', {
         store_name: storeName,
         company_name: companyName,
-        logo_url: logoUrl.trim() || null,
         cnpj,
         address,
         whatsapp_number: whatsappNumber.trim() || null,
@@ -437,40 +435,20 @@ const Configuracoes: React.FC = () => {
     }
   }
 
-  const persistLogo = async (nextLogoUrl: string | null) => {
-    await api.put('/api/config', {
-      logo_url: nextLogoUrl,
-    })
-    dispatchBrandingUpdate(storeName, nextLogoUrl)
-  }
-
   const persistCategoryImages = async (nextCategoryImages: Record<string, string>) => {
     await api.put('/api/config', {
       category_images: nextCategoryImages,
     })
   }
 
-  const handlePickLogo = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) {
-      return
-    }
-    void uploadConfigImage(file, 'logo')
-  }
-
-  const uploadConfigImage = async (file: File, slot: 'logo' | 'category', categoryId?: string) => {
+  const uploadConfigImage = async (file: File, categoryId?: string) => {
     const formData = new FormData()
     formData.append('file', file)
-    formData.append('slot', slot)
-    if (slot === 'category' && categoryId) {
+    formData.append('slot', 'category')
+    if (categoryId) {
       formData.append('category_id', categoryId)
     }
-
-    if (slot === 'logo') {
-      setUploadingLogo(true)
-    } else {
-      setUploadingCategoryImage(true)
-    }
+    setUploadingCategoryImage(true)
 
     try {
       const response = await api.post<UploadImageResponse>('/api/config/upload-image', formData, {
@@ -478,11 +456,7 @@ const Configuracoes: React.FC = () => {
           'Content-Type': 'multipart/form-data'
         }
       })
-      if (slot === 'logo') {
-        await persistLogo(response.data.relative_url)
-        setLogoUrl(response.data.relative_url)
-        setFeedback('Logo enviada e salva com sucesso.')
-      } else if (categoryId) {
+      if (categoryId) {
         const nextCategoryImages = {
           ...categoryImages,
           [categoryId]: response.data.relative_url
@@ -493,28 +467,14 @@ const Configuracoes: React.FC = () => {
         setFeedback('Imagem da categoria enviada e salva com sucesso.')
       }
     } catch {
-      setFeedback(slot === 'logo' ? 'Falha ao enviar logo.' : 'Falha ao enviar imagem da categoria.')
+      setFeedback('Falha ao enviar imagem da categoria.')
     } finally {
-      if (slot === 'logo') {
-        setUploadingLogo(false)
-      } else {
-        setUploadingCategoryImage(false)
-      }
+      setUploadingCategoryImage(false)
     }
   }
 
   const [printers, setPrinters] = useState<{ name: string, id: string }[]>([])
   const [selectedPrinter, setSelectedPrinter] = useState('auto')
-
-  const handleRemoveLogo = async () => {
-    try {
-      await persistLogo(null)
-      setLogoUrl('')
-      setFeedback('Logo removida com sucesso.')
-    } catch {
-      setFeedback('Falha ao remover logo.')
-    }
-  }
 
   const handleFetchPrinters = async () => {
     if (!agentUrl.trim()) {
@@ -683,27 +643,6 @@ const Configuracoes: React.FC = () => {
         <input value={companyName} onChange={(event) => setCompanyName(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Razao social" />
         <input value={address} onChange={(event) => setAddress(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Endereco" />
         <input value={whatsappNumber} onChange={(event) => setWhatsappNumber(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="WhatsApp da empresa (com DDD)" />
-        <label className="text-sm font-medium text-slate-700">Logo da empresa</label>
-        <input
-          type="file"
-          accept="image/*"
-          onChange={handlePickLogo}
-          disabled={uploadingLogo}
-          className="w-full rounded-lg border border-brand-100 bg-white px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-brand-100 file:px-3 file:py-1 file:text-brand-700"
-        />
-        {uploadingLogo ? <p className="text-xs text-slate-500">Enviando logo...</p> : null}
-        {logoUrl ? (
-          <div className="flex items-center gap-3">
-            <img src={resolveAssetUrl(logoUrl)} alt="Logo da empresa" className="h-14 w-14 rounded-lg border border-brand-100 object-cover" />
-            <button
-              type="button"
-              onClick={() => void handleRemoveLogo()}
-              className="h-9 rounded-lg border border-rose-300 px-3 text-rose-700"
-            >
-              Remover logo
-            </button>
-          </div>
-        ) : null}
       </div>
 
       <div className="panel space-y-3 p-4">
