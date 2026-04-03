@@ -278,16 +278,22 @@ const Configuracoes: React.FC = () => {
     void uploadConfigImage(file, 'category', selectedCategoryId)
   }
 
-  const handleClearCategoryImage = () => {
+  const handleClearCategoryImage = async () => {
     if (!selectedCategoryId) {
       return
     }
-    setSelectedCategoryImage('')
-    setCategoryImages((prev) => {
-      const next = { ...prev }
+    try {
+      const next = { ...categoryImages }
       delete next[selectedCategoryId]
-      return next
-    })
+      await api.put('/api/config', {
+        category_images: next
+      })
+      setSelectedCategoryImage('')
+      setCategoryImages(next)
+      setFeedback('Imagem da categoria removida com sucesso.')
+    } catch {
+      setFeedback('Falha ao remover imagem da categoria.')
+    }
   }
 
   const handleSaveCategoryPrice = async () => {
@@ -390,6 +396,12 @@ const Configuracoes: React.FC = () => {
     dispatchBrandingUpdate(storeName, nextLogoUrl)
   }
 
+  const persistCategoryImages = async (nextCategoryImages: Record<string, string>) => {
+    await api.put('/api/config', {
+      category_images: nextCategoryImages,
+    })
+  }
+
   const handlePickLogo = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file) {
@@ -423,9 +435,14 @@ const Configuracoes: React.FC = () => {
         setLogoUrl(response.data.relative_url)
         setFeedback('Logo enviada e salva com sucesso.')
       } else if (categoryId) {
+        const nextCategoryImages = {
+          ...categoryImages,
+          [categoryId]: response.data.relative_url
+        }
+        await persistCategoryImages(nextCategoryImages)
         setSelectedCategoryImage(response.data.relative_url)
         handleCategoryImageChange(Number(categoryId), response.data.relative_url)
-        setFeedback('Imagem da categoria enviada com sucesso.')
+        setFeedback('Imagem da categoria enviada e salva com sucesso.')
       }
     } catch {
       setFeedback(slot === 'logo' ? 'Falha ao enviar logo.' : 'Falha ao enviar imagem da categoria.')
