@@ -118,6 +118,39 @@ class LoyaltyEarnOnCloseOrderTests(TestCase):
         self.assertEqual(LoyaltyMove.objects.filter(order=order, type=LoyaltyMove.TYPE_EARN).count(), 1)
 
 
+class CashPaymentMetaTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(email='cash-meta@test.com', password='test', name='Cash Meta User')
+        services.open_cash(user=self.user, initial_float=Decimal('100.00'))
+
+    def test_close_order_persists_cash_change_meta(self):
+        order = services.create_order_idempotent(
+            order_type='COUNTER',
+            table_label=None,
+            customer=None,
+            client_request_id=uuid4(),
+        )
+        order.subtotal = Decimal('12.50')
+        order.total = Decimal('12.50')
+        order.save(update_fields=['subtotal', 'total'])
+
+        services.close_order(
+            order=order,
+            discount=Decimal('0'),
+            payments=[{
+                'method': 'CASH',
+                'amount': '12.50',
+                'meta': {'cash_received': '20.00', 'change_amount': '7.50'},
+            }],
+            use_loyalty_points=False,
+            client_request_id=uuid4(),
+            user=self.user,
+        )
+
+        payment = Payment.objects.get(order=order)
+        self.assertEqual(payment.meta, {'cash_received': '20.00', 'change_amount': '7.50'})
+
+
 class AddItemTotalsTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(email='cash-item@test.com', password='test', name='Cash Item')

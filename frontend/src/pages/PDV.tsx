@@ -116,6 +116,25 @@ const receiptPaymentLabel = (method: string, meta?: Record<string, string> | nul
   return 'Dinheiro'
 }
 
+const parsePaymentMetaAmount = (meta: Record<string, string> | null | undefined, key: string) => {
+  const value = Number(meta?.[key] ?? 0)
+  return Number.isFinite(value) ? value : 0
+}
+
+const receiptPaymentNote = (payment: { amount: string; meta?: Record<string, string> | null }) => {
+  const cashReceived = parsePaymentMetaAmount(payment.meta, 'cash_received')
+  const changeAmount = parsePaymentMetaAmount(payment.meta, 'change_amount')
+  const paymentAmount = Number(payment.amount || 0)
+
+  if (cashReceived <= 0 || cashReceived <= paymentAmount) {
+    return undefined
+  }
+  if (changeAmount > 0) {
+    return `Recebido ${formatBRL(cashReceived)} | Troco ${formatBRL(changeAmount)}`
+  }
+  return `Recebido ${formatBRL(cashReceived)}`
+}
+
 const getOrderDisplayNumber = (order: Pick<Order, 'id' | 'display_number'>) => order.display_number || order.id.slice(0, 8)
 
 const getHttpStatus = (error: unknown): number => {
@@ -1171,7 +1190,8 @@ const PDV: React.FC = () => {
         total: payments.length > 0 ? payableTotal : Number(order.total),
         payments: payments.map((payment) => ({
           method: receiptPaymentLabel(payment.method, payment.meta),
-          amount: Number(payment.amount)
+          amount: Number(payment.amount),
+          note: receiptPaymentNote(payment)
         }))
       }
     },
@@ -1265,7 +1285,7 @@ const PDV: React.FC = () => {
       const payments = entries.map((entry) => {
         if (entry.method === 'CARD_CREDIT') return { method: 'CARD', meta: { card_type: 'CREDIT' }, amount: entry.amount }
         if (entry.method === 'CARD_DEBIT') return { method: 'CARD', meta: { card_type: 'DEBIT' }, amount: entry.amount }
-        return { method: entry.method, meta: null, amount: entry.amount }
+        return { method: entry.method, meta: entry.meta ?? null, amount: entry.amount }
       })
 
       const payload = {

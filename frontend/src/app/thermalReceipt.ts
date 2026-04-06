@@ -15,6 +15,7 @@ export type ThermalReceiptItem = {
 export type ThermalReceiptPayment = {
   method: string
   amount: number
+  note?: string
 }
 
 export type ThermalReceiptPayload = {
@@ -72,7 +73,12 @@ const buildHtml = (payload: ThermalReceiptPayload) => {
     .join('')
 
   const payments = (payload.payments ?? [])
-    .map((payment) => `<div class="row"><span>${escapeHtml(payment.method)}</span><strong>${formatBRL(payment.amount)}</strong></div>`)
+    .map((payment) => `
+      <div class="item">
+        <div class="row"><span>${escapeHtml(payment.method)}</span><strong>${formatBRL(payment.amount)}</strong></div>
+        ${payment.note ? `<div class="notes">${escapeHtml(payment.note)}</div>` : ''}
+      </div>
+    `)
     .join('')
 
   const headerLines = (payload.receipt_header_lines ?? []).map((line) => `<div class="center">${escapeHtml(line)}</div>`).join('')
