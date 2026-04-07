@@ -1,6 +1,8 @@
 from decimal import Decimal
 
+from django.db import connection
 from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from apps.accounts.models import User
@@ -65,3 +67,32 @@ class CategoryApplyPriceTests(TestCase):
         self.assertEqual(response.status_code, 200)
         created_price = ProductPrice.objects.get(product=product, store_id=1)
         self.assertEqual(created_price.price, Decimal('13.50'))
+
+
+@override_settings(REQUIRE_AUTH=False)
+class ProductCompactListTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        category = Category.objects.create(name='Linha Fit', price=Decimal('12.00'))
+        for index in range(5):
+            Product.objects.create(
+                category=category,
+                name=f'Produto {index}',
+                active=True,
+                sold_by_weight=index % 2 == 0,
+                stock=Decimal('10.000'),
+                description='descricao grande que nao precisa ir no modo compacto',
+                image_url='https://example.com/produto.png',
+            )
+
+    def test_compact_product_list_uses_small_payload_query(self):
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get('/api/products?compact=1')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 5)
+        self.assertLessEqual(len(queries), 1)
+        self.assertEqual(
+            sorted(response.data[0].keys()),
+            ['active', 'category', 'id', 'name', 'sold_by_weight', 'stock'],
+        )

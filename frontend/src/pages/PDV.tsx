@@ -97,6 +97,8 @@ type CashStatusResponse = {
   open: boolean
 }
 
+const PDV_REFRESH_DEBOUNCE_MS = 150
+
 const formatBRL = (value: string | number) => {
   const numberValue = Number(value || 0)
   return numberValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -202,6 +204,51 @@ const normalizeOrder = (order: Partial<Order> & { id: string }): Order => ({
   customer_phone: order.customer_phone ?? null,
   items: Array.isArray(order.items) ? order.items : [],
 })
+
+const buildOpenOrdersSnapshot = (orders: OrderSummary[]) =>
+  JSON.stringify(
+    orders.map((order) => [
+      order.id,
+      order.display_number ?? '',
+      order.status,
+      order.total,
+      order.subtotal,
+      order.discount,
+      order.client_request_id ?? '',
+      order.local_only ? 1 : 0,
+      order.customer ?? '',
+      order.customer_name ?? '',
+      order.customer_phone ?? '',
+    ])
+  )
+
+const buildCatalogSnapshot = (
+  categories: Category[],
+  products: Product[],
+  config: StoreConfigResponse | null | undefined
+) =>
+  JSON.stringify({
+    categories: categories.map((category) => [category.id, category.name]),
+    products: products.map((product) => [
+      product.id,
+      product.category,
+      product.name,
+      product.sold_by_weight ? 1 : 0,
+      product.active === false ? 0 : 1,
+    ]),
+    config: {
+      store_name: config?.store_name ?? '',
+      company_name: config?.company_name ?? '',
+      cnpj: config?.cnpj ?? '',
+      address: config?.address ?? '',
+      point_value_real: String(config?.point_value_real ?? ''),
+      min_redeem_points: String(config?.min_redeem_points ?? ''),
+      category_images: config?.category_images ?? {},
+      receipt_header_lines: config?.receipt_header_lines ?? [],
+      receipt_footer_lines: config?.receipt_footer_lines ?? [],
+      printer: config?.printer ?? {},
+    },
+  })
 
 const addItemToOrder = (order: Order, item: OrderItem): Order => ({
   ...order,
@@ -322,6 +369,13 @@ const PDV: React.FC = () => {
   const lastCashValidationAtRef = useRef(0)
   const addingQtyItemRef = useRef(false)
   const addingScaleItemRef = useRef(false)
+  const selectedOrderIdRef = useRef<string | null>(null)
+  const selectedOrderRef = useRef<Order | null>(null)
+  const openOrdersRequestIdRef = useRef(0)
+  const orderDetailRequestIdRef = useRef(0)
+  const catalogRequestIdRef = useRef(0)
+  const openOrdersSnapshotRef = useRef('')
+  const catalogSnapshotRef = useRef('')
 
   const productsById = useMemo(() => {
     const map = new Map<number, Product>()
@@ -396,7 +450,28 @@ const PDV: React.FC = () => {
     [pendingSyncOrderKeys]
   )
 
+  useEffect(() => {
+    selectedOrderIdRef.current = selectedOrderId
+  }, [selectedOrderId])
+
+  useEffect(() => {
+    selectedOrderRef.current = selectedOrder
+  }, [selectedOrder])
+
+  const applyOpenOrders = useCallback((nextOrders: OrderSummary[]) => {
+    const snapshot = buildOpenOrdersSnapshot(nextOrders)
+    if (snapshot === openOrdersSnapshotRef.current) {
+      return
+    }
+    openOrdersSnapshotRef.current = snapshot
+    startTransition(() => {
+      setOpenOrders(nextOrders)
+    })
+  }, [])
+
   const applyOrderSnapshot = useCallback((order: Order) => {
+    selectedOrderRef.current = order
+    selectedOrderIdRef.current = order.id
     startTransition(() => {
       setSelectedOrder(order)
       setSelectedOrderId(order.id)
@@ -404,10 +479,13 @@ const PDV: React.FC = () => {
         const summary = toOrderSummary(order)
         const existingIndex = prev.findIndex((entry) => entry.id === order.id)
         if (existingIndex === -1) {
-          return [summary, ...prev]
+          const next = [summary, ...prev]
+          openOrdersSnapshotRef.current = buildOpenOrdersSnapshot(next)
+          return next
         }
         const next = [...prev]
         next[existingIndex] = { ...next[existingIndex], ...summary }
+        openOrdersSnapshotRef.current = buildOpenOrdersSnapshot(next)
         return next
       })
     })
@@ -423,7 +501,9 @@ const PDV: React.FC = () => {
         if (!prev || prev.id !== summary.id) {
           return prev
         }
-        return mergeOrderSummary(prev, summary)
+        const next = mergeOrderSummary(prev, summary)
+        selectedOrderRef.current = next
+        return next
       })
     })
   }, [])
@@ -431,9 +511,21 @@ const PDV: React.FC = () => {
   const discardLocalOrder = useCallback(async (order: Order) => {
     await removeOutboxEntries((entry) => isOrderLinkedToOutboxEntry(order, entry))
     await removeLocalOrder(order.id)
-    setOpenOrders((prev) => prev.filter((item) => item.id !== order.id))
-    setSelectedOrder((prev) => (prev?.id === order.id ? null : prev))
-    setSelectedOrderId((prev) => (prev === order.id ? null : prev))
+    setOpenOrders((prev) => {
+      const next = prev.filter((item) => item.id !== order.id)
+      openOrdersSnapshotRef.current = buildOpenOrdersSnapshot(next)
+      return next
+    })
+    setSelectedOrder((prev) => {
+      const next = prev?.id === order.id ? null : prev
+      selectedOrderRef.current = next
+      return next
+    })
+    setSelectedOrderId((prev) => {
+      const next = prev === order.id ? null : prev
+      selectedOrderIdRef.current = next
+      return next
+    })
   }, [])
 
   const rebuildLocalOnlyOrderQueue = useCallback(async (order: Order) => {
@@ -455,14 +547,21 @@ const PDV: React.FC = () => {
   }, [])
 
   const fetchOrderDetail = useCallback(async (orderId: string) => {
+    const requestId = ++orderDetailRequestIdRef.current
     try {
       const response = await api.get<Order>(`/api/orders/${orderId}/detail`)
+      if (requestId !== orderDetailRequestIdRef.current) {
+        return null
+      }
       const order = normalizeOrder(response.data)
       applyOrderSnapshot(order)
       setIsOnline(true)
       return order
     } catch (error) {
       const localOrder = await getLocalOrder<Order>(orderId)
+      if (requestId !== orderDetailRequestIdRef.current) {
+        return null
+      }
       if (localOrder) {
         const normalizedLocalOrder = normalizeOrder(localOrder)
         applyOrderSnapshot(normalizedLocalOrder)
@@ -476,34 +575,42 @@ const PDV: React.FC = () => {
   }, [applyOrderSnapshot])
 
   const fetchCatalog = useCallback(async () => {
+    const requestId = ++catalogRequestIdRef.current
     try {
       const [categoriesResp, productsResp, configResp] = await Promise.all([
         api.get<Category[]>('/api/categories'),
         api.get<Product[]>('/api/products?compact=1'),
         api.get<StoreConfigResponse>('/api/config/pdv')
       ])
+      if (requestId !== catalogRequestIdRef.current) {
+        return
+      }
       
       const cats = categoriesResp.data
       const prods = productsResp.data.filter((item) => item.active !== false)
       const conf = configResp.data
+      const snapshot = buildCatalogSnapshot(cats, prods, conf)
 
-      startTransition(() => {
-        setCategories(cats)
-        setProducts(prods)
-        setCategoryImages(conf.category_images ?? {})
-        setPointValueReal(Number(conf.point_value_real ?? 0))
-        setMinRedeemPoints(Number(conf.min_redeem_points ?? 0))
-        setAgentUrl(conf.printer?.agent_url?.trim() ?? '')
-        setStoreLabel(conf.store_name || 'Sorveteria POS')
-        setCompanyName(conf.company_name || '')
-        setStoreCnpj(conf.cnpj || '')
-        setStoreAddress(conf.address || '')
-        setReceiptHeaderLines(conf.receipt_header_lines ?? [])
-        setReceiptFooterLines(conf.receipt_footer_lines ?? [])
-        setAutoPrintReceipt(Boolean(conf.printer?.auto_print_receipt ?? true))
-        setAutoPrintKitchen(Boolean(conf.printer?.auto_print_kitchen ?? false))
-        setPrinterName(conf.printer?.printer_name || 'auto')
-      })
+      if (snapshot !== catalogSnapshotRef.current) {
+        catalogSnapshotRef.current = snapshot
+        startTransition(() => {
+          setCategories(cats)
+          setProducts(prods)
+          setCategoryImages(conf.category_images ?? {})
+          setPointValueReal(Number(conf.point_value_real ?? 0))
+          setMinRedeemPoints(Number(conf.min_redeem_points ?? 0))
+          setAgentUrl(conf.printer?.agent_url?.trim() ?? '')
+          setStoreLabel(conf.store_name || 'Sorveteria POS')
+          setCompanyName(conf.company_name || '')
+          setStoreCnpj(conf.cnpj || '')
+          setStoreAddress(conf.address || '')
+          setReceiptHeaderLines(conf.receipt_header_lines ?? [])
+          setReceiptFooterLines(conf.receipt_footer_lines ?? [])
+          setAutoPrintReceipt(Boolean(conf.printer?.auto_print_receipt ?? true))
+          setAutoPrintKitchen(Boolean(conf.printer?.auto_print_kitchen ?? false))
+          setPrinterName(conf.printer?.printer_name || 'auto')
+        })
+      }
 
       void saveCategories(cats)
       void saveProducts(prods)
@@ -515,28 +622,36 @@ const PDV: React.FC = () => {
         getProducts(),
         getConfig()
       ])
+      if (requestId !== catalogRequestIdRef.current) {
+        return
+      }
       
       if (localCats.length > 0 || localProds.length > 0 || localConf) {
-        startTransition(() => {
-          if (localCats.length > 0) setCategories(localCats as Category[])
-          if (localProds.length > 0) setProducts((localProds as Product[]).filter(p => p.active !== false))
-          if (localConf) {
-            const conf = localConf as StoreConfigResponse
-            setCategoryImages(conf.category_images ?? {})
-            setPointValueReal(Number(conf.point_value_real ?? 0))
-            setMinRedeemPoints(Number(conf.min_redeem_points ?? 0))
-            setAgentUrl(conf.printer?.agent_url?.trim() ?? '')
-            setStoreLabel(conf.store_name || 'Sorveteria POS')
-            setCompanyName(conf.company_name || '')
-            setStoreCnpj(conf.cnpj || '')
-            setStoreAddress(conf.address || '')
-            setReceiptHeaderLines(conf.receipt_header_lines ?? [])
-            setReceiptFooterLines(conf.receipt_footer_lines ?? [])
-            setAutoPrintReceipt(Boolean(conf.printer?.auto_print_receipt ?? true))
-            setAutoPrintKitchen(Boolean(conf.printer?.auto_print_kitchen ?? false))
-            setPrinterName(conf.printer?.printer_name || 'auto')
-          }
-        })
+        const fallbackProducts = (localProds as Product[]).filter((p) => p.active !== false)
+        const fallbackConfig = localConf ? (localConf as StoreConfigResponse) : null
+        const snapshot = buildCatalogSnapshot(localCats as Category[], fallbackProducts, fallbackConfig)
+        if (snapshot !== catalogSnapshotRef.current) {
+          catalogSnapshotRef.current = snapshot
+          startTransition(() => {
+            if (localCats.length > 0) setCategories(localCats as Category[])
+            if (localProds.length > 0) setProducts(fallbackProducts)
+            if (fallbackConfig) {
+              setCategoryImages(fallbackConfig.category_images ?? {})
+              setPointValueReal(Number(fallbackConfig.point_value_real ?? 0))
+              setMinRedeemPoints(Number(fallbackConfig.min_redeem_points ?? 0))
+              setAgentUrl(fallbackConfig.printer?.agent_url?.trim() ?? '')
+              setStoreLabel(fallbackConfig.store_name || 'Sorveteria POS')
+              setCompanyName(fallbackConfig.company_name || '')
+              setStoreCnpj(fallbackConfig.cnpj || '')
+              setStoreAddress(fallbackConfig.address || '')
+              setReceiptHeaderLines(fallbackConfig.receipt_header_lines ?? [])
+              setReceiptFooterLines(fallbackConfig.receipt_footer_lines ?? [])
+              setAutoPrintReceipt(Boolean(fallbackConfig.printer?.auto_print_receipt ?? true))
+              setAutoPrintKitchen(Boolean(fallbackConfig.printer?.auto_print_kitchen ?? false))
+              setPrinterName(fallbackConfig.printer?.printer_name || 'auto')
+            }
+          })
+        }
         setFeedback({ type: 'ok', text: 'Modo offline: usando dados locais.' })
       }
       if (isNetworkError(error)) {
@@ -546,15 +661,17 @@ const PDV: React.FC = () => {
   }, [])
 
   const fetchOpenOrders = useCallback(async (options?: { targetOrderId?: string | null; refreshSelectedDetail?: boolean }) => {
+    const requestId = ++openOrdersRequestIdRef.current
     const refreshSelectedDetail = options?.refreshSelectedDetail ?? true
     try {
       const response = await api.get<OrderSummary[]>('/api/orders/open?include_items=0')
-      startTransition(() => {
-        setOpenOrders(response.data)
-      })
+      if (requestId !== openOrdersRequestIdRef.current) {
+        return
+      }
+      applyOpenOrders(response.data)
       void syncLocalOpenOrders(response.data)
       setIsOnline(true)
-      let nextSelectedOrderId = selectedOrderId
+      let nextSelectedOrderId = selectedOrderIdRef.current
       if (typeof options?.targetOrderId !== 'undefined') {
         nextSelectedOrderId = options.targetOrderId
       }
@@ -564,35 +681,46 @@ const PDV: React.FC = () => {
       if (!nextSelectedSummary) {
         nextSelectedOrderId = null
       }
-      setSelectedOrderId(nextSelectedOrderId)
-      if (nextSelectedSummary && selectedOrder?.id === nextSelectedSummary.id) {
+      if (selectedOrderIdRef.current !== nextSelectedOrderId) {
+        selectedOrderIdRef.current = nextSelectedOrderId
+        setSelectedOrderId(nextSelectedOrderId)
+      } else {
+        selectedOrderIdRef.current = nextSelectedOrderId
+      }
+      if (nextSelectedSummary && selectedOrderRef.current?.id === nextSelectedSummary.id) {
         mergeSelectedOrderSummary(nextSelectedSummary)
       }
-      if (nextSelectedOrderId && (refreshSelectedDetail || selectedOrder?.id !== nextSelectedOrderId)) {
+      if (nextSelectedOrderId && (refreshSelectedDetail || selectedOrderRef.current?.id !== nextSelectedOrderId)) {
         await fetchOrderDetail(nextSelectedOrderId)
       } else {
         if (!nextSelectedOrderId) {
+          selectedOrderRef.current = null
           setSelectedOrder(null)
         }
         return
       }
     } catch (error) {
+      if (requestId !== openOrdersRequestIdRef.current) {
+        return
+      }
       const localOrders = (await listLocalOrders<Order | OrderSummary>()).map((order) => normalizeOrder(order as Order))
       if (localOrders.length > 0) {
-        startTransition(() => {
-          setOpenOrders(localOrders.map((order) => toOrderSummary(order)))
-        })
-        let nextSelectedOrderId = selectedOrderId
+        applyOpenOrders(localOrders.map((order) => toOrderSummary(order)))
+        let nextSelectedOrderId = selectedOrderIdRef.current
         if (typeof options?.targetOrderId !== 'undefined') {
           nextSelectedOrderId = options.targetOrderId
         }
         const fallbackOrder = nextSelectedOrderId ? localOrders.find((order) => order.id === nextSelectedOrderId) ?? null : null
         if (fallbackOrder) {
+          selectedOrderIdRef.current = fallbackOrder.id
+          selectedOrderRef.current = fallbackOrder
           startTransition(() => {
             setSelectedOrder(fallbackOrder)
             setSelectedOrderId(fallbackOrder.id)
           })
         } else {
+          selectedOrderIdRef.current = localOrders[0]?.id ?? null
+          selectedOrderRef.current = localOrders[0] ?? null
           startTransition(() => {
             setSelectedOrder(localOrders[0] ?? null)
             setSelectedOrderId(localOrders[0]?.id ?? null)
@@ -603,7 +731,7 @@ const PDV: React.FC = () => {
         setIsOnline(false)
       }
     }
-  }, [fetchOrderDetail, mergeSelectedOrderSummary, selectedOrder?.id, selectedOrderId])
+  }, [applyOpenOrders, fetchOrderDetail, mergeSelectedOrderSummary])
 
   const refreshOpenOrdersInBackground = useCallback((targetOrderId?: string | null) => {
     void fetchOpenOrders({ targetOrderId, refreshSelectedDetail: false })
@@ -612,6 +740,10 @@ const PDV: React.FC = () => {
   const getProductName = useCallback((productId: number) => productsById.get(productId)?.name ?? `Produto ${productId}`, [productsById])
 
   const handleSelectOrder = useCallback((orderId: string) => {
+    if (selectedOrderIdRef.current === orderId && selectedOrderRef.current?.id === orderId) {
+      return
+    }
+    selectedOrderIdRef.current = orderId
     setSelectedOrderId(orderId)
     void fetchOrderDetail(orderId)
   }, [fetchOrderDetail])
@@ -700,17 +832,23 @@ const PDV: React.FC = () => {
   useEffect(() => {
     const ws = connectWS('/ws/pdv', (data) => {
       const scheduleRefresh = (options?: { orders?: boolean; cash?: boolean }) => {
+        if (document.visibilityState !== 'visible') {
+          return
+        }
         if (wsRefreshTimerRef.current !== null) {
           window.clearTimeout(wsRefreshTimerRef.current)
         }
         wsRefreshTimerRef.current = window.setTimeout(() => {
+          if (document.visibilityState !== 'visible') {
+            return
+          }
           if (options?.orders) {
             refreshOpenOrdersInBackground()
           }
           if (options?.cash) {
             void fetchCashStatus()
           }
-        }, 120)
+        }, PDV_REFRESH_DEBOUNCE_MS)
       }
       if (data?.event === 'order_paid' || data?.event === 'order_canceled') {
         scheduleRefresh({ orders: true, cash: true })
@@ -731,15 +869,18 @@ const PDV: React.FC = () => {
   }, [fetchCashStatus, refreshOpenOrdersInBackground])
 
   useEffect(() => {
-    if (!selectedOrderId) {
-      setSelectedOrder(null)
-      return
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') {
+        return
+      }
+      refreshOpenOrdersInBackground(selectedOrderIdRef.current)
+      void fetchCashStatus()
     }
-    if (selectedOrder?.id === selectedOrderId) {
-      return
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-    void fetchOrderDetail(selectedOrderId)
-  }, [fetchOrderDetail, selectedOrder?.id, selectedOrderId])
+  }, [fetchCashStatus, refreshOpenOrdersInBackground])
 
   useEffect(() => {
     const loadLoyalty = async () => {

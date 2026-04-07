@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import { connectWS } from '../api/ws'
 import '../styles.css'
@@ -29,10 +29,10 @@ const normalizeOrders = (payload: OrdersResponse): Order[] => {
   if (Array.isArray(payload)) {
     return payload
   }
-  if (payload && Array.isArray(payload.results)) {
+  if (payload && !Array.isArray(payload) && 'results' in payload && Array.isArray(payload.results)) {
     return payload.results
   }
-  if (payload && Array.isArray(payload.data)) {
+  if (payload && !Array.isArray(payload) && 'data' in payload && Array.isArray(payload.data)) {
     return payload.data
   }
   return []
@@ -47,6 +47,27 @@ const sourceLabel: Record<string, string> = {
 const formatBRL = (value: string | number) =>
   Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
+const DELIVERY_POLL_INTERVAL_MS = 10000
+const DELIVERY_REFRESH_DEBOUNCE_MS = 150
+
+const buildOrdersSnapshot = (orders: Order[]) =>
+  JSON.stringify(
+    orders.map((order) => [
+      order.id,
+      order.customer_name || '',
+      order.customer_phone || '',
+      order.address || '',
+      order.subtotal,
+      order.delivery_fee,
+      order.total,
+      order.status,
+      order.created_at,
+      order.source || '',
+      order.pix_payload || '',
+      (order.items || []).map((item) => [item.product_name, item.quantity, item.unit_price || '', item.total || '']),
+    ])
+  )
+
 const PedidosDelivery: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
@@ -54,21 +75,41 @@ const PedidosDelivery: React.FC = () => {
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
   const wsRefreshTimerRef = useRef<number | null>(null)
   const pollTimerRef = useRef<number | null>(null)
+  const ordersSnapshotRef = useRef('')
+  const fetchRequestIdRef = useRef(0)
 
-  const fetchOrders = async (options?: { silent?: boolean }) => {
+  const applyOrders = useCallback((nextOrders: Order[]) => {
+    const snapshot = buildOrdersSnapshot(nextOrders)
+    if (snapshot === ordersSnapshotRef.current) {
+      return
+    }
+    ordersSnapshotRef.current = snapshot
+    setOrders(nextOrders)
+  }, [])
+
+  const fetchOrders = useCallback(async (options?: { silent?: boolean }) => {
+    const requestId = ++fetchRequestIdRef.current
     try {
       const response = await api.get<OrdersResponse>('/api/orders/')
-      setOrders(normalizeOrders(response.data))
+      if (requestId !== fetchRequestIdRef.current) {
+        return
+      }
+      applyOrders(normalizeOrders(response.data))
       setFeedback((current) => (current?.type === 'error' ? null : current))
     } catch (err: any) {
+      if (requestId !== fetchRequestIdRef.current) {
+        return
+      }
       if (!options?.silent) {
         const msg = err.response?.data?.detail || 'Erro ao carregar pedidos de delivery.'
         setFeedback({ type: 'error', text: msg })
       }
     } finally {
-      setLoading(false)
+      if (requestId === fetchRequestIdRef.current) {
+        setLoading(false)
+      }
     }
-  }
+  }, [applyOrders])
 
   useEffect(() => {
     void fetchOrders()
@@ -77,21 +118,32 @@ const PedidosDelivery: React.FC = () => {
       if (document.visibilityState === 'visible' && navigator.onLine) {
         void fetchOrders({ silent: true })
       }
-    }, 3000)
+    }, DELIVERY_POLL_INTERVAL_MS)
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        void fetchOrders({ silent: true })
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     const ws = connectWS('/ws/pdv', (data) => {
+      if (document.visibilityState !== 'visible') {
+        return
+      }
       if (data?.event === 'order_created' && data?.source === 'delivery') {
         if (wsRefreshTimerRef.current !== null) {
           window.clearTimeout(wsRefreshTimerRef.current)
         }
         wsRefreshTimerRef.current = window.setTimeout(() => {
-          void fetchOrders()
-        }, 120)
+          void fetchOrders({ silent: true })
+        }, DELIVERY_REFRESH_DEBOUNCE_MS)
       }
     })
 
     return () => {
       ws.close()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
       if (wsRefreshTimerRef.current !== null) {
         window.clearTimeout(wsRefreshTimerRef.current)
       }
@@ -99,14 +151,18 @@ const PedidosDelivery: React.FC = () => {
         window.clearInterval(pollTimerRef.current)
       }
     }
-  }, [])
+  }, [fetchOrders])
 
   const updateStatus = async (id: string, status: string) => {
     setBusyOrderId(id)
     try {
-      await api.patch(`/api/orders/${id}/`, { status })
+      const response = await api.patch<Order>(`/api/orders/${id}/`, { status })
+      setOrders((current) => {
+        const nextOrders = current.map((order) => (order.id === id ? response.data : order))
+        ordersSnapshotRef.current = buildOrdersSnapshot(nextOrders)
+        return nextOrders
+      })
       setFeedback({ type: 'ok', text: 'Status do pedido atualizado.' })
-      void fetchOrders({ silent: true })
     } catch (err: any) {
       const msg = err.response?.data?.detail || 'Nao foi possivel atualizar o status do pedido.'
       setFeedback({ type: 'error', text: msg })
@@ -123,7 +179,11 @@ const PedidosDelivery: React.FC = () => {
     setBusyOrderId(order.id)
     try {
       await api.delete(`/api/orders/${order.id}/`)
-      setOrders((current) => current.filter((item) => item.id !== order.id))
+      setOrders((current) => {
+        const nextOrders = current.filter((item) => item.id !== order.id)
+        ordersSnapshotRef.current = buildOrdersSnapshot(nextOrders)
+        return nextOrders
+      })
       setFeedback({ type: 'ok', text: 'Pedido excluido com sucesso.' })
     } catch (err: any) {
       const msg = err.response?.data?.detail || 'Nao foi possivel excluir o pedido.'

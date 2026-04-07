@@ -1,6 +1,8 @@
 from decimal import Decimal
 
-from django.test import TestCase
+from django.db import connection
+from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from apps.accounts.models import Permission, Role, RolePermission, User, UserRole
@@ -344,3 +346,57 @@ class PublicDeliveryOrderCreateTests(TestCase):
         self.assertEqual(response.data['subtotal'], '8.00')
         self.assertEqual(response.data['delivery_fee'], '7.50')
         self.assertEqual(response.data['total'], '15.50')
+
+
+@override_settings(REQUIRE_AUTH=False)
+class DeliveryOrdersQueryEfficiencyTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.category = Category.objects.create(name='Sorvetes', price=Decimal('8.00'))
+        self.product = Product.objects.create(category=self.category, name='Cascao')
+        ProductPrice.objects.create(
+            product=self.product,
+            store_id=1,
+            price=Decimal('8.00'),
+            cost=Decimal('0'),
+            freight=Decimal('0'),
+            other=Decimal('0'),
+            tax_pct=Decimal('0'),
+            overhead_pct=Decimal('0'),
+            margin_pct=Decimal('0'),
+        )
+        StoreConfig.objects.update_or_create(
+            id=1,
+            defaults={'delivery_fee_default': Decimal('5.00')},
+        )
+        cashier = User.objects.create_superuser(email='cash-delivery@test.com', password='test', name='Cash Delivery')
+        services.open_cash(user=cashier, initial_float=Decimal('100.00'))
+        for index in range(3):
+            response = self.client.post(
+                '/api/orders/public/',
+                {
+                    'customer_name': f'Cliente {index}',
+                    'customer_phone': f'9199999000{index}',
+                    'address': 'Rua das Flores, 10',
+                    'neighborhood': 'Centro',
+                    'payment_method': 'PIX',
+                    'items': [
+                        {
+                            'product_id': self.product.id,
+                            'product_name': 'Cascao',
+                            'quantity': 1,
+                        }
+                    ],
+                },
+                format='json',
+            )
+            self.assertEqual(response.status_code, 201)
+
+    def test_delivery_list_prefetches_items_in_constant_queries(self):
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get('/api/orders/?include_items=1&limit=20')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+        self.assertTrue(all(order['items'] for order in response.data))
+        self.assertLessEqual(len(queries), 3)

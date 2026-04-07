@@ -24,7 +24,7 @@ const preloadOfflineRoutes = () => {
     ;(window as Window & { requestIdleCallback: (callback: () => void) => number }).requestIdleCallback(warmUp)
     return
   }
-  window.setTimeout(warmUp, 1500)
+  setTimeout(warmUp, 1500)
 }
 
 const maybeRecoverFromChunkError = (reason: unknown) => {

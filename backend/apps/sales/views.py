@@ -64,6 +64,22 @@ ORDER_ITEM_ONLY_FIELDS = (
     'product__name',
 )
 
+PAYMENT_ONLY_FIELDS = (
+    'id',
+    'order_id',
+    'method',
+    'amount',
+    'meta',
+    'created_at',
+)
+
+OPEN_ORDER_BLOCKER_ONLY_FIELDS = (
+    *ORDER_ONLY_FIELDS,
+    'type',
+    'delivery_meta__source',
+    'delivery_meta__customer_name',
+)
+
 
 def _is_date_only(value: str) -> bool:
     return isinstance(value, str) and 'T' not in value and ' ' not in value and ':' not in value
@@ -169,10 +185,17 @@ def _order_items_prefetch():
     )
 
 
+def _order_payments_prefetch():
+    return Prefetch(
+        'payments',
+        queryset=Payment.objects.only(*PAYMENT_ONLY_FIELDS),
+    )
+
+
 def _orders_with_customer(include_items=True):
     qs = _orders_base_queryset().filter(delivery_meta__isnull=True)
     if include_items:
-        qs = qs.prefetch_related(_order_items_prefetch())
+        qs = qs.prefetch_related(_order_items_prefetch(), _order_payments_prefetch())
     return qs
 
 
@@ -445,10 +468,14 @@ class OrdersClosedView(APIView):
         from_date = request.query_params.get('from')
         to_date = request.query_params.get('to')
         include_items = _wants_items(request, default=True)
+        limit = _get_positive_int_param(request, 'limit', None, maximum=500)
         qs = _orders_with_customer(include_items=include_items).filter(status=Order.STATUS_PAID)
         qs = qs.filter(closed_at__isnull=False)
         qs = _apply_range_filter_for_field(qs, 'closed_at', from_date, to_date)
-        return Response(_serialize_orders(qs.order_by('-closed_at'), include_items=include_items))
+        qs = qs.order_by('-closed_at')
+        if limit is not None:
+            qs = qs[:limit]
+        return Response(_serialize_orders(qs, include_items=include_items))
 
 
 class OrdersCanceledView(APIView):
@@ -456,9 +483,13 @@ class OrdersCanceledView(APIView):
         from_date = request.query_params.get('from')
         to_date = request.query_params.get('to')
         include_items = _wants_items(request, default=True)
+        limit = _get_positive_int_param(request, 'limit', None, maximum=500)
         qs = _orders_with_customer(include_items=include_items).filter(status=Order.STATUS_CANCELED)
         qs = _apply_range_filter(qs, from_date, to_date)
-        return Response(_serialize_orders(qs.order_by('-created_at'), include_items=include_items))
+        qs = qs.order_by('-created_at')
+        if limit is not None:
+            qs = qs[:limit]
+        return Response(_serialize_orders(qs, include_items=include_items))
 
 
 class OrderDetailView(APIView):
@@ -618,7 +649,7 @@ class CashDashboardView(APIView):
         history_qs = history_qs[:history_limit]
 
         config = services.get_store_config()
-        open_orders_qs = Order.objects.select_related('customer', 'delivery_meta').filter(
+        open_orders_qs = Order.objects.select_related('customer', 'delivery_meta').only(*OPEN_ORDER_BLOCKER_ONLY_FIELDS).filter(
             status__in=[Order.STATUS_OPEN, Order.STATUS_SENT, Order.STATUS_READY],
         ).order_by('-created_at')
         open_orders_count = open_orders_qs.aggregate(total=Count('id'))['total'] or 0

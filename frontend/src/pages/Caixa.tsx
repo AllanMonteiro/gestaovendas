@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import { openThermalReceiptPdf, type ThermalReceiptPayload } from '../app/thermalReceipt'
 import { connectWS } from '../api/ws'
@@ -114,6 +114,7 @@ type CashDashboardResponse = {
 const CASH_DASHBOARD_ORDERS_LIMIT = 50
 const CASH_DASHBOARD_MOVES_LIMIT = 50
 const CASH_DASHBOARD_HISTORY_LIMIT = 30
+const CASH_REFRESH_DEBOUNCE_MS = 150
 
 const formatBRL = (value: string | number) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const getOrderDisplayNumber = (order: Pick<Order, 'id' | 'display_number'>) => order.display_number || order.id.slice(0, 8)
@@ -151,6 +152,22 @@ const todayISO = () => {
   return `${y}-${m}-${d}`
 }
 
+const sortClosedOrders = (orders: Order[]) =>
+  [...orders].sort((a, b) => ((a.closed_at || a.created_at) < (b.closed_at || b.created_at) ? 1 : -1))
+
+const buildDashboardSnapshot = (payload: CashDashboardResponse) =>
+  JSON.stringify({
+    cash_status: payload.cash_status,
+    closed_orders: sortClosedOrders(payload.closed_orders),
+    open_orders: payload.open_orders ?? [],
+    cash_moves: payload.cash_moves,
+    cash_history: payload.cash_history,
+    payments: payload.payments,
+    today_summary: payload.today_summary,
+    open_orders_count: payload.open_orders_count,
+    config: payload.config,
+  })
+
 const Caixa: React.FC = () => {
   const [cashStatus, setCashStatus] = useState<CashStatusResponse>({ open: false })
   const [orders, setOrders] = useState<Order[]>([])
@@ -175,28 +192,43 @@ const Caixa: React.FC = () => {
   const [storeCnpj, setStoreCnpj] = useState('')
   const [storeAddress, setStoreAddress] = useState('')
   const wsRefreshTimerRef = useRef<number | null>(null)
+  const loadDataRequestIdRef = useRef(0)
+  const dashboardSnapshotRef = useRef('')
 
   const loadData = useCallback(async () => {
+    const requestId = ++loadDataRequestIdRef.current
     try {
       const response = await api.get<CashDashboardResponse>(
         `/api/cash/dashboard?from=${appliedFromDate}&to=${appliedToDate}&orders_limit=${CASH_DASHBOARD_ORDERS_LIMIT}&moves_limit=${CASH_DASHBOARD_MOVES_LIMIT}&history_limit=${CASH_DASHBOARD_HISTORY_LIMIT}`
       )
+      if (requestId !== loadDataRequestIdRef.current) {
+        return
+      }
       const payload = response.data
-      setCashStatus(payload.cash_status)
-      setOrders(payload.closed_orders.sort((a, b) => ((a.closed_at || a.created_at) < (b.closed_at || b.created_at) ? 1 : -1)))
-      setOpenOrders(payload.open_orders ?? [])
-      setCashMoves(payload.cash_moves)
-      setCashHistory(payload.cash_history)
-      setPaymentsAgg(payload.payments)
-      setDailySummary(payload.today_summary)
-      setOpenOrdersCount(payload.open_orders_count)
-      setAgentUrl(payload.config.printer?.agent_url?.trim() ?? '')
-      setStoreLabel(payload.config.company_name || payload.config.store_name || 'Sorveteria POS')
-      setStoreCnpj(payload.config.cnpj || '')
-      setStoreAddress(payload.config.address || '')
-      setFeedback('')
+      const sortedOrders = sortClosedOrders(payload.closed_orders)
+      const snapshot = buildDashboardSnapshot({ ...payload, closed_orders: sortedOrders })
+      if (snapshot !== dashboardSnapshotRef.current) {
+        dashboardSnapshotRef.current = snapshot
+        startTransition(() => {
+          setCashStatus(payload.cash_status)
+          setOrders(sortedOrders)
+          setOpenOrders(payload.open_orders ?? [])
+          setCashMoves(payload.cash_moves)
+          setCashHistory(payload.cash_history)
+          setPaymentsAgg(payload.payments)
+          setDailySummary(payload.today_summary)
+          setOpenOrdersCount(payload.open_orders_count)
+          setAgentUrl(payload.config.printer?.agent_url?.trim() ?? '')
+          setStoreLabel(payload.config.company_name || payload.config.store_name || 'Sorveteria POS')
+          setStoreCnpj(payload.config.cnpj || '')
+          setStoreAddress(payload.config.address || '')
+        })
+      }
+      setFeedback((current) => (current ? '' : current))
     } catch {
-      setFeedback('Alguns dados do caixa falharam ao atualizar. Tente novamente.')
+      if (requestId === loadDataRequestIdRef.current) {
+        setFeedback('Alguns dados do caixa falharam ao atualizar. Tente novamente.')
+      }
     }
   }, [appliedFromDate, appliedToDate])
 
@@ -238,6 +270,9 @@ const Caixa: React.FC = () => {
 
   useEffect(() => {
     const ws = connectWS('/ws/pdv', (data) => {
+      if (document.visibilityState !== 'visible') {
+        return
+      }
       if (
         data?.event === 'order_paid' ||
         data?.event === 'order_canceled' ||
@@ -249,7 +284,7 @@ const Caixa: React.FC = () => {
         }
         wsRefreshTimerRef.current = window.setTimeout(() => {
           void loadData()
-        }, 120)
+        }, CASH_REFRESH_DEBOUNCE_MS)
       }
     })
     return () => {
@@ -257,6 +292,18 @@ const Caixa: React.FC = () => {
       if (wsRefreshTimerRef.current !== null) {
         window.clearTimeout(wsRefreshTimerRef.current)
       }
+    }
+  }, [loadData])
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        void loadData()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [loadData])
 

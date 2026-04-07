@@ -1,6 +1,7 @@
 import unicodedata
 
 from django.db import transaction
+from django.db.models import Prefetch
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -10,6 +11,7 @@ from apps.integrations.whatsapp.services_ai import create_delivery_order_from_pa
 from apps.sales import services
 from apps.sales.consumers import broadcast_delivery_event
 from apps.sales.models import DeliveryOrderMeta, Order, Payment
+from apps.sales.models import OrderItem
 
 from .serializers import OrderSerializer
 
@@ -29,6 +31,39 @@ PAYMENT_METHOD_ALIASES = {
     'credito': Payment.METHOD_CARD,
     'debito': Payment.METHOD_CARD,
 }
+
+DELIVERY_ORDER_ONLY_FIELDS = (
+    'id',
+    'customer_id',
+    'type',
+    'status',
+    'subtotal',
+    'total',
+    'created_at',
+    'customer__name',
+    'delivery_meta__customer_name',
+    'delivery_meta__customer_phone',
+    'delivery_meta__address',
+    'delivery_meta__notes',
+    'delivery_meta__payment_method',
+    'delivery_meta__source',
+    'delivery_meta__status',
+    'delivery_meta__delivery_fee',
+    'delivery_meta__pix_payload',
+    'delivery_meta__cep',
+    'delivery_meta__neighborhood',
+    'delivery_meta__raw_items',
+)
+
+DELIVERY_ITEM_ONLY_FIELDS = (
+    'id',
+    'order_id',
+    'product_id',
+    'qty',
+    'unit_price',
+    'total',
+    'product__name',
+)
 
 
 def _normalize_payment_token(raw_method):
@@ -98,10 +133,16 @@ def _delivery_orders(*, include_items=True, limit=None):
     qs = (
         Order.objects.filter(type=Order.TYPE_DELIVERY, delivery_meta__isnull=False)
         .select_related('customer', 'delivery_meta')
+        .only(*DELIVERY_ORDER_ONLY_FIELDS)
         .order_by('-created_at')
     )
     if include_items:
-        qs = qs.prefetch_related('items__product')
+        qs = qs.prefetch_related(
+            Prefetch(
+                'items',
+                queryset=OrderItem.objects.select_related('product').only(*DELIVERY_ITEM_ONLY_FIELDS),
+            )
+        )
     if limit is not None:
         qs = qs[:limit]
     return qs

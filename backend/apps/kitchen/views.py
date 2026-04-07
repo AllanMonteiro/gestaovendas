@@ -1,15 +1,52 @@
+from django.db.models import Prefetch
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from apps.kitchen.models import KitchenTicket
-from apps.sales.models import Order
+from apps.sales.models import Order, OrderItem, Payment
 from apps.sales.serializers import OrderSerializer
 from apps.kitchen.consumers import broadcast_kitchen_event
 from apps.sales.consumers import broadcast_pdv_event
 
+ORDER_ITEM_ONLY_FIELDS = (
+    'id',
+    'order_id',
+    'product_id',
+    'qty',
+    'weight_grams',
+    'unit_price',
+    'total',
+    'notes',
+    'client_request_id',
+    'product__id',
+    'product__name',
+)
+
+PAYMENT_ONLY_FIELDS = (
+    'id',
+    'order_id',
+    'method',
+    'amount',
+    'meta',
+    'created_at',
+)
+
 
 class KitchenQueueView(APIView):
     def get(self, request):
-        tickets = KitchenTicket.objects.select_related('order').prefetch_related('order__items__product').order_by('updated_at')
+        tickets = (
+            KitchenTicket.objects.select_related('order', 'order__customer')
+            .prefetch_related(
+                Prefetch(
+                    'order__items',
+                    queryset=OrderItem.objects.select_related('product').only(*ORDER_ITEM_ONLY_FIELDS),
+                ),
+                Prefetch(
+                    'order__payments',
+                    queryset=Payment.objects.only(*PAYMENT_ONLY_FIELDS),
+                ),
+            )
+            .order_by('updated_at')
+        )
         orders = [t.order for t in tickets]
         return Response(OrderSerializer(orders, many=True).data)
 

@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 
 type Category = {
   id: number
   name: string
   price?: string | null
+  sort_order?: number
+  active?: boolean
 }
 
 type Product = {
@@ -29,6 +31,34 @@ type ProductPrice = {
   ideal_price: string
   profit: string
 }
+
+const sortCategories = (items: Category[]) =>
+  [...items].sort((left, right) => {
+    const leftOrder = Number(left.sort_order ?? 0)
+    const rightOrder = Number(right.sort_order ?? 0)
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder
+    }
+    return left.name.localeCompare(right.name, 'pt-BR')
+  })
+
+const sortProducts = (items: Product[]) =>
+  [...items].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR'))
+
+const buildFallbackPrice = (product: Product, categoryList: Category[]): ProductPrice => ({
+  price: String(categoryList.find((category) => category.id === product.category)?.price || '0'),
+  cost: '0',
+  freight: '0',
+  other: '0',
+  tax_pct: '0',
+  overhead_pct: '0',
+  margin_pct: '0',
+  ideal_price: '0',
+  profit: '0'
+})
+
+const buildFallbackPriceMap = (productList: Product[], categoryList: Category[]) =>
+  Object.fromEntries(productList.map((product) => [product.id, buildFallbackPrice(product, categoryList)]))
 
 const formatBRL = (value: string | number) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const getApiErrorText = (error: unknown, fallback: string) => {
@@ -120,33 +150,27 @@ const Produtos: React.FC = () => {
     return products.filter((product) => String(product.category) === deleteCategoryId).length
   }, [deleteCategoryId, products])
 
-  const loadData = async () => {
+  const mergePriceForProduct = useCallback((product: Product, price?: ProductPrice, categoryList?: Category[]) => {
+    setPriceMap((current) => ({
+      ...current,
+      [product.id]: price ?? buildFallbackPrice(product, categoryList ?? categories),
+    }))
+  }, [categories])
+
+  const loadData = useCallback(async () => {
     try {
       const [productsResp, categoriesResp] = await Promise.all([
         api.get<Product[]>('/api/products'),
         api.get<Category[]>('/api/categories')
       ])
-      setProducts(productsResp.data)
-      setCategories(categoriesResp.data)
+      const nextProducts = sortProducts(productsResp.data)
+      const nextCategories = sortCategories(categoriesResp.data)
+      setProducts(nextProducts)
+      setCategories(nextCategories)
 
-      const fallbackMap = Object.fromEntries(
-        productsResp.data.map((product) => [
-          product.id,
-          {
-            price: String(categoriesResp.data.find((category) => category.id === product.category)?.price || '0'),
-            cost: '0',
-            freight: '0',
-            other: '0',
-            tax_pct: '0',
-            overhead_pct: '0',
-            margin_pct: '0',
-            ideal_price: '0',
-            profit: '0'
-          } satisfies ProductPrice
-        ])
-      )
+      const fallbackMap = buildFallbackPriceMap(nextProducts, nextCategories)
 
-      const productIds = productsResp.data.map((product) => product.id)
+      const productIds = nextProducts.map((product) => product.id)
       const productIdSet = new Set(productIds)
 
       try {
@@ -166,11 +190,11 @@ const Produtos: React.FC = () => {
     } catch {
       setFeedback('Falha ao carregar produtos.')
     }
-  }
+  }, [])
 
   useEffect(() => {
     void loadData()
-  }, [])
+  }, [loadData])
 
   const toDecimal = (value: string) => value.replace(',', '.').trim()
 
@@ -268,12 +292,13 @@ const Produtos: React.FC = () => {
         sort_order: sortOrder,
         active: createCategoryActive
       })
+      const nextCategory = response.data
+      setCategories((current) => sortCategories([...current, nextCategory]))
       setFeedback('Categoria criada com sucesso.')
       setShowCreateCategoryModal(false)
       if (!createCategory) {
-        setCreateCategory(String(response.data.id))
+        setCreateCategory(String(nextCategory.id))
       }
-      await loadData()
     } catch (error: unknown) {
       setFeedback(getApiErrorText(error, 'Falha ao criar categoria.'))
     } finally {
@@ -301,10 +326,11 @@ const Produtos: React.FC = () => {
     setDeletingCategory(true)
     try {
       await api.delete(`/api/categories/${deleteCategoryId}`)
+      const deletedCategoryId = Number(deleteCategoryId)
+      setCategories((current) => current.filter((category) => category.id !== deletedCategoryId))
       setFeedback('Categoria excluida com sucesso.')
       setShowDeleteCategoryModal(false)
       setDeleteCategoryId('')
-      await loadData()
     } catch (error: unknown) {
       setFeedback(getApiErrorText(error, 'Falha ao excluir categoria.'))
     } finally {
@@ -346,7 +372,8 @@ const Produtos: React.FC = () => {
         stock: toDecimal(createStock || '0')
       })
 
-      await api.put(`/api/products/${createResp.data.id}/price`, {
+      const createdProduct = createResp.data
+      const priceResp = await api.put<ProductPrice>(`/api/products/${createdProduct.id}/price`, {
         price: toDecimal(createPrice || '0'),
         cost: toDecimal(createCost || '0'),
         freight: toDecimal(createFreight || '0'),
@@ -356,9 +383,10 @@ const Produtos: React.FC = () => {
         margin_pct: toDecimal(createMarginPct || '0')
       })
 
+      setProducts((current) => sortProducts([...current, createdProduct]))
+      mergePriceForProduct(createdProduct, priceResp.data)
       setFeedback('Produto criado com sucesso.')
       setShowCreateModal(false)
-      await loadData()
     } catch {
       setFeedback('Falha ao criar produto.')
     } finally {
@@ -374,12 +402,12 @@ const Produtos: React.FC = () => {
     }
 
     try {
-      await api.put(`/api/products/${product.id}/price`, {
+      const response = await api.put<ProductPrice>(`/api/products/${product.id}/price`, {
         price: priceInput.replace(',', '.'),
         cost: priceMap[product.id]?.cost || '0'
       })
+      mergePriceForProduct(product, response.data)
       setFeedback('Preco atualizado.')
-      await loadData()
     } catch {
       setFeedback('Falha ao atualizar preco.')
     }
@@ -392,12 +420,12 @@ const Produtos: React.FC = () => {
       return
     }
     try {
-      await api.put(`/api/products/${product.id}/price`, {
+      const response = await api.put<ProductPrice>(`/api/products/${product.id}/price`, {
         price: info.ideal_price,
         cost: info.cost
       })
+      mergePriceForProduct(product, response.data)
       setFeedback('Preco ideal aplicado.')
-      await loadData()
     } catch {
       setFeedback('Falha ao aplicar preco ideal.')
     }
@@ -405,15 +433,17 @@ const Produtos: React.FC = () => {
 
   const handleToggleActive = async (product: Product) => {
     try {
-      await api.put(`/api/products/${product.id}`, {
+      const response = await api.put<Product>(`/api/products/${product.id}`, {
         category: product.category,
         name: product.name,
         active: !product.active,
         sold_by_weight: product.sold_by_weight,
         stock: product.stock
       })
+      setProducts((current) =>
+        sortProducts(current.map((item) => (item.id === product.id ? response.data : item)))
+      )
       setFeedback('Status do produto atualizado.')
-      await loadData()
     } catch {
       setFeedback('Falha ao alterar status do produto.')
     }
@@ -458,8 +488,8 @@ const Produtos: React.FC = () => {
         sold_by_weight: editSoldByWeight,
         stock: toDecimal(editStock || '0')
       }
-      await api.put(`/api/products/${editingProduct.id}`, payload)
-      await api.put(`/api/products/${editingProduct.id}/price`, {
+      const productResp = await api.put<Product>(`/api/products/${editingProduct.id}`, payload)
+      const priceResp = await api.put<ProductPrice>(`/api/products/${editingProduct.id}/price`, {
         price: toDecimal(editPrice || '0'),
         cost: toDecimal(editCost || '0'),
         freight: toDecimal(editFreight || '0'),
@@ -468,9 +498,12 @@ const Produtos: React.FC = () => {
         overhead_pct: toDecimal(editOverheadPct || '0'),
         margin_pct: toDecimal(editMarginPct || '0')
       })
+      setProducts((current) =>
+        sortProducts(current.map((item) => (item.id === editingProduct.id ? productResp.data : item)))
+      )
+      mergePriceForProduct(productResp.data, priceResp.data)
       setFeedback('Produto atualizado com sucesso.')
       setEditingProduct(null)
-      await loadData()
     } catch {
       setFeedback('Falha ao atualizar produto.')
     } finally {

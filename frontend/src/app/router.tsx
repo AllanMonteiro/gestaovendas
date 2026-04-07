@@ -40,6 +40,8 @@ type DeliveryOrdersResponse = DeliveryOrderPayload[] | { results?: DeliveryOrder
 
 const CHUNK_RELOAD_KEY = 'sorveteria.chunk-reload-at'
 const BRANDING_CACHE_KEY = 'sorveteria.branding-cache'
+const DELIVERY_ALERT_POLL_INTERVAL_MS = 10000
+const DELIVERY_ALERT_REFRESH_DEBOUNCE_MS = 150
 
 const normalizeTheme = (value?: string | null) => {
   if (!value || value === 'light') return 'cream'
@@ -118,10 +120,10 @@ const normalizeDeliveryOrders = (payload: DeliveryOrdersResponse): DeliveryOrder
   if (Array.isArray(payload)) {
     return payload
   }
-  if (payload && Array.isArray(payload.results)) {
+  if (payload && !Array.isArray(payload) && 'results' in payload && Array.isArray(payload.results)) {
     return payload.results
   }
-  if (payload && Array.isArray(payload.data)) {
+  if (payload && !Array.isArray(payload) && 'data' in payload && Array.isArray(payload.data)) {
     return payload.data
   }
   return []
@@ -316,21 +318,35 @@ const Layout: React.FC = () => {
       if (document.visibilityState === 'visible' && navigator.onLine) {
         void fetchDeliveryOrders({ notifyOnNew: true })
       }
-    }, 3000)
+    }, DELIVERY_ALERT_POLL_INTERVAL_MS)
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        void fetchDeliveryOrders({ notifyOnNew: true })
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     const ws = connectWS('/ws/pdv', (data) => {
+      if (document.visibilityState !== 'visible') {
+        return
+      }
       if (data?.event === 'order_created' && data?.source === 'delivery') {
         if (deliveryRefreshTimerRef.current !== null) {
           window.clearTimeout(deliveryRefreshTimerRef.current)
         }
         deliveryRefreshTimerRef.current = window.setTimeout(() => {
+          if (document.visibilityState !== 'visible' || !navigator.onLine) {
+            return
+          }
           void fetchDeliveryOrders({ notifyOnNew: true })
-        }, 120)
+        }, DELIVERY_ALERT_REFRESH_DEBOUNCE_MS)
       }
     })
 
     return () => {
       ws.close()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
       if (deliveryPollTimerRef.current !== null) {
         window.clearInterval(deliveryPollTimerRef.current)
       }

@@ -1,7 +1,9 @@
 from uuid import uuid4
 from decimal import Decimal
 import os
-from django.test import TestCase
+from django.db import connection
+from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 from apps.accounts.models import User
 from apps.audit.models import AuditLog
@@ -420,6 +422,113 @@ class StoreConfigAssetUrlTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['logo_url'], 'http://pdv.exemplo.com/media/store-config/logo.png')
+
+
+@override_settings(REQUIRE_AUTH=False)
+class OpenOrdersQueryEfficiencyTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_superuser(email='efficiency@test.com', password='test123', name='Efficiency Admin')
+        services.open_cash(user=self.user, initial_float=Decimal('100.00'))
+        category = Category.objects.create(name='Sorvetes', price=Decimal('7.50'))
+        self.product = Product.objects.create(category=category, name='Casquinha')
+        ProductPrice.objects.create(
+            product=self.product,
+            store_id=1,
+            price=Decimal('7.50'),
+            cost=Decimal('0'),
+            freight=Decimal('0'),
+            other=Decimal('0'),
+            tax_pct=Decimal('0'),
+            overhead_pct=Decimal('0'),
+            margin_pct=Decimal('0'),
+        )
+
+        for index in range(3):
+            order = services.create_order_idempotent(
+                order_type='COUNTER',
+                table_label=None,
+                customer=None,
+                client_request_id=uuid4(),
+            )
+            services.add_item(order=order, product_id=self.product.id, qty=Decimal('1'), weight_grams=None, notes=f'item {index}')
+            Payment.objects.create(order=order, method=Payment.METHOD_PIX, amount=Decimal('7.50'))
+
+    def test_open_orders_prefetch_items_and_payments(self):
+        with CaptureQueriesContext(connection) as queries:
+            response = self.client.get('/api/orders/open?include_items=1')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 3)
+        self.assertTrue(all(order['items'] for order in response.data))
+        self.assertTrue(all(order['payments'] for order in response.data))
+        self.assertLessEqual(len(queries), 3)
+
+
+@override_settings(REQUIRE_AUTH=False)
+class OrdersHistoryLimitTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_superuser(email='history-limit@test.com', password='test123', name='History Limit Admin')
+        services.open_cash(user=self.user, initial_float=Decimal('100.00'))
+        category = Category.objects.create(name='Sorvetes', price=Decimal('7.50'))
+        self.product = Product.objects.create(category=category, name='Casquinha')
+        ProductPrice.objects.create(
+            product=self.product,
+            store_id=1,
+            price=Decimal('7.50'),
+            cost=Decimal('0'),
+            freight=Decimal('0'),
+            other=Decimal('0'),
+            tax_pct=Decimal('0'),
+            overhead_pct=Decimal('0'),
+            margin_pct=Decimal('0'),
+        )
+
+    def _create_paid_order(self):
+        order = services.create_order_idempotent(
+            order_type='COUNTER',
+            table_label=None,
+            customer=None,
+            client_request_id=uuid4(),
+        )
+        services.add_item(order=order, product_id=self.product.id, qty=Decimal('1'), weight_grams=None, notes=None)
+        return services.close_order(
+            order=order,
+            discount=Decimal('0'),
+            payments=[{'method': 'PIX', 'amount': '7.50'}],
+            use_loyalty_points=False,
+            client_request_id=uuid4(),
+            user=self.user,
+        )
+
+    def _create_canceled_order(self):
+        order = services.create_order_idempotent(
+            order_type='COUNTER',
+            table_label=None,
+            customer=None,
+            client_request_id=uuid4(),
+        )
+        services.add_item(order=order, product_id=self.product.id, qty=Decimal('1'), weight_grams=None, notes=None)
+        return services.cancel_order(order=order, reason='Cliente desistiu', user=self.user)
+
+    def test_closed_orders_support_limit(self):
+        for _ in range(3):
+            self._create_paid_order()
+
+        response = self.client.get('/api/orders/closed?include_items=0&limit=2')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+
+    def test_canceled_orders_support_limit(self):
+        for _ in range(3):
+            self._create_canceled_order()
+
+        response = self.client.get('/api/orders/canceled?include_items=0&limit=2')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
 
     def test_put_config_normalizes_media_logo_url_before_saving(self):
         response = self.client.put(

@@ -57,7 +57,7 @@ type CategoryPriceApplyResponse = {
 type UploadImageResponse = {
   url: string
   relative_url: string
-  slot: 'category'
+  slot: 'logo' | 'category'
   category_id?: string | null
 }
 
@@ -126,6 +126,7 @@ const Configuracoes: React.FC = () => {
   const [applyingCategoryId, setApplyingCategoryId] = useState<string>('')
   const [deletingCategoryId, setDeletingCategoryId] = useState<string>('')
   const [uploadingCategoryImage, setUploadingCategoryImage] = useState(false)
+  const [uploadingLogoImage, setUploadingLogoImage] = useState(false)
 
   const [storeName, setStoreName] = useState('')
   const [companyName, setCompanyName] = useState('')
@@ -276,6 +277,21 @@ const Configuracoes: React.FC = () => {
       return
     }
     void uploadConfigImage(file, selectedCategoryId)
+    event.target.value = ''
+  }
+
+  const handlePickLogoImage = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) {
+      return
+    }
+    void uploadConfigImage(file)
+    event.target.value = ''
+  }
+
+  const handleClearLogoImage = () => {
+    setLogoUrl('')
+    setFeedback('Logo removida. Clique em salvar para confirmar a alteracao.')
   }
 
   const handleClearCategoryImage = async () => {
@@ -401,6 +417,7 @@ const Configuracoes: React.FC = () => {
       await api.put('/api/config', {
         store_name: storeName,
         company_name: companyName,
+        logo_url: logoUrl.trim() || null,
         cnpj,
         address,
         whatsapp_number: whatsappNumber.trim() || null,
@@ -444,11 +461,15 @@ const Configuracoes: React.FC = () => {
   const uploadConfigImage = async (file: File, categoryId?: string) => {
     const formData = new FormData()
     formData.append('file', file)
-    formData.append('slot', 'category')
+    formData.append('slot', categoryId ? 'category' : 'logo')
     if (categoryId) {
       formData.append('category_id', categoryId)
     }
-    setUploadingCategoryImage(true)
+    if (categoryId) {
+      setUploadingCategoryImage(true)
+    } else {
+      setUploadingLogoImage(true)
+    }
 
     try {
       const response = await api.post<UploadImageResponse>('/api/config/upload-image', formData, {
@@ -465,11 +486,18 @@ const Configuracoes: React.FC = () => {
         setSelectedCategoryImage(response.data.relative_url)
         handleCategoryImageChange(Number(categoryId), response.data.relative_url)
         setFeedback('Imagem da categoria enviada e salva com sucesso.')
+      } else {
+        setLogoUrl(response.data.relative_url)
+        setFeedback('Logo enviada com sucesso. Clique em salvar para concluir.')
       }
     } catch {
-      setFeedback('Falha ao enviar imagem da categoria.')
+      setFeedback(categoryId ? 'Falha ao enviar imagem da categoria.' : 'Falha ao enviar logo da empresa.')
     } finally {
-      setUploadingCategoryImage(false)
+      if (categoryId) {
+        setUploadingCategoryImage(false)
+      } else {
+        setUploadingLogoImage(false)
+      }
     }
   }
 
@@ -643,6 +671,35 @@ const Configuracoes: React.FC = () => {
         <input value={companyName} onChange={(event) => setCompanyName(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Razao social" />
         <input value={address} onChange={(event) => setAddress(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Endereco" />
         <input value={whatsappNumber} onChange={(event) => setWhatsappNumber(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="WhatsApp da empresa (com DDD)" />
+        <div className="space-y-2 rounded-xl border border-brand-100 p-3">
+          <div>
+            <h3 className="text-sm font-medium text-slate-700">Logo da empresa</h3>
+            <p className="text-xs text-slate-500">Envie uma imagem para representar a loja no sistema.</p>
+          </div>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handlePickLogoImage}
+            disabled={uploadingLogoImage}
+            className="w-full rounded-lg border border-brand-100 bg-white px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-brand-100 file:px-3 file:py-1 file:text-brand-700"
+          />
+          {uploadingLogoImage ? <p className="text-xs text-slate-500">Enviando logo...</p> : null}
+          <div className="rounded-lg border border-brand-100 p-3">
+            {logoUrl ? (
+              <img src={resolveAssetUrl(logoUrl)} alt="Logo da empresa" className="h-24 w-24 rounded-lg object-cover" />
+            ) : (
+              <p className="text-sm text-slate-500">Nenhuma logo cadastrada.</p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={handleClearLogoImage}
+            disabled={!logoUrl}
+            className="rounded-lg border border-rose-300 px-3 py-2 text-sm text-rose-700 disabled:opacity-50"
+          >
+            Remover logo
+          </button>
+        </div>
       </div>
 
       <div className="panel space-y-3 p-4">

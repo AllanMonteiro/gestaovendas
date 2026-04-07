@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useState } from 'react'
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { ReportFilters } from '../components/ReportFilters'
 import { api } from '../api/client'
 
@@ -139,6 +139,7 @@ const monthRange = (value: string) => {
   return { from: toISODate(start), to: toISODate(end) }
 }
 const getOrderDisplayNumber = (order: Pick<OrderRow, 'id' | 'display_number'>) => order.display_number || order.id.slice(0, 8)
+const REPORT_ORDER_PAGE_SIZE = 50
 const Charts = lazy(async () => {
   const module = await import('../components/Charts')
   return { default: module.Charts }
@@ -161,6 +162,10 @@ const Relatorios: React.FC = () => {
   const [cashHistory, setCashHistory] = useState<CashHistoryRow[]>([])
   const [finalizedOrders, setFinalizedOrders] = useState<OrderRow[]>([])
   const [canceledOrders, setCanceledOrders] = useState<OrderRow[]>([])
+  const [finalizedLimit, setFinalizedLimit] = useState(REPORT_ORDER_PAGE_SIZE)
+  const [canceledLimit, setCanceledLimit] = useState(REPORT_ORDER_PAGE_SIZE)
+  const [hasMoreFinalized, setHasMoreFinalized] = useState(false)
+  const [hasMoreCanceled, setHasMoreCanceled] = useState(false)
   const [orderDetails, setOrderDetails] = useState<Record<string, OrderRow>>({})
   const [feedback, setFeedback] = useState('')
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null)
@@ -169,14 +174,29 @@ const Relatorios: React.FC = () => {
   const [salePaymentMethod, setSalePaymentMethod] = useState<'CASH' | 'PIX' | 'CARD_CREDIT' | 'CARD_DEBIT'>('CASH')
   const [saleDatePassword, setSaleDatePassword] = useState('')
   const [savingSaleDateOrderId, setSavingSaleDateOrderId] = useState<string | null>(null)
+  const loadReportsRequestIdRef = useRef(0)
 
-  const loadReports = async (from = fromDate, to = toDate) => {
+  const loadReports = useCallback(async (
+    from = fromDate,
+    to = toDate,
+    options?: {
+      finalizedLimit?: number
+      canceledLimit?: number
+      preserveDetails?: boolean
+    }
+  ) => {
+    const requestId = ++loadReportsRequestIdRef.current
+    const nextFinalizedLimit = options?.finalizedLimit ?? finalizedLimit
+    const nextCanceledLimit = options?.canceledLimit ?? canceledLimit
     try {
       const [dashboardResp, finalizedResp, canceledResp] = await Promise.all([
         api.get<ReportsDashboardResponse>(`/api/reports/dashboard?from=${from}&to=${to}&limit=20`),
-        api.get<OrderRow[]>(`/api/orders/closed?from=${from}&to=${to}&include_items=0`),
-        api.get<OrderRow[]>(`/api/orders/canceled?from=${from}&to=${to}&include_items=0`)
+        api.get<OrderRow[]>(`/api/orders/closed?from=${from}&to=${to}&include_items=0&limit=${nextFinalizedLimit}`),
+        api.get<OrderRow[]>(`/api/orders/canceled?from=${from}&to=${to}&include_items=0&limit=${nextCanceledLimit}`)
       ])
+      if (requestId !== loadReportsRequestIdRef.current) {
+        return
+      }
       setSummary(dashboardResp.data.summary)
       setCategories(dashboardResp.data.categories)
       setProducts(dashboardResp.data.products)
@@ -186,17 +206,25 @@ const Relatorios: React.FC = () => {
       setCashHistory(dashboardResp.data.cash_history)
       setFinalizedOrders(finalizedResp.data)
       setCanceledOrders(canceledResp.data)
-      setOrderDetails({})
-      setExpandedOrderId(null)
-      setEditingSaleDateOrderId(null)
-      setSaleAmountInput('')
-      setSalePaymentMethod('CASH')
-      setSaleDatePassword('')
+      setFinalizedLimit(nextFinalizedLimit)
+      setCanceledLimit(nextCanceledLimit)
+      setHasMoreFinalized(finalizedResp.data.length >= nextFinalizedLimit)
+      setHasMoreCanceled(canceledResp.data.length >= nextCanceledLimit)
+      if (!options?.preserveDetails) {
+        setOrderDetails({})
+        setExpandedOrderId(null)
+        setEditingSaleDateOrderId(null)
+        setSaleAmountInput('')
+        setSalePaymentMethod('CASH')
+        setSaleDatePassword('')
+      }
       setFeedback('')
     } catch {
-      setFeedback('Falha ao carregar relatorios.')
+      if (requestId === loadReportsRequestIdRef.current) {
+        setFeedback('Falha ao carregar relatorios.')
+      }
     }
-  }
+  }, [canceledLimit, finalizedLimit, fromDate, toDate])
 
   const toggleOrderExpansion = async (orderId: string) => {
     if (expandedOrderId === orderId) {
@@ -255,7 +283,7 @@ const Relatorios: React.FC = () => {
       })
       setFeedback('Valor e pagamento da venda atualizados com sucesso.')
       cancelSaleDateEdit()
-      await loadReports()
+      await loadReports(fromDate, toDate, { preserveDetails: false })
     } catch (error: any) {
       const message = error?.response?.data?.detail || 'Nao foi possivel atualizar valor e pagamento da venda.'
       setFeedback(message)
@@ -265,15 +293,23 @@ const Relatorios: React.FC = () => {
   }
 
   useEffect(() => {
-    void loadReports(initialRange.from, initialRange.to)
-  }, [])
+    void loadReports(initialRange.from, initialRange.to, {
+      finalizedLimit: REPORT_ORDER_PAGE_SIZE,
+      canceledLimit: REPORT_ORDER_PAGE_SIZE,
+      preserveDetails: false,
+    })
+  }, [loadReports])
 
   const handleMonthChange = (value: string) => {
     setSelectedMonth(value)
     const range = monthRange(value)
     setFromDate(range.from)
     setToDate(range.to)
-    void loadReports(range.from, range.to)
+    void loadReports(range.from, range.to, {
+      finalizedLimit: REPORT_ORDER_PAGE_SIZE,
+      canceledLimit: REPORT_ORDER_PAGE_SIZE,
+      preserveDetails: false,
+    })
   }
 
   const handleQuickRange = (days: 0 | 1 | 7 | 30) => {
@@ -283,7 +319,11 @@ const Relatorios: React.FC = () => {
       setSelectedMonth(toMonthValue(now))
       setFromDate(today)
       setToDate(today)
-      void loadReports(today, today)
+      void loadReports(today, today, {
+        finalizedLimit: REPORT_ORDER_PAGE_SIZE,
+        canceledLimit: REPORT_ORDER_PAGE_SIZE,
+        preserveDetails: false,
+      })
       return
     }
     if (days === 1) {
@@ -293,7 +333,11 @@ const Relatorios: React.FC = () => {
       setSelectedMonth(toMonthValue(yesterday))
       setFromDate(y)
       setToDate(y)
-      void loadReports(y, y)
+      void loadReports(y, y, {
+        finalizedLimit: REPORT_ORDER_PAGE_SIZE,
+        canceledLimit: REPORT_ORDER_PAGE_SIZE,
+        preserveDetails: false,
+      })
       return
     }
     const start = new Date(now)
@@ -303,8 +347,38 @@ const Relatorios: React.FC = () => {
     setSelectedMonth(toMonthValue(now))
     setFromDate(from)
     setToDate(to)
-    void loadReports(from, to)
+    void loadReports(from, to, {
+      finalizedLimit: REPORT_ORDER_PAGE_SIZE,
+      canceledLimit: REPORT_ORDER_PAGE_SIZE,
+      preserveDetails: false,
+    })
   }
+
+  const handleApplyFilters = useCallback(() => {
+    void loadReports(fromDate, toDate, {
+      finalizedLimit: REPORT_ORDER_PAGE_SIZE,
+      canceledLimit: REPORT_ORDER_PAGE_SIZE,
+      preserveDetails: false,
+    })
+  }, [fromDate, loadReports, toDate])
+
+  const handleLoadMoreFinalized = useCallback(() => {
+    const nextLimit = finalizedLimit + REPORT_ORDER_PAGE_SIZE
+    void loadReports(fromDate, toDate, {
+      finalizedLimit: nextLimit,
+      canceledLimit,
+      preserveDetails: true,
+    })
+  }, [canceledLimit, finalizedLimit, fromDate, loadReports, toDate])
+
+  const handleLoadMoreCanceled = useCallback(() => {
+    const nextLimit = canceledLimit + REPORT_ORDER_PAGE_SIZE
+    void loadReports(fromDate, toDate, {
+      finalizedLimit,
+      canceledLimit: nextLimit,
+      preserveDetails: true,
+    })
+  }, [canceledLimit, finalizedLimit, fromDate, loadReports, toDate])
 
   const cards = [
     { label: 'Faturamento finalizado', value: formatBRL(summary?.total_sales) },
@@ -328,7 +402,7 @@ const Relatorios: React.FC = () => {
         onChangeFrom={setFromDate}
         onChangeTo={setToDate}
         onQuickRange={handleQuickRange}
-        onApply={() => void loadReports()}
+        onApply={handleApplyFilters}
       />
 
       {feedback ? <p className="text-sm text-brand-700">{feedback}</p> : null}
@@ -520,9 +594,20 @@ const Relatorios: React.FC = () => {
               <h3 className="text-lg font-semibold">Pedidos finalizados</h3>
               <p className="text-sm text-slate-500">Comandas concluídas no período filtrado.</p>
             </div>
-            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-              {formatNumber(finalizedOrders.length)} pedidos
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                {formatNumber(finalizedOrders.length)} pedidos
+              </span>
+              {hasMoreFinalized ? (
+                <button
+                  type="button"
+                  onClick={handleLoadMoreFinalized}
+                  className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700"
+                >
+                  Carregar mais
+                </button>
+              ) : null}
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm lg:text-base">
@@ -666,9 +751,20 @@ const Relatorios: React.FC = () => {
               <h3 className="text-lg font-semibold">Pedidos cancelados</h3>
               <p className="text-sm text-slate-500">Cancelamentos registrados no período filtrado.</p>
             </div>
-            <span className="rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
-              {formatNumber(canceledOrders.length)} pedidos
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700">
+                {formatNumber(canceledOrders.length)} pedidos
+              </span>
+              {hasMoreCanceled ? (
+                <button
+                  type="button"
+                  onClick={handleLoadMoreCanceled}
+                  className="rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700"
+                >
+                  Carregar mais
+                </button>
+              ) : null}
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm lg:text-base">

@@ -15,7 +15,7 @@ def local_admin_permissions():
 
 
 class CategoryListView(generics.ListCreateAPIView):
-    queryset = Category.objects.filter(active=True).order_by('sort_order', 'name')
+    queryset = Category.objects.filter(active=True).only('id', 'name', 'image_url', 'sort_order', 'active', 'price').order_by('sort_order', 'name')
     serializer_class = CategorySerializer
 
     def get_permissions(self):
@@ -147,6 +147,8 @@ class ProductListView(generics.ListCreateAPIView):
         qs = Product.objects.all()
         if not compact:
             qs = qs.select_related('category')
+        else:
+            qs = qs.only('id', 'category_id', 'name', 'active', 'sold_by_weight', 'stock')
         category_id = self.request.query_params.get('category_id')
         query = self.request.query_params.get('q')
         if category_id:
