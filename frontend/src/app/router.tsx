@@ -3,6 +3,7 @@ import { createBrowserRouter, NavLink, Outlet, useLocation, useNavigate, useRout
 import { useOutboxSync } from './useSync'
 import { api } from '../api/client'
 import { type AuthSession } from './auth'
+import { resolveAssetUrl } from './runtime'
 import { LoginGate } from '../components/LoginGate'
 import { connectWS } from '../api/ws'
 
@@ -19,11 +20,13 @@ const PedidosDelivery = lazy(() => import('../pages/PedidosDelivery'))
 
 type StoreHeaderConfig = {
   store_name?: string
+  logo_url?: string | null
   theme?: string
 }
 
 type BrandingDetail = {
   store_name?: string
+  logo_url?: string | null
 }
 
 type DeliveryAlert = {
@@ -61,6 +64,7 @@ const readBrandingCache = () => {
     const parsed = JSON.parse(raw) as StoreHeaderConfig
     return {
       store_name: parsed.store_name || 'Sorveteria POS',
+      logo_url: parsed.logo_url || '',
       theme: normalizeTheme(parsed.theme),
     }
   } catch {
@@ -77,6 +81,7 @@ const writeBrandingCache = (branding: StoreHeaderConfig) => {
       BRANDING_CACHE_KEY,
       JSON.stringify({
         store_name: branding.store_name || 'Sorveteria POS',
+        logo_url: branding.logo_url || '',
         theme: normalizeTheme(branding.theme),
       })
     )
@@ -174,6 +179,7 @@ const Layout: React.FC = () => {
   const cachedBranding = readBrandingCache()
 
   const [storeName, setStoreName] = useState(cachedBranding?.store_name || 'Sorveteria POS')
+  const [logoUrl, setLogoUrl] = useState(cachedBranding?.logo_url || '')
   const [theme, setTheme] = useState<string>(cachedBranding?.theme || 'cream')
   const [currentUserName, setCurrentUserName] = useState('')
   const [deliveryAlerts, setDeliveryAlerts] = useState<DeliveryAlert[]>([])
@@ -201,12 +207,14 @@ const Layout: React.FC = () => {
           api.get<AuthSession>('/api/auth/session').catch(() => ({ data: null as AuthSession | null }))
         ])
         setStoreName(configResponse.data.store_name || 'Sorveteria POS')
+        setLogoUrl(configResponse.data.logo_url || '')
         setTheme(normalizeTheme(configResponse.data.theme))
         writeBrandingCache(configResponse.data)
         setCurrentUserName(sessionResponse.data?.user?.name || sessionResponse.data?.user?.email || '')
       } catch {
         const fallbackBranding = readBrandingCache()
         setStoreName(fallbackBranding?.store_name || 'Sorveteria POS')
+        setLogoUrl(fallbackBranding?.logo_url || '')
         setTheme(fallbackBranding?.theme || 'cream')
         setCurrentUserName('')
       }
@@ -216,26 +224,28 @@ const Layout: React.FC = () => {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
-    writeBrandingCache({ store_name: storeName, theme })
-  }, [theme])
+    writeBrandingCache({ store_name: storeName, logo_url: logoUrl, theme })
+  }, [logoUrl, storeName, theme])
 
   useEffect(() => {
     const handler = (event: Event) => {
       const custom = event as CustomEvent<string>
       const nextTheme = normalizeTheme(custom.detail)
       setTheme(nextTheme)
-      writeBrandingCache({ store_name: storeName, theme: nextTheme })
+      writeBrandingCache({ store_name: storeName, logo_url: logoUrl, theme: nextTheme })
     }
     window.addEventListener('sorveteria:theme', handler as EventListener)
     return () => window.removeEventListener('sorveteria:theme', handler as EventListener)
-  }, [storeName])
+  }, [logoUrl, storeName])
 
   useEffect(() => {
     const handler = (event: Event) => {
       const custom = event as CustomEvent<BrandingDetail>
       const nextStoreName = custom.detail?.store_name || 'Sorveteria POS'
+      const nextLogoUrl = custom.detail?.logo_url || ''
       setStoreName(nextStoreName)
-      writeBrandingCache({ store_name: nextStoreName, theme })
+      setLogoUrl(nextLogoUrl)
+      writeBrandingCache({ store_name: nextStoreName, logo_url: nextLogoUrl, theme })
     }
     window.addEventListener('sorveteria:branding', handler as EventListener)
     return () => window.removeEventListener('sorveteria:branding', handler as EventListener)
@@ -364,6 +374,19 @@ const Layout: React.FC = () => {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start justify-between gap-3 sm:items-center">
               <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-brand-100 bg-white shadow-sm">
+                  {logoUrl ? (
+                    <img
+                      src={resolveAssetUrl(logoUrl)}
+                      alt={`Logo de ${storeName}`}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span className="text-lg font-bold uppercase tracking-wide text-brand-700">
+                      {(storeName || 'SP').slice(0, 2)}
+                    </span>
+                  )}
+                </div>
                 <div className="min-w-0">
                   <h1 className="truncate text-xl font-display tracking-wide text-brand-700 sm:text-2xl lg:text-3xl">{storeName}</h1>
                   <p className="text-xs text-slate-500 sm:text-sm">Operacao local com modo offline-first</p>
