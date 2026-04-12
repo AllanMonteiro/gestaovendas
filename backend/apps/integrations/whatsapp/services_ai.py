@@ -5,6 +5,7 @@ import re
 from django.db import transaction
 
 from apps.catalog.models import Product, ProductPrice
+from apps.integrations.entregas_expressas.services import sync_delivery_order
 from apps.catalog.services.product_matcher import find_product_by_name
 from apps.integrations.pix_service import generate_static_pix
 from apps.integrations.viacep_service import calculate_delivery_fee, get_address_from_cep
@@ -185,8 +186,11 @@ def create_delivery_order_from_parsed(
         raw_items=raw_items,
     )
 
-    return (
+    created_order = (
         Order.objects.select_related('customer', 'delivery_meta')
         .prefetch_related('items__product')
         .get(pk=order.pk)
     )
+
+    sync_delivery_order(created_order)
+    return created_order

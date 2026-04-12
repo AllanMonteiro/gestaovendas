@@ -36,6 +36,17 @@ type StoreConfig = {
     neighborhood?: string
     fee?: string
   }>
+  delivery_integration?: {
+    enabled?: boolean
+    provider?: string
+    integration_token?: string
+    merchant_id?: string
+    pickup_location?: string
+    default_payment_method?: string
+    service_type?: string
+    enable_dynamic_return?: boolean
+    dispatch_after_seconds?: number
+  }
 }
 
 type DeliveryFeeRuleForm = {
@@ -138,6 +149,14 @@ const Configuracoes: React.FC = () => {
   const [theme, setTheme] = useState('cream')
   const [deliveryFeeDefault, setDeliveryFeeDefault] = useState('10.00')
   const [deliveryFeeRules, setDeliveryFeeRules] = useState<DeliveryFeeRuleForm[]>([createDeliveryFeeRule()])
+  const [deliveryIntegrationEnabled, setDeliveryIntegrationEnabled] = useState(false)
+  const [deliveryIntegrationToken, setDeliveryIntegrationToken] = useState('')
+  const [deliveryIntegrationMerchantId, setDeliveryIntegrationMerchantId] = useState('')
+  const [deliveryIntegrationPickupLocation, setDeliveryIntegrationPickupLocation] = useState('')
+  const [deliveryIntegrationDefaultPaymentMethod, setDeliveryIntegrationDefaultPaymentMethod] = useState('')
+  const [deliveryIntegrationServiceType, setDeliveryIntegrationServiceType] = useState('automatico')
+  const [deliveryIntegrationDynamicReturn, setDeliveryIntegrationDynamicReturn] = useState(true)
+  const [deliveryIntegrationDispatchAfterSeconds, setDeliveryIntegrationDispatchAfterSeconds] = useState('120')
 
   const [agentUrl, setAgentUrl] = useState('http://127.0.0.1:9876')
   const [autoPrintReceipt, setAutoPrintReceipt] = useState(true)
@@ -191,6 +210,14 @@ const Configuracoes: React.FC = () => {
       setTheme(normalizeTheme(cfg.theme))
       setDeliveryFeeDefault(String(cfg.delivery_fee_default ?? '10.00'))
       setDeliveryFeeRules(normalizeDeliveryFeeRules(cfg.delivery_fee_rules))
+      setDeliveryIntegrationEnabled(Boolean(cfg.delivery_integration?.enabled ?? false))
+      setDeliveryIntegrationToken(cfg.delivery_integration?.integration_token || cfg.delivery_integration?.auth_token || '')
+      setDeliveryIntegrationMerchantId(cfg.delivery_integration?.merchant_id || '')
+      setDeliveryIntegrationPickupLocation(cfg.delivery_integration?.pickup_location || '')
+      setDeliveryIntegrationDefaultPaymentMethod(cfg.delivery_integration?.default_payment_method || '')
+      setDeliveryIntegrationServiceType(cfg.delivery_integration?.service_type || 'automatico')
+      setDeliveryIntegrationDynamicReturn(Boolean(cfg.delivery_integration?.enable_dynamic_return ?? true))
+      setDeliveryIntegrationDispatchAfterSeconds(String(cfg.delivery_integration?.dispatch_after_seconds ?? 120))
       setPointsPerReal(String(cfg.points_per_real ?? 1))
       setPointValueReal(String(cfg.point_value_real ?? '0.10'))
       setMinRedeemPoints(String(cfg.min_redeem_points ?? 10))
@@ -424,6 +451,17 @@ const Configuracoes: React.FC = () => {
         pix_key: pixKey,
         delivery_fee_default: deliveryFeeDefault.replace(',', '.') || '0',
         delivery_fee_rules: buildDeliveryFeeRulesPayload(deliveryFeeRules),
+        delivery_integration: {
+          enabled: deliveryIntegrationEnabled,
+          provider: 'entregas_expressas',
+          integration_token: deliveryIntegrationToken.trim(),
+          merchant_id: deliveryIntegrationMerchantId.trim(),
+          pickup_location: deliveryIntegrationPickupLocation.trim(),
+          default_payment_method: deliveryIntegrationDefaultPaymentMethod.trim(),
+          service_type: deliveryIntegrationServiceType,
+          enable_dynamic_return: deliveryIntegrationDynamicReturn,
+          dispatch_after_seconds: Number(deliveryIntegrationDispatchAfterSeconds) || 120,
+        },
         theme: normalizeTheme(theme),
         points_per_real: Number(pointsPerReal) || 1,
         point_value_real: pointValueReal.replace(',', '.'),
@@ -819,6 +857,71 @@ const Configuracoes: React.FC = () => {
         </button>
         <p className="text-xs text-slate-500">
           Cadastre os bairros atendidos e a taxa de cada um. Quando o bairro nao estiver listado, o sistema usa a taxa padrao acima.
+        </p>
+      </div>
+
+      <div className="panel space-y-3 p-4">
+        <h2 className="font-semibold">Entregas Expressas</h2>
+        <label className="inline-flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={deliveryIntegrationEnabled}
+            onChange={(event) => setDeliveryIntegrationEnabled(event.target.checked)}
+          />
+          Enviar pedidos delivery automaticamente
+        </label>
+        <input
+          value={deliveryIntegrationToken}
+          onChange={(event) => setDeliveryIntegrationToken(event.target.value)}
+          className="w-full rounded-lg border border-brand-100 px-3 py-2"
+          placeholder="Token do PDV Integrado / Integrador"
+        />
+        <input
+          value={deliveryIntegrationPickupLocation}
+          onChange={(event) => setDeliveryIntegrationPickupLocation(event.target.value)}
+          className="w-full rounded-lg border border-brand-100 px-3 py-2"
+          placeholder="Local de coleta dos pedidos"
+        />
+        <input
+          value={deliveryIntegrationMerchantId}
+          onChange={(event) => setDeliveryIntegrationMerchantId(event.target.value)}
+          className="w-full rounded-lg border border-brand-100 px-3 py-2"
+          placeholder="Merchant/Store ID"
+        />
+        <select
+          value={deliveryIntegrationDefaultPaymentMethod}
+          onChange={(event) => setDeliveryIntegrationDefaultPaymentMethod(event.target.value)}
+          className="w-full rounded-lg border border-brand-100 bg-white px-3 py-2"
+        >
+          <option value="">Forma de pagamento padrao</option>
+          <option value="pix">PIX</option>
+          <option value="dinheiro">Dinheiro</option>
+          <option value="cartao">Cartao</option>
+        </select>
+        <select
+          value={deliveryIntegrationServiceType}
+          onChange={(event) => setDeliveryIntegrationServiceType(event.target.value)}
+          className="w-full rounded-lg border border-brand-100 bg-white px-3 py-2"
+        >
+          <option value="automatico">Automatico</option>
+          <option value="manual">Manual</option>
+        </select>
+        <label className="inline-flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={deliveryIntegrationDynamicReturn}
+            onChange={(event) => setDeliveryIntegrationDynamicReturn(event.target.checked)}
+          />
+          Habilitar retorno dinamico
+        </label>
+        <input
+          value={deliveryIntegrationDispatchAfterSeconds}
+          onChange={(event) => setDeliveryIntegrationDispatchAfterSeconds(event.target.value)}
+          className="w-full rounded-lg border border-brand-100 px-3 py-2"
+          placeholder="Chamar entregador apos quantos segundos"
+        />
+        <p className="text-xs text-slate-500">
+          Cole aqui o token copiado no portal da Entregas Expressas. Pelo que vimos no painel deles, o mesmo token atende o fluxo de extensao e integrador.
         </p>
       </div>
 

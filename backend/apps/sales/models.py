@@ -102,6 +102,10 @@ class DeliveryOrderMeta(models.Model):
     source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default=SOURCE_WHATSAPP)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_NEW)
     raw_items = models.JSONField(default=list, blank=True)
+    external_provider = models.CharField(max_length=40, blank=True, default='')
+    external_order_id = models.CharField(max_length=120, blank=True, default='')
+    external_sync_status = models.CharField(max_length=20, blank=True, default='pending')
+    external_sync_error = models.TextField(blank=True, default='')
 
     class Meta:
         indexes = [
@@ -212,6 +216,7 @@ class StoreConfig(models.Model):
     pix_key = models.CharField(max_length=100, null=True, blank=True)
     delivery_fee_default = models.DecimalField(max_digits=10, decimal_places=2, default=10)
     delivery_fee_rules = models.JSONField(default=default_delivery_fee_rules)
+    delivery_integration = models.JSONField(default=dict, blank=True)
 
     class Meta:
         verbose_name = 'Store Config'

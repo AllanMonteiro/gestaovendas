@@ -109,7 +109,7 @@ ASGI_APPLICATION = 'config.asgi.application'
 def build_database_from_url(url: str) -> dict:
     config = dj_database_url.parse(
         url,
-        conn_max_age=int(get_env('DB_CONN_MAX_AGE', default='120') or '120'),
+        conn_max_age=0,
         ssl_require=not DEBUG,
     )
     if config.get('ENGINE') == 'django.db.backends.postgresql':
@@ -124,8 +124,17 @@ def build_database_from_url(url: str) -> dict:
 
 
 DATABASE_URL = get_env('DATABASE_URL')
+USE_SQLITE = get_bool_env('USE_SQLITE', default=False)
+
 if DATABASE_URL:
     DATABASES = {'default': build_database_from_url(DATABASE_URL)}
+elif USE_SQLITE:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 else:
     DATABASES = {
         'default': {

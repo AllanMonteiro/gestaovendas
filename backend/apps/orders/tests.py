@@ -1,4 +1,5 @@
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.db import connection
 from django.test import TestCase, override_settings
@@ -346,6 +347,66 @@ class PublicDeliveryOrderCreateTests(TestCase):
         self.assertEqual(response.data['subtotal'], '8.00')
         self.assertEqual(response.data['delivery_fee'], '7.50')
         self.assertEqual(response.data['total'], '15.50')
+
+    @patch('apps.integrations.whatsapp.services_ai.sync_delivery_order')
+    def test_public_menu_dispatches_order_to_entregas_expressas_when_enabled(self, sync_delivery_order_mock):
+        StoreConfig.objects.update_or_create(
+            id=1,
+            defaults={
+                'delivery_fee_default': Decimal('10.00'),
+                'delivery_integration': {
+                    'enabled': True,
+                    'provider': 'entregas_expressas',
+                    'integration_token': 'secret',
+                    'merchant_id': 'store-1',
+                    'pickup_location': 'Balcao principal',
+                    'service_type': 'automatico',
+                },
+            },
+        )
+
+        response = self.client.post(
+            '/api/orders/public/',
+            {
+                'customer_name': 'Cliente Integrado',
+                'customer_phone': '91999990000',
+                'address': 'Rua das Flores, 10',
+                'neighborhood': 'Centro',
+                'payment_method': 'PIX',
+                'items': [
+                    {
+                        'product_id': self.product.id,
+                        'product_name': 'Cascao',
+                        'quantity': 1,
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        sync_delivery_order_mock.assert_called_once()
+
+    def test_config_exposes_delivery_integration_settings(self):
+        StoreConfig.objects.update_or_create(
+            id=1,
+            defaults={
+                'delivery_integration': {
+                    'enabled': True,
+                    'provider': 'entregas_expressas',
+                    'integration_token': 'secret',
+                    'merchant_id': 'store-1',
+                    'pickup_location': 'Balcao principal',
+                    'service_type': 'automatico',
+                },
+            },
+        )
+
+        response = self.staff_client.get('/api/config')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['delivery_integration']['provider'], 'entregas_expressas')
+        self.assertTrue(response.data['delivery_integration']['enabled'])
 
 
 @override_settings(REQUIRE_AUTH=False)

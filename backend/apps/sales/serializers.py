@@ -1,5 +1,6 @@
 from urllib.parse import urlparse
 from django.conf import settings
+from django.core.files.storage import default_storage
 from rest_framework import serializers
 from apps.sales.models import Order, OrderItem, Payment, CashSession, CashMove, StoreConfig
 
@@ -91,6 +92,17 @@ class CashMoveSerializer(serializers.ModelSerializer):
 
 
 class StoreConfigAssetSerializer(serializers.ModelSerializer):
+    def _media_asset_exists(self, value):
+        if not isinstance(value, str) or not value.startswith(settings.MEDIA_URL):
+            return True
+        relative_path = value[len(settings.MEDIA_URL):].lstrip('/')
+        if not relative_path:
+            return False
+        try:
+            return default_storage.exists(relative_path)
+        except Exception:
+            return False
+
     def _normalize_media_asset_value(self, value):
         if not isinstance(value, str):
             return value
@@ -113,6 +125,8 @@ class StoreConfigAssetSerializer(serializers.ModelSerializer):
         value = self._normalize_media_asset_value(value)
         if not isinstance(value, str) or not value:
             return value
+        if value.startswith(settings.MEDIA_URL) and not self._media_asset_exists(value):
+            return ''
         if value.startswith('http://') or value.startswith('https://') or value.startswith('data:'):
             return value
         request = self.context.get('request')
@@ -167,6 +181,7 @@ class StoreConfigUiSerializer(StoreConfigAssetSerializer):
             'receipt_footer_lines',
             'delivery_fee_default',
             'delivery_fee_rules',
+            'delivery_integration',
         ]
 
 
