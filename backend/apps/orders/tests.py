@@ -408,6 +408,84 @@ class PublicDeliveryOrderCreateTests(TestCase):
         self.assertEqual(response.data['delivery_integration']['provider'], 'entregas_expressas')
         self.assertTrue(response.data['delivery_integration']['enabled'])
 
+    @patch('apps.integrations.entregas_expressas.services.EntregasExpressasClient.send_order')
+    def test_sync_delivery_order_sends_when_endpoint_is_configured(self, send_order_mock):
+        send_order_mock.return_value = {'id': 'delivery-123'}
+        StoreConfig.objects.update_or_create(
+            id=1,
+            defaults={
+                'delivery_integration': {
+                    'enabled': True,
+                    'provider': 'entregas_expressas',
+                    'integration_token': 'secret',
+                    'endpoint_url': 'https://api.example.com/orders',
+                    'merchant_id': 'store-1',
+                },
+            },
+        )
+
+        response = self.client.post(
+            '/api/orders/public/',
+            {
+                'customer_name': 'Cliente Integrado',
+                'customer_phone': '91999990000',
+                'address': 'Rua das Flores, 10',
+                'neighborhood': 'Centro',
+                'payment_method': 'PIX',
+                'items': [
+                    {
+                        'product_id': self.product.id,
+                        'product_name': 'Cascao',
+                        'quantity': 1,
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        send_order_mock.assert_called_once()
+        order = Order.objects.select_related('delivery_meta').get(id=response.data['id'])
+        self.assertEqual(order.delivery_meta.external_sync_status, 'sent')
+        self.assertEqual(order.delivery_meta.external_order_id, 'delivery-123')
+
+    def test_sync_delivery_order_marks_pending_when_only_token_is_configured(self):
+        StoreConfig.objects.update_or_create(
+            id=1,
+            defaults={
+                'delivery_integration': {
+                    'enabled': True,
+                    'provider': 'entregas_expressas',
+                    'integration_token': 'secret',
+                    'merchant_id': 'store-1',
+                },
+            },
+        )
+
+        response = self.client.post(
+            '/api/orders/public/',
+            {
+                'customer_name': 'Cliente Integrado',
+                'customer_phone': '91999990000',
+                'address': 'Rua das Flores, 10',
+                'neighborhood': 'Centro',
+                'payment_method': 'PIX',
+                'items': [
+                    {
+                        'product_id': self.product.id,
+                        'product_name': 'Cascao',
+                        'quantity': 1,
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        order = Order.objects.select_related('delivery_meta').get(id=response.data['id'])
+        self.assertEqual(order.delivery_meta.external_sync_status, 'pending')
+        self.assertIn('PDV Integrado', order.delivery_meta.external_sync_error)
+
 
 @override_settings(REQUIRE_AUTH=False)
 class DeliveryOrdersQueryEfficiencyTests(TestCase):

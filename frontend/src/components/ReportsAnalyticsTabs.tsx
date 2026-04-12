@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react'
-import { useQueries, useQuery } from '@tanstack/react-query'
+import { useQueries } from '@tanstack/react-query'
 import {
   Bar,
   BarChart,
   CartesianGrid,
-  Legend,
+  Cell,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -76,10 +76,10 @@ type SalesPoint = {
   total: number
 }
 
-type ComparePoint = {
+type MonthComparisonPoint = {
   label: string
-  atual: number
-  anterior: number
+  total: number
+  period: 'Mes atual' | 'Mes anterior'
 }
 
 type StockTurnoverPoint = {
@@ -204,22 +204,27 @@ const buildCumulativeSeries = (days: string[], rows: DailySalesRow[]) => {
   })
 }
 
-const buildMonthComparisonSeries = (currentRows: DailySalesRow[], previousRows: DailySalesRow[], referenceDate: Date): ComparePoint[] => {
-  const currentMonthDays = buildMonthDays(referenceDate)
+const buildMonthComparisonSeries = (
+  currentRows: DailySalesRow[],
+  previousRows: DailySalesRow[],
+  referenceDate: Date
+): MonthComparisonPoint[] => {
   const previousMonthDate = addMonths(referenceDate, -1)
-  const previousMonthDays = buildMonthDays(previousMonthDate)
-  const maxDays = Math.max(currentMonthDays.length, previousMonthDays.length)
-  const currentMap = new Map(currentRows.map((row) => [parseDateSafe(row.day).getDate(), parseNumber(row.total)]))
-  const previousMap = new Map(previousRows.map((row) => [parseDateSafe(row.day).getDate(), parseNumber(row.total)]))
+  const currentTotal = currentRows.reduce((sum, row) => sum + parseNumber(row.total), 0)
+  const previousTotal = previousRows.reduce((sum, row) => sum + parseNumber(row.total), 0)
 
-  return Array.from({ length: maxDays }, (_, index) => {
-    const day = index + 1
-    return {
-      label: String(day).padStart(2, '0'),
-      atual: currentMap.get(day) || 0,
-      anterior: previousMap.get(day) || 0,
-    }
-  })
+  return [
+    {
+      label: previousMonthDate.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }),
+      total: previousTotal,
+      period: 'Mes anterior',
+    },
+    {
+      label: referenceDate.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }),
+      total: currentTotal,
+      period: 'Mes atual',
+    },
+  ]
 }
 
 const buildYearCumulativeSeries = (rows: DailySalesRow[]) => {
@@ -421,7 +426,7 @@ const SalesChartsSection: React.FC<{
 
       <ChartCard
         title="Mes atual vs anterior"
-        description="Comparacao diaria entre o mes de referencia e o mes imediatamente anterior."
+        description="Comparacao do faturamento total entre o mes de referencia e o mes imediatamente anterior."
         meta={<ChartPill>Comparativo</ChartPill>}
       >
         {comparisonSeries.length === 0 ? (
@@ -429,15 +434,20 @@ const SalesChartsSection: React.FC<{
         ) : (
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={comparisonSeries} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+              <BarChart data={comparisonSeries} margin={{ top: 8, right: 8, left: -12, bottom: 0 }} barCategoryGap="36%">
                 <CartesianGrid vertical={false} strokeDasharray="3 6" className="ui-chart-grid" />
                 <XAxis dataKey="label" tickLine={false} axisLine={false} tick={axisStyle} />
                 <YAxis tickLine={false} axisLine={false} tick={axisStyle} tickFormatter={(value) => formatCompactBRL(Number(value || 0))} />
                 <Tooltip content={<AnalyticsTooltip valueFormatter={(value) => formatBRL(value)} />} />
-                <Legend />
-                <Line type="monotone" dataKey="atual" name="Mes atual" stroke="#e55c2f" strokeWidth={3} dot={false} activeDot={{ r: 5 }} />
-                <Line type="monotone" dataKey="anterior" name="Mes anterior" stroke="#facfb5" strokeWidth={3} dot={false} activeDot={{ r: 5 }} />
-              </LineChart>
+                <Bar dataKey="total" name="Faturamento mensal" radius={[12, 12, 4, 4]} maxBarSize={88}>
+                  {comparisonSeries.map((entry) => (
+                    <Cell
+                      key={entry.label}
+                      fill={entry.period === 'Mes atual' ? '#e55c2f' : '#facfb5'}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
             </ResponsiveContainer>
           </div>
         )}

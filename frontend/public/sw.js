@@ -86,7 +86,16 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', copy))
           return resp
         })
-        .catch(() => caches.match('/index.html'))
+        .catch(async () => {
+          const cached = await caches.match('/index.html')
+          return (
+            cached ||
+            new Response('Offline', {
+              status: 503,
+              headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+            })
+          )
+        })
     )
     return
   }
@@ -103,21 +112,40 @@ self.addEventListener('fetch', (event) => {
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
           return resp
         })
-        .catch(() => caches.match(event.request))
+        .catch(async () => {
+          const cached = await caches.match(event.request)
+          return (
+            cached ||
+            new Response('', {
+              status: 504,
+              headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+            })
+          )
+        })
     )
     return
   }
 
   event.respondWith(
     caches.match(event.request).then((cached) =>
-      cached || fetch(event.request).then((resp) => {
-        if (!resp.ok) {
+      cached ||
+      fetch(event.request)
+        .then((resp) => {
+          if (!resp.ok) {
+            return resp
+          }
+          const copy = resp.clone()
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
           return resp
-        }
-        const copy = resp.clone()
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
-        return resp
-      }).catch(() => cached)
+        })
+        .catch(
+          () =>
+            cached ||
+            new Response('', {
+              status: 504,
+              headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+            })
+        )
     )
   )
 })

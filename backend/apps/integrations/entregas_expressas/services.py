@@ -19,6 +19,7 @@ def _read_config() -> dict[str, Any]:
     return {
         'enabled': bool(raw.get('enabled')),
         'provider': str(raw.get('provider') or '').strip().lower(),
+        'endpoint_url': str(raw.get('endpoint_url') or '').strip(),
         'integration_token': str(raw.get('integration_token') or raw.get('auth_token') or '').strip(),
         'merchant_id': str(raw.get('merchant_id') or '').strip(),
         'pickup_location': str(raw.get('pickup_location') or '').strip(),
@@ -110,7 +111,8 @@ def sync_delivery_order(order: Order, *, force: bool = False) -> dict[str, Any] 
         meta.external_provider = PROVIDER_NAME if cfg['provider'] == PROVIDER_NAME else ''
         meta.external_sync_status = 'disabled'
         meta.external_sync_error = ''
-        meta.save(update_fields=['external_provider', 'external_sync_status', 'external_sync_error'])
+        meta.external_order_id = ''
+        meta.save(update_fields=['external_provider', 'external_order_id', 'external_sync_status', 'external_sync_error'])
         return None
 
     if meta.external_sync_status == 'sent' and meta.external_order_id and not force:
@@ -122,9 +124,31 @@ def sync_delivery_order(order: Order, *, force: bool = False) -> dict[str, Any] 
     meta.save(update_fields=['external_provider', 'external_sync_status', 'external_sync_error'])
 
     payload = build_order_payload(order, cfg=cfg)
-    meta.external_order_id = ''
-    meta.external_sync_status = 'configured'
+    if not cfg['endpoint_url']:
+        meta.external_order_id = ''
+        meta.external_sync_status = 'pending'
+        meta.external_sync_error = 'Aguardando sincronizacao pelo PDV Integrado com token configurado.'
+        meta.save(update_fields=['external_order_id', 'external_sync_status', 'external_sync_error'])
+        logger.info(
+            'Pedido %s aguardando sincronizacao da Entregas Expressas; token configurado sem endpoint direto.',
+            order.id,
+        )
+        return payload
+
+    client = EntregasExpressasClient(cfg['endpoint_url'], cfg['integration_token'])
+    try:
+        response = client.send_order(payload)
+    except Exception as exc:
+        meta.external_order_id = ''
+        meta.external_sync_status = 'error'
+        meta.external_sync_error = str(exc)
+        meta.save(update_fields=['external_order_id', 'external_sync_status', 'external_sync_error'])
+        logger.exception('Falha ao enviar pedido %s para Entregas Expressas', order.id)
+        raise
+
+    meta.external_order_id = _extract_external_order_id(response)
+    meta.external_sync_status = 'sent'
     meta.external_sync_error = ''
     meta.save(update_fields=['external_order_id', 'external_sync_status', 'external_sync_error'])
-    logger.info('Pedido %s marcado para integracao Entregas Expressas via token do PDV Integrado', order.id)
-    return payload
+    logger.info('Pedido %s enviado para Entregas Expressas', order.id)
+    return response
