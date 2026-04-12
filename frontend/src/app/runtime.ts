@@ -1,4 +1,5 @@
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '')
+let restoreSessionPromise: Promise<unknown> | null = null
 
 const isLocalHostname = (hostname: string) =>
   hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
@@ -60,4 +61,11 @@ export const resolveAssetUrl = (value?: string | null) => {
 
   const normalizedPath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`
   return new URL(normalizedPath, `${getApiBaseUrl()}/`).toString()
+}
+
+export const restoreSessionOnStartup = <T>(restore: () => Promise<T>) => {
+  if (!restoreSessionPromise) {
+    restoreSessionPromise = restore()
+  }
+  return restoreSessionPromise as Promise<T>
 }

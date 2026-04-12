@@ -1,11 +1,11 @@
-import React, { useEffect, useRef, useState, Suspense, lazy } from 'react'
+import React, { useCallback, useEffect, useRef, useState, Suspense, lazy } from 'react'
 import { createBrowserRouter, NavLink, Outlet, useLocation, useNavigate, useRouteError } from 'react-router-dom'
 import { useOutboxSync } from './useSync'
 import { api } from '../api/client'
 import { type AuthSession } from './auth'
 import { resolveAssetUrl } from './runtime'
 import { LoginGate } from '../components/LoginGate'
-import { connectWS } from '../api/ws'
+import { useSocket } from '../hooks/useSocket'
 
 // Lazy loading das paginas para reduzir o bundle inicial
 const PDV = lazy(() => import('../pages/PDV'))
@@ -64,7 +64,9 @@ const readBrandingCache = () => {
     const parsed = JSON.parse(raw) as StoreHeaderConfig
     return {
       store_name: parsed.store_name || 'Sorveteria POS',
-      logo_url: parsed.logo_url || '',
+      // Avoid reviving stale media URLs from localStorage; the current logo
+      // should always come from the latest server config for this session.
+      logo_url: '',
       theme: normalizeTheme(parsed.theme),
     }
   } catch {
@@ -81,7 +83,7 @@ const writeBrandingCache = (branding: StoreHeaderConfig) => {
       BRANDING_CACHE_KEY,
       JSON.stringify({
         store_name: branding.store_name || 'Sorveteria POS',
-        logo_url: branding.logo_url || '',
+        logo_url: '',
         theme: normalizeTheme(branding.theme),
       })
     )
@@ -187,6 +189,7 @@ const Layout: React.FC = () => {
   const deliveryPollTimerRef = useRef<number | null>(null)
   const deliveryRefreshTimerRef = useRef<number | null>(null)
   const deliveryAlertTimeoutsRef = useRef<Record<string, number>>({})
+  const fetchDeliveryOrdersRef = useRef<(options?: { notifyOnNew?: boolean }) => void>(() => undefined)
 
   const links = [
     { to: '/', label: 'Caixa' },
@@ -322,6 +325,10 @@ const Layout: React.FC = () => {
       }
     }
 
+    fetchDeliveryOrdersRef.current = (options) => {
+      void fetchDeliveryOrders(options)
+    }
+
     void fetchDeliveryOrders()
 
     deliveryPollTimerRef.current = window.setInterval(() => {
@@ -337,25 +344,8 @@ const Layout: React.FC = () => {
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
-    const ws = connectWS('/ws/pdv', (data) => {
-      if (document.visibilityState !== 'visible') {
-        return
-      }
-      if (data?.event === 'order_created' && data?.source === 'delivery') {
-        if (deliveryRefreshTimerRef.current !== null) {
-          window.clearTimeout(deliveryRefreshTimerRef.current)
-        }
-        deliveryRefreshTimerRef.current = window.setTimeout(() => {
-          if (document.visibilityState !== 'visible' || !navigator.onLine) {
-            return
-          }
-          void fetchDeliveryOrders({ notifyOnNew: true })
-        }, DELIVERY_ALERT_REFRESH_DEBOUNCE_MS)
-      }
-    })
-
     return () => {
-      ws.close()
+      fetchDeliveryOrdersRef.current = () => undefined
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       if (deliveryPollTimerRef.current !== null) {
         window.clearInterval(deliveryPollTimerRef.current)
@@ -367,6 +357,36 @@ const Layout: React.FC = () => {
     }
   }, [location.pathname])
 
+  const handlePdvRealtimeMessage = useCallback((data: unknown) => {
+    if (location.pathname === '/delivery' || document.visibilityState !== 'visible') {
+      return
+    }
+
+    if (
+      typeof data === 'object' &&
+      data !== null &&
+      'event' in data &&
+      'source' in data &&
+      (data as { event?: unknown }).event === 'order_created' &&
+      (data as { source?: unknown }).source === 'delivery'
+    ) {
+      if (deliveryRefreshTimerRef.current !== null) {
+        window.clearTimeout(deliveryRefreshTimerRef.current)
+      }
+      deliveryRefreshTimerRef.current = window.setTimeout(() => {
+        if (document.visibilityState !== 'visible' || !navigator.onLine) {
+          return
+        }
+        fetchDeliveryOrdersRef.current({ notifyOnNew: true })
+      }, DELIVERY_ALERT_REFRESH_DEBOUNCE_MS)
+    }
+  }, [location.pathname])
+
+  useSocket('/ws/pdv', {
+    enabled: location.pathname !== '/delivery',
+    onMessage: handlePdvRealtimeMessage,
+  })
+
   return (
     <div className="app-shell">
       <header className="sticky top-0 z-20 border-b border-brand-100 bg-white/80 backdrop-blur">
@@ -374,12 +394,13 @@ const Layout: React.FC = () => {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="flex items-start justify-between gap-3 sm:items-center">
               <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-brand-100 bg-white shadow-sm">
+                <div className="flex h-18 w-18 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-brand-100 bg-white shadow-sm sm:h-20 sm:w-20">
                   {logoUrl ? (
                     <img
                       src={resolveAssetUrl(logoUrl)}
                       alt={`Logo de ${storeName}`}
                       className="h-full w-full object-cover"
+                      onError={() => setLogoUrl('')}
                     />
                   ) : (
                     <span className="text-lg font-bold uppercase tracking-wide text-brand-700">

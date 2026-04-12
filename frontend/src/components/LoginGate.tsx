@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
-import { type AuthSession, clearTokens, saveTokens } from '../app/auth'
+import { type AuthSession, clearTokens } from '../app/auth'
+import { useAuth } from '../hooks/useAuth'
 
 type LoginGateProps = {
   children: React.ReactNode
@@ -29,6 +30,7 @@ const isTemporarySessionError = (error: unknown) => {
 }
 
 export const LoginGate: React.FC<LoginGateProps> = ({ children }) => {
+  const { login, logout, refreshSession } = useAuth()
   const [loading, setLoading] = useState(true)
   const [session, setSession] = useState<AuthSession | null>(null)
   const [email, setEmail] = useState('admin@admin.com')
@@ -49,8 +51,8 @@ export const LoginGate: React.FC<LoginGateProps> = ({ children }) => {
       }
 
       try {
-        const response = await api.get<AuthSession>('/api/auth/session')
-        setSession(response.data)
+        const response = await refreshSession()
+        setSession(response)
         setFeedback('')
         setLoading(false)
         return
@@ -74,7 +76,7 @@ export const LoginGate: React.FC<LoginGateProps> = ({ children }) => {
         : 'Erro ao carregar sessao. Verifique se o servidor esta rodando.'
     )
     setLoading(false)
-  }, [])
+  }, [refreshSession])
 
   useEffect(() => {
     void loadSession()
@@ -88,9 +90,9 @@ export const LoginGate: React.FC<LoginGateProps> = ({ children }) => {
   const handleLogin = async () => {
     setBusy(true)
     try {
-      const response = await api.post('/api/auth/login', { email, password })
-      saveTokens(response.data.access, response.data.refresh)
-      await loadSession()
+      const nextSession = await login(email, password)
+      setSession(nextSession)
+      setFeedback('')
     } catch {
       setFeedback('Login ou senha invalidos.')
     } finally {
@@ -113,8 +115,8 @@ export const LoginGate: React.FC<LoginGateProps> = ({ children }) => {
   }
 
   const handleLogout = async () => {
-    clearTokens()
-    await loadSession()
+    const nextSession = await logout()
+    setSession(nextSession)
   }
 
   useEffect(() => {
@@ -123,7 +125,7 @@ export const LoginGate: React.FC<LoginGateProps> = ({ children }) => {
     }
     window.addEventListener('sorveteria:logout', handler)
     return () => window.removeEventListener('sorveteria:logout', handler)
-  }, [])
+  }, [logout])
 
   if (loading) {
     return <div className="panel p-6 text-sm text-slate-500">Carregando sessao...</div>

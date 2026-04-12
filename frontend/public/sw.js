@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sorveteria-pos-v8'
+const CACHE_NAME = 'sorveteria-pos-v9'
 const ASSETS = ['/', '/index.html', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png']
 
 const extractAssetUrls = (html) => {
@@ -10,6 +10,15 @@ const extractAssetUrls = (html) => {
     }
   }
   return [...assetUrls]
+}
+
+const isCacheableProtocol = (requestUrl) => {
+  try {
+    const { protocol } = new URL(requestUrl)
+    return protocol === 'http:' || protocol === 'https:'
+  } catch {
+    return false
+  }
 }
 
 self.addEventListener('install', (event) => {
@@ -50,6 +59,7 @@ self.addEventListener('message', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return
+  if (!isCacheableProtocol(event.request.url)) return
   const url = new URL(event.request.url)
 
   // Nunca cacheie API: evita status/caixa desatualizado.

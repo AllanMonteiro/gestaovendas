@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { clearTokens, getAccessToken, getRefreshToken, saveTokens } from '../app/auth'
+import { clearTokens, getAccessToken, refreshAccessToken } from '../app/auth'
 import { isOutboxUrlSupported, listOutbox, removeOutbox, markOutboxError } from './outbox'
 
 const buildSyncHeaders = (headers: Record<string, string> | undefined, accessToken: string | null) => {
@@ -14,27 +14,6 @@ const buildSyncHeaders = (headers: Record<string, string> | undefined, accessTok
     nextHeaders.Authorization = `Bearer ${accessToken}`
   }
   return nextHeaders
-}
-
-const refreshAccessToken = async (baseURL: string) => {
-  const refresh = getRefreshToken()
-  if (!refresh) {
-    clearTokens()
-    return null
-  }
-  try {
-    const response = await axios.post(
-      `${baseURL}/api/auth/refresh`,
-      { refresh },
-      { headers: {}, timeout: 8000 }
-    )
-    const nextAccess = response.data.access as string
-    saveTokens(nextAccess, refresh)
-    return nextAccess
-  } catch {
-    clearTokens()
-    return null
-  }
 }
 
 const shouldDiscardOnResponseStatus = (status?: number) => [400, 403, 404, 409, 422].includes(Number(status))
@@ -63,8 +42,9 @@ export async function syncOutbox(baseURL: string) {
         await send()
       } catch (err: any) {
         if (err?.response?.status === 401) {
-          accessToken = await refreshAccessToken(baseURL)
+          accessToken = await refreshAccessToken()
           if (!accessToken) {
+            clearTokens()
             throw err
           }
           await send()

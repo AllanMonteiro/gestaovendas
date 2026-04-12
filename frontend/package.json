@@ -10,6 +10,7 @@
     "lint": "eslint . --ext ts,tsx"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.97.0",
     "axios": "^1.6.8",
     "dexie": "^4.0.4",
     "react": "^18.2.0",
