@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { api } from '../api/client'
 import { type AuthSession, clearTokens } from '../app/auth'
 import { useAuth } from '../hooks/useAuth'
@@ -29,8 +30,63 @@ const isTemporarySessionError = (error: unknown) => {
   return status === null || [408, 425, 429, 500, 502, 503, 504].includes(status)
 }
 
+const PublicEntryScreen: React.FC<{ allowSystemAccess?: boolean }> = ({ allowSystemAccess = true }) => (
+  <div className="mx-auto flex min-h-[80vh] max-w-5xl items-center px-3 py-6 sm:px-4">
+    <section className="panel w-full overflow-hidden">
+      <div className="grid gap-0 lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="bg-gradient-to-br from-brand-50 via-white to-amber-50 p-6 sm:p-8 lg:p-10">
+          <p className="text-sm font-semibold uppercase tracking-[0.24em] text-brand-600">Pedido Online</p>
+          <h1 className="mt-4 max-w-xl text-4xl font-semibold leading-tight text-slate-900 sm:text-5xl">
+            Abra o cardapio e faca seu pedido sem depender do painel interno.
+          </h1>
+          <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
+            Esta entrada publica foi pensada para links compartilhados em Instagram, WhatsApp e navegadores internos.
+            Se voce veio pelo perfil da loja, toque no botao abaixo para acessar o cardapio.
+          </p>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <a
+              href="/cardapio"
+              className="rounded-2xl bg-gradient-to-r from-brand-600 to-brand-500 px-5 py-3 text-sm font-semibold text-white shadow-sm"
+            >
+              Abrir cardapio
+            </a>
+            {allowSystemAccess ? (
+              <a
+                href="/pdv"
+                className="rounded-2xl border border-brand-200 bg-white px-5 py-3 text-sm font-semibold text-brand-700"
+              >
+                Entrar no sistema
+              </a>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="flex flex-col justify-center gap-4 border-t border-brand-100 bg-white/90 p-6 sm:p-8 lg:border-l lg:border-t-0">
+          <div className="rounded-2xl border border-brand-100 bg-brand-50/70 p-4">
+            <p className="text-xs font-bold uppercase tracking-[0.22em] text-brand-600">Link recomendado</p>
+            <p className="mt-2 break-all text-sm font-medium text-slate-700">/cardapio</p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="text-sm font-semibold text-slate-900">Se abriu pelo Instagram</p>
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              Caso o navegador interno esteja instavel, toque em "Abrir cardapio" e, se necessario, abra o link no navegador do celular.
+            </p>
+          </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="text-sm font-semibold text-slate-900">Acesso interno</p>
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              O painel administrativo continua protegido. A area publica e apenas para o cliente montar e enviar o pedido.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+)
+
 export const LoginGate: React.FC<LoginGateProps> = ({ children }) => {
   const { login, logout, refreshSession } = useAuth()
+  const location = useLocation()
   const [loading, setLoading] = useState(true)
   const [session, setSession] = useState<AuthSession | null>(null)
   const [email, setEmail] = useState('admin@admin.com')
@@ -132,6 +188,10 @@ export const LoginGate: React.FC<LoginGateProps> = ({ children }) => {
   }
 
   if (session === null) {
+    if (location.pathname === '/') {
+      return <PublicEntryScreen allowSystemAccess={false} />
+    }
+
     return (
       <div className="mx-auto flex min-h-[70vh] max-w-3xl items-center justify-center px-3 py-6 sm:px-4">
         <section className="panel w-full p-6 sm:p-8">
@@ -166,6 +226,10 @@ export const LoginGate: React.FC<LoginGateProps> = ({ children }) => {
 
   if (!requiresLogin) {
     return <>{children}</>
+  }
+
+  if (location.pathname === '/') {
+    return <PublicEntryScreen />
   }
 
   return (
