@@ -1,49 +1,40 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { api } from '../api/client'
-
-type Category = {
-  id: number
-  name: string
-  price?: string | null
-  sort_order?: number
-  active?: boolean
-}
-
-type Product = {
-  id: number
-  category: number
-  name: string
-  active: boolean
-  sold_by_weight: boolean
-  stock: string | number
-}
-
-type ProductPrice = {
-  id?: number
-  product?: number
-  price: string
-  cost: string
-  freight: string
-  other: string
-  tax_pct: string
-  overhead_pct: string
-  margin_pct: string
-  ideal_price: string
-  profit: string
-}
-
-const sortCategories = (items: Category[]) =>
-  [...items].sort((left, right) => {
-    const leftOrder = Number(left.sort_order ?? 0)
-    const rightOrder = Number(right.sort_order ?? 0)
-    if (leftOrder !== rightOrder) {
-      return leftOrder - rightOrder
-    }
-    return left.name.localeCompare(right.name, 'pt-BR')
-  })
-
-const sortProducts = (items: Product[]) =>
-  [...items].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR'))
+import React, { useCallback, useMemo, useState } from 'react'
+import { useCategories } from '../features/catalog/hooks/useCategories'
+import {
+  useCreateCategoryMutation,
+  useCreateProductMutation,
+  useDeleteCategoryMutation,
+  useToggleProductActiveMutation,
+  useUpdateProductMutation,
+  useUpdateProductPriceMutation,
+} from '../features/catalog/hooks/useCatalogMutations'
+import { useProducts } from '../features/catalog/hooks/useProducts'
+import { useProductPrices } from '../features/catalog/hooks/useProductPrices'
+import type { Category, Product, ProductPrice } from '../features/catalog/types'
+import {
+  Badge,
+  Button,
+  Card,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  FilterBar,
+  Input,
+  LoadingState,
+  Modal,
+  PageHeader,
+  SectionHeader,
+  Select,
+  StatCard,
+  Table,
+  TableBody,
+  TableCell,
+  TableElement,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+} from '../components/ui'
 
 const buildFallbackPrice = (product: Product, categoryList: Category[]): ProductPrice => ({
   price: String(categoryList.find((category) => category.id === product.category)?.price || '0'),
@@ -74,9 +65,14 @@ const getApiErrorText = (error: unknown, fallback: string) => {
 }
 
 const Produtos: React.FC = () => {
-  const [products, setProducts] = useState<Product[]>([])
-  const [categories, setCategories] = useState<Category[]>([])
-  const [priceMap, setPriceMap] = useState<Record<number, ProductPrice>>({})
+  const productsQuery = useProducts()
+  const categoriesQuery = useCategories()
+  const createCategoryMutation = useCreateCategoryMutation()
+  const deleteCategoryMutation = useDeleteCategoryMutation()
+  const createProductMutation = useCreateProductMutation()
+  const toggleProductActiveMutation = useToggleProductActiveMutation()
+  const updateProductMutation = useUpdateProductMutation()
+  const updateProductPriceMutation = useUpdateProductPriceMutation()
   const [feedback, setFeedback] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -97,10 +93,7 @@ const Produtos: React.FC = () => {
   const [createCategoryName, setCreateCategoryName] = useState('')
   const [createCategorySortOrder, setCreateCategorySortOrder] = useState('0')
   const [createCategoryActive, setCreateCategoryActive] = useState(true)
-  const [creatingCategory, setCreatingCategory] = useState(false)
   const [deleteCategoryId, setDeleteCategoryId] = useState('')
-  const [deletingCategory, setDeletingCategory] = useState(false)
-  const [creatingProduct, setCreatingProduct] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   const [editName, setEditName] = useState('')
   const [editCategory, setEditCategory] = useState('')
@@ -113,7 +106,41 @@ const Produtos: React.FC = () => {
   const [editPrice, setEditPrice] = useState('0,00')
   const [editMarginPct, setEditMarginPct] = useState('30,00')
   const [editStock, setEditStock] = useState('0,000')
-  const [savingEdit, setSavingEdit] = useState(false)
+  const products = productsQuery.data ?? []
+  const categories = categoriesQuery.data ?? []
+  const creatingCategory = createCategoryMutation.isPending
+  const deletingCategory = deleteCategoryMutation.isPending
+  const creatingProduct = createProductMutation.isPending
+  const savingEdit = updateProductMutation.isPending
+  const productIds = useMemo(
+    () => products.map((product) => product.id),
+    [products]
+  )
+  const productPricesQuery = useProductPrices(productIds, {
+    enabled: productsQuery.isSuccess,
+  })
+
+  const priceMap = useMemo(() => {
+    const fallbackMap = buildFallbackPriceMap(products, categories)
+    const productIdSet = new Set(productIds)
+    const fetchedPrices = productPricesQuery.data ?? []
+    const mappedPrices = Object.fromEntries(
+      fetchedPrices
+        .filter((price) => typeof price.product === 'number' && productIdSet.has(Number(price.product)))
+        .map((price) => [Number(price.product), price])
+    )
+    return { ...fallbackMap, ...mappedPrices }
+  }, [categories, productIds, productPricesQuery.data, products])
+
+  const auxiliaryFeedback = useMemo(() => {
+    if (categoriesQuery.isError) {
+      return 'Falha ao carregar categorias.'
+    }
+    if (productPricesQuery.isError) {
+      return 'Falha ao carregar precos auxiliares.'
+    }
+    return ''
+  }, [categoriesQuery.isError, productPricesQuery.isError])
 
   const categoryById = useMemo(() => {
     const map = new Map<number, string>()
@@ -138,6 +165,16 @@ const Produtos: React.FC = () => {
     })
   }, [categoryById, products, searchTerm])
 
+  const activeProductsCount = useMemo(
+    () => products.filter((product) => product.active).length,
+    [products]
+  )
+
+  const soldByWeightCount = useMemo(
+    () => products.filter((product) => product.sold_by_weight).length,
+    [products]
+  )
+
   const selectedDeleteCategory = useMemo(
     () => categories.find((category) => String(category.id) === deleteCategoryId) ?? null,
     [categories, deleteCategoryId]
@@ -150,51 +187,14 @@ const Produtos: React.FC = () => {
     return products.filter((product) => String(product.category) === deleteCategoryId).length
   }, [deleteCategoryId, products])
 
-  const mergePriceForProduct = useCallback((product: Product, price?: ProductPrice, categoryList?: Category[]) => {
-    setPriceMap((current) => ({
-      ...current,
-      [product.id]: price ?? buildFallbackPrice(product, categoryList ?? categories),
-    }))
-  }, [categories])
-
-  const loadData = useCallback(async () => {
-    try {
-      const [productsResp, categoriesResp] = await Promise.all([
-        api.get<Product[]>('/api/products'),
-        api.get<Category[]>('/api/categories')
-      ])
-      const nextProducts = sortProducts(productsResp.data)
-      const nextCategories = sortCategories(categoriesResp.data)
-      setProducts(nextProducts)
-      setCategories(nextCategories)
-
-      const fallbackMap = buildFallbackPriceMap(nextProducts, nextCategories)
-
-      const productIds = nextProducts.map((product) => product.id)
-      const productIdSet = new Set(productIds)
-
-      try {
-        const priceQuery = productIds.join(',')
-        const pricesResp = priceQuery
-          ? await api.get<ProductPrice[]>(`/api/products/prices?product_ids=${priceQuery}`)
-          : { data: [] as ProductPrice[] }
-        const mapped = Object.fromEntries(
-          pricesResp.data
-            .filter((price) => typeof price.product === 'number' && productIdSet.has(Number(price.product)))
-            .map((price) => [Number(price.product), price])
-        )
-        setPriceMap({ ...fallbackMap, ...mapped })
-      } catch {
-        setPriceMap(fallbackMap)
-      }
-    } catch {
-      setFeedback('Falha ao carregar produtos.')
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadData()
-  }, [loadData])
+  const handleRefresh = async () => {
+    setFeedback('')
+    await Promise.all([
+      productsQuery.refetch(),
+      categoriesQuery.refetch(),
+      productPricesQuery.refetch(),
+    ])
+  }
 
   const toDecimal = (value: string) => value.replace(',', '.').trim()
 
@@ -250,6 +250,10 @@ const Produtos: React.FC = () => {
   }
 
   const openCreateProductModal = () => {
+    if (categoriesQuery.isLoading) {
+      setFeedback('Aguarde o carregamento das categorias.')
+      return
+    }
     if (categories.length === 0) {
       setFeedback('Cadastre ao menos uma categoria antes de criar produto. Use o botao "Nova Categoria".')
       return
@@ -266,6 +270,10 @@ const Produtos: React.FC = () => {
   }
 
   const openDeleteCategoryModal = () => {
+    if (categoriesQuery.isLoading) {
+      setFeedback('Aguarde o carregamento das categorias.')
+      return
+    }
     if (categories.length === 0) {
       setFeedback('Nao ha categorias cadastradas para excluir.')
       return
@@ -285,15 +293,12 @@ const Produtos: React.FC = () => {
       return
     }
 
-    setCreatingCategory(true)
     try {
-      const response = await api.post<Category>('/api/categories', {
+      const nextCategory = await createCategoryMutation.mutateAsync({
         name: createCategoryName.trim(),
         sort_order: sortOrder,
         active: createCategoryActive
       })
-      const nextCategory = response.data
-      setCategories((current) => sortCategories([...current, nextCategory]))
       setFeedback('Categoria criada com sucesso.')
       setShowCreateCategoryModal(false)
       if (!createCategory) {
@@ -301,8 +306,6 @@ const Produtos: React.FC = () => {
       }
     } catch (error: unknown) {
       setFeedback(getApiErrorText(error, 'Falha ao criar categoria.'))
-    } finally {
-      setCreatingCategory(false)
     }
   }
 
@@ -323,18 +326,13 @@ const Produtos: React.FC = () => {
       return
     }
 
-    setDeletingCategory(true)
     try {
-      await api.delete(`/api/categories/${deleteCategoryId}`)
-      const deletedCategoryId = Number(deleteCategoryId)
-      setCategories((current) => current.filter((category) => category.id !== deletedCategoryId))
+      await deleteCategoryMutation.mutateAsync(Number(deleteCategoryId))
       setFeedback('Categoria excluida com sucesso.')
       setShowDeleteCategoryModal(false)
       setDeleteCategoryId('')
     } catch (error: unknown) {
       setFeedback(getApiErrorText(error, 'Falha ao excluir categoria.'))
-    } finally {
-      setDeletingCategory(false)
     }
   }
 
@@ -361,19 +359,13 @@ const Produtos: React.FC = () => {
       return
     }
 
-    setCreatingProduct(true)
-
     try {
-      const createResp = await api.post<Product>('/api/products', {
+      await createProductMutation.mutateAsync({
         category: categoryId,
         name: createName.trim(),
         active: createActive,
         sold_by_weight: createSoldByWeight,
-        stock: toDecimal(createStock || '0')
-      })
-
-      const createdProduct = createResp.data
-      const priceResp = await api.put<ProductPrice>(`/api/products/${createdProduct.id}/price`, {
+        stock: toDecimal(createStock || '0'),
         price: toDecimal(createPrice || '0'),
         cost: toDecimal(createCost || '0'),
         freight: toDecimal(createFreight || '0'),
@@ -382,15 +374,10 @@ const Produtos: React.FC = () => {
         overhead_pct: toDecimal(createOverheadPct || '0'),
         margin_pct: toDecimal(createMarginPct || '0')
       })
-
-      setProducts((current) => sortProducts([...current, createdProduct]))
-      mergePriceForProduct(createdProduct, priceResp.data)
       setFeedback('Produto criado com sucesso.')
       setShowCreateModal(false)
-    } catch {
-      setFeedback('Falha ao criar produto.')
-    } finally {
-      setCreatingProduct(false)
+    } catch (error: unknown) {
+      setFeedback(getApiErrorText(error, 'Falha ao criar produto.'))
     }
   }
 
@@ -402,14 +389,14 @@ const Produtos: React.FC = () => {
     }
 
     try {
-      const response = await api.put<ProductPrice>(`/api/products/${product.id}/price`, {
+      await updateProductPriceMutation.mutateAsync({
+        productId: product.id,
         price: priceInput.replace(',', '.'),
         cost: priceMap[product.id]?.cost || '0'
       })
-      mergePriceForProduct(product, response.data)
       setFeedback('Preco atualizado.')
-    } catch {
-      setFeedback('Falha ao atualizar preco.')
+    } catch (error: unknown) {
+      setFeedback(getApiErrorText(error, 'Falha ao atualizar preco.'))
     }
   }
 
@@ -420,32 +407,23 @@ const Produtos: React.FC = () => {
       return
     }
     try {
-      const response = await api.put<ProductPrice>(`/api/products/${product.id}/price`, {
+      await updateProductPriceMutation.mutateAsync({
+        productId: product.id,
         price: info.ideal_price,
         cost: info.cost
       })
-      mergePriceForProduct(product, response.data)
       setFeedback('Preco ideal aplicado.')
-    } catch {
-      setFeedback('Falha ao aplicar preco ideal.')
+    } catch (error: unknown) {
+      setFeedback(getApiErrorText(error, 'Falha ao aplicar preco ideal.'))
     }
   }
 
   const handleToggleActive = async (product: Product) => {
     try {
-      const response = await api.put<Product>(`/api/products/${product.id}`, {
-        category: product.category,
-        name: product.name,
-        active: !product.active,
-        sold_by_weight: product.sold_by_weight,
-        stock: product.stock
-      })
-      setProducts((current) =>
-        sortProducts(current.map((item) => (item.id === product.id ? response.data : item)))
-      )
+      await toggleProductActiveMutation.mutateAsync({ product })
       setFeedback('Status do produto atualizado.')
-    } catch {
-      setFeedback('Falha ao alterar status do produto.')
+    } catch (error: unknown) {
+      setFeedback(getApiErrorText(error, 'Falha ao alterar status do produto.'))
     }
   }
 
@@ -479,17 +457,14 @@ const Produtos: React.FC = () => {
       return
     }
 
-    setSavingEdit(true)
     try {
-      const payload = {
+      await updateProductMutation.mutateAsync({
+        id: editingProduct.id,
         category: categoryId,
         name: editName.trim(),
         active: editingProduct.active,
         sold_by_weight: editSoldByWeight,
-        stock: toDecimal(editStock || '0')
-      }
-      const productResp = await api.put<Product>(`/api/products/${editingProduct.id}`, payload)
-      const priceResp = await api.put<ProductPrice>(`/api/products/${editingProduct.id}/price`, {
+        stock: toDecimal(editStock || '0'),
         price: toDecimal(editPrice || '0'),
         cost: toDecimal(editCost || '0'),
         freight: toDecimal(editFreight || '0'),
@@ -498,16 +473,10 @@ const Produtos: React.FC = () => {
         overhead_pct: toDecimal(editOverheadPct || '0'),
         margin_pct: toDecimal(editMarginPct || '0')
       })
-      setProducts((current) =>
-        sortProducts(current.map((item) => (item.id === editingProduct.id ? productResp.data : item)))
-      )
-      mergePriceForProduct(productResp.data, priceResp.data)
       setFeedback('Produto atualizado com sucesso.')
       setEditingProduct(null)
-    } catch {
-      setFeedback('Falha ao atualizar produto.')
-    } finally {
-      setSavingEdit(false)
+    } catch (error: unknown) {
+      setFeedback(getApiErrorText(error, 'Falha ao atualizar produto.'))
     }
   }
 
@@ -524,104 +493,132 @@ const Produtos: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="space-y-1">
-          <h2 className="text-xl font-semibold">Produtos</h2>
-          <p className="text-sm text-slate-500">
-            {filteredProducts.length} produto(s) encontrado(s)
-          </p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <input
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Pesquisar produto ou categoria"
-            className="w-full rounded-lg border border-brand-200 px-3 py-2 text-sm sm:w-72"
+      <PageHeader
+        eyebrow="Catalogo"
+        title="Produtos"
+        description="Gerencie itens, categorias e precificacao com uma hierarquia visual mais clara, sem mudar o comportamento atual."
+        meta={<Badge variant="brand">{filteredProducts.length} produto(s)</Badge>}
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => void handleRefresh()}>
+              {productsQuery.isFetching ? 'Atualizando...' : 'Atualizar'}
+            </Button>
+            <Button variant="ghost" onClick={openCreateCategoryModal}>Nova categoria</Button>
+            <Button variant="danger" onClick={openDeleteCategoryModal}>Excluir categoria</Button>
+            <Button variant="primary" onClick={() => openCreateProductModal()}>Novo produto</Button>
+          </>
+        }
+      />
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <StatCard label="Itens visiveis" value={filteredProducts.length} description="Resultado atual da busca." tone="accent" />
+        <StatCard label="Produtos ativos" value={activeProductsCount} description="Disponiveis para venda." />
+        <StatCard label="Venda por peso" value={soldByWeightCount} description="Itens configurados por kg." />
+      </div>
+
+      <FilterBar
+        title="Busca e filtros"
+        description="Pesquise por produto ou categoria e mantenha as acoes principais sempre acessiveis."
+        actions={searchTerm ? <Badge variant="info">Filtro ativo</Badge> : <Badge variant="neutral">Lista completa</Badge>}
+      >
+        <Input
+          label="Pesquisar produto"
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+          placeholder="Pesquisar produto ou categoria"
+          className="lg:max-w-md"
+        />
+        {searchTerm ? <Button variant="secondary" onClick={() => setSearchTerm('')}>Limpar busca</Button> : null}
+      </FilterBar>
+
+      {feedback || auxiliaryFeedback ? (
+        <Card className="p-4" tone={feedback ? 'warning' : 'muted'}>
+          <p className="text-sm font-medium text-slate-700">{feedback || auxiliaryFeedback}</p>
+        </Card>
+      ) : null}
+
+      <Card className="p-0">
+        <div className="border-b border-[color:var(--line)] px-4 py-4 sm:px-5">
+          <SectionHeader
+            title="Itens cadastrados"
+            description="Visualize estoque, preco atual, preco ideal e acoes operacionais em uma tabela mais consistente."
+            meta={<Badge variant="neutral">{categories.length} categoria(s)</Badge>}
           />
-          {searchTerm ? (
-            <button
-              onClick={() => setSearchTerm('')}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700"
-            >
-              Limpar
-            </button>
-          ) : null}
         </div>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <div className="flex gap-2">
-          <button onClick={() => void loadData()} className="px-3 py-2 rounded-lg border border-brand-200 text-brand-700">
-            Atualizar
-          </button>
-          <button onClick={openCreateCategoryModal} className="px-3 py-2 rounded-lg border border-brand-300 text-brand-700">
-            Nova Categoria
-          </button>
-          <button onClick={openDeleteCategoryModal} className="px-3 py-2 rounded-lg border border-rose-300 text-rose-700">
-            Excluir Categoria
-          </button>
-          <button onClick={() => openCreateProductModal()} className="px-3 py-2 rounded-lg bg-brand-600 text-white">
-            Novo Produto
-          </button>
-        </div>
-      </div>
-
-      {feedback ? <p className="text-sm text-brand-700">{feedback}</p> : null}
-
-      <div className="panel p-4 overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-slate-500">
-              <th className="pb-2">Produto</th>
-              <th className="pb-2">Categoria</th>
-              <th className="pb-2 text-right">Estoque</th>
-              <th className="pb-2">Preco</th>
-              <th className="pb-2">Ideal</th>
-              <th className="pb-2">Lucro</th>
-              <th className="pb-2">Status</th>
-              <th className="pb-2">Acoes</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredProducts.length === 0 ? (
-              <tr>
-                <td colSpan={8} className="py-8 text-center text-slate-500">
-                  Nenhum produto encontrado para a pesquisa informada.
-                </td>
-              </tr>
-            ) : filteredProducts.map((product) => {
-              const pricing = priceMap[product.id]
-              return (
-                <tr key={product.id} className="border-t border-brand-100">
-                  <td className="py-2">{product.name}</td>
-                  <td className="py-2">{categoryById.get(product.category) || product.category}</td>
-                  <td className="py-2 text-right">{String(product.stock || '0')}</td>
-                  <td className="py-2">{formatBRL(pricing?.price || '0')}</td>
-                  <td className="py-2">{formatBRL(pricing?.ideal_price || '0')}</td>
-                  <td className="py-2">{formatBRL(pricing?.profit || '0')}</td>
-                  <td className="py-2">{product.active ? 'Ativo' : 'Inativo'}</td>
-                  <td className="py-2">
-                    <div className="flex flex-wrap gap-2">
-                      <button onClick={() => void handleSetPrice(product)} className="rounded px-2 py-1 border border-brand-200 text-brand-700">
-                        Preco
-                      </button>
-                      <button onClick={() => openEditProduct(product)} className="rounded px-2 py-1 border border-indigo-300 text-indigo-700">
-                        Editar
-                      </button>
-                      <button onClick={() => void handleApplyIdealPrice(product)} className="rounded px-2 py-1 border border-emerald-300 text-emerald-700">
-                        Aplicar ideal
-                      </button>
-                      <button onClick={() => void handleToggleActive(product)} className="rounded px-2 py-1 border border-slate-300 text-slate-700">
-                        {product.active ? 'Inativar' : 'Ativar'}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
+        <Table>
+          <TableElement>
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell>Produto</TableHeaderCell>
+                <TableHeaderCell>Categoria</TableHeaderCell>
+                <TableHeaderCell className="text-right">Estoque</TableHeaderCell>
+                <TableHeaderCell>Preco</TableHeaderCell>
+                <TableHeaderCell>Ideal</TableHeaderCell>
+                <TableHeaderCell>Lucro</TableHeaderCell>
+                <TableHeaderCell>Status</TableHeaderCell>
+                <TableHeaderCell>Acoes</TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {productsQuery.isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={8}>
+                    <LoadingState title="Carregando produtos" description="Buscando categorias, estoque e precificacao." />
+                  </TableCell>
+                </TableRow>
+              ) : productsQuery.isError ? (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-rose-700">
+                    Falha ao carregar produtos.
+                  </TableCell>
+                </TableRow>
+              ) : filteredProducts.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={8}>
+                    <EmptyState
+                      title="Nenhum produto encontrado"
+                      description="Ajuste a pesquisa ou cadastre um novo item para preencher o catalogo."
+                      action={<Button variant="primary" onClick={() => openCreateProductModal()}>Novo produto</Button>}
+                    />
+                  </TableCell>
+                </TableRow>
+              ) : filteredProducts.map((product) => {
+                const pricing = priceMap[product.id]
+                return (
+                  <TableRow key={product.id}>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <div className="font-semibold text-slate-900">{product.name}</div>
+                        {product.sold_by_weight ? <Badge variant="info">Vendido por kg</Badge> : <Badge variant="neutral">Unidade</Badge>}
+                      </div>
+                    </TableCell>
+                    <TableCell>{categoryById.get(product.category) || product.category}</TableCell>
+                    <TableCell className="text-right font-medium">{String(product.stock || '0')}</TableCell>
+                    <TableCell className="font-semibold text-slate-900">{formatBRL(pricing?.price || '0')}</TableCell>
+                    <TableCell>{formatBRL(pricing?.ideal_price || '0')}</TableCell>
+                    <TableCell>{formatBRL(pricing?.profit || '0')}</TableCell>
+                    <TableCell>
+                      <Badge variant={product.active ? 'success' : 'warning'}>
+                        {product.active ? 'Ativo' : 'Inativo'}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap gap-2">
+                        <Button size="sm" variant="secondary" onClick={() => void handleSetPrice(product)}>Preco</Button>
+                        <Button size="sm" variant="ghost" onClick={() => openEditProduct(product)}>Editar</Button>
+                        <Button size="sm" variant="success" onClick={() => void handleApplyIdealPrice(product)}>Aplicar ideal</Button>
+                        <Button size="sm" variant={product.active ? 'warning' : 'secondary'} onClick={() => void handleToggleActive(product)}>
+                          {product.active ? 'Inativar' : 'Ativar'}
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
+            </TableBody>
+          </TableElement>
+        </Table>
+      </Card>
 
       {editingProduct ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4">

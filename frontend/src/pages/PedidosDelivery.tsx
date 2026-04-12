@@ -1,47 +1,46 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { api } from '../api/client'
-import { connectWS } from '../api/ws'
+import { useQueryClient } from '@tanstack/react-query'
+import {
+  useDeleteDeliveryOrderMutation,
+  useUpdateDeliveryOrderStatusMutation,
+} from '../features/orders/hooks/useDeliveryOrderMutations'
+import { useDeliveryOrders } from '../features/orders/hooks/useDeliveryOrders'
+import { ordersQueryKeys } from '../features/orders/queryKeys'
+import type { DeliveryOrder } from '../features/orders/types'
+import { useSocket } from '../hooks/useSocket'
+import {
+  Badge,
+  Button,
+  Card,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  SectionHeader,
+  LoadingState,
+  PageHeader,
+  StatCard,
+} from '../components/ui'
 import '../styles.css'
-
-interface Order {
-  items?: Array<{
-    product_name: string
-    quantity: string | number
-    unit_price?: string
-    total?: string
-  }>
-  id: string
-  customer_name: string
-  customer_phone: string
-  address: string
-  subtotal: string
-  delivery_fee: string
-  total: string
-  status: string
-  created_at: string
-  source: string
-  pix_payload?: string
-}
-
-type OrdersResponse = Order[] | { results?: Order[] } | { data?: Order[] }
-
-const normalizeOrders = (payload: OrdersResponse): Order[] => {
-  if (Array.isArray(payload)) {
-    return payload
-  }
-  if (payload && !Array.isArray(payload) && 'results' in payload && Array.isArray(payload.results)) {
-    return payload.results
-  }
-  if (payload && !Array.isArray(payload) && 'data' in payload && Array.isArray(payload.data)) {
-    return payload.data
-  }
-  return []
-}
 
 const sourceLabel: Record<string, string> = {
   web: 'WEB',
   pdv: 'PDV',
   whatsapp: 'WHATSAPP',
+}
+
+const statusLabel: Record<string, string> = {
+  novo: 'Novo',
+  preparo: 'Em preparo',
+  despachado: 'Saiu para entrega',
+  entregue: 'Entregue',
+}
+
+const statusVariant = (status: string): 'info' | 'warning' | 'success' | 'neutral' => {
+  if (status === 'entregue') return 'success'
+  if (status === 'despachado') return 'info'
+  if (status === 'preparo') return 'warning'
+  return 'neutral'
 }
 
 const formatBRL = (value: string | number) =>
@@ -50,99 +49,38 @@ const formatBRL = (value: string | number) =>
 const DELIVERY_POLL_INTERVAL_MS = 10000
 const DELIVERY_REFRESH_DEBOUNCE_MS = 150
 
-const buildOrdersSnapshot = (orders: Order[]) =>
-  JSON.stringify(
-    orders.map((order) => [
-      order.id,
-      order.customer_name || '',
-      order.customer_phone || '',
-      order.address || '',
-      order.subtotal,
-      order.delivery_fee,
-      order.total,
-      order.status,
-      order.created_at,
-      order.source || '',
-      order.pix_payload || '',
-      (order.items || []).map((item) => [item.product_name, item.quantity, item.unit_price || '', item.total || '']),
-    ])
-  )
-
 const PedidosDelivery: React.FC = () => {
-  const [orders, setOrders] = useState<Order[]>([])
-  const [loading, setLoading] = useState(true)
+  const queryClient = useQueryClient()
+  const ordersQuery = useDeliveryOrders()
+  const updateStatusMutation = useUpdateDeliveryOrderStatusMutation()
+  const deleteOrderMutation = useDeleteDeliveryOrderMutation()
   const [busyOrderId, setBusyOrderId] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
   const wsRefreshTimerRef = useRef<number | null>(null)
   const pollTimerRef = useRef<number | null>(null)
-  const ordersSnapshotRef = useRef('')
-  const fetchRequestIdRef = useRef(0)
-
-  const applyOrders = useCallback((nextOrders: Order[]) => {
-    const snapshot = buildOrdersSnapshot(nextOrders)
-    if (snapshot === ordersSnapshotRef.current) {
-      return
-    }
-    ordersSnapshotRef.current = snapshot
-    setOrders(nextOrders)
-  }, [])
-
-  const fetchOrders = useCallback(async (options?: { silent?: boolean }) => {
-    const requestId = ++fetchRequestIdRef.current
-    try {
-      const response = await api.get<OrdersResponse>('/api/orders/')
-      if (requestId !== fetchRequestIdRef.current) {
-        return
-      }
-      applyOrders(normalizeOrders(response.data))
-      setFeedback((current) => (current?.type === 'error' ? null : current))
-    } catch (err: any) {
-      if (requestId !== fetchRequestIdRef.current) {
-        return
-      }
-      if (!options?.silent) {
-        const msg = err.response?.data?.detail || 'Erro ao carregar pedidos de delivery.'
-        setFeedback({ type: 'error', text: msg })
-      }
-    } finally {
-      if (requestId === fetchRequestIdRef.current) {
-        setLoading(false)
-      }
-    }
-  }, [applyOrders])
+  const orders = ordersQuery.data ?? []
+  const preparingCount = orders.filter((order) => order.status === 'preparo').length
+  const dispatchedCount = orders.filter((order) => order.status === 'despachado').length
+  const deliveredCount = orders.filter((order) => order.status === 'entregue').length
+  const refreshOrders = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ordersQueryKeys.delivery.all })
+  }, [queryClient])
 
   useEffect(() => {
-    void fetchOrders()
-
     pollTimerRef.current = window.setInterval(() => {
       if (document.visibilityState === 'visible' && navigator.onLine) {
-        void fetchOrders({ silent: true })
+        refreshOrders()
       }
     }, DELIVERY_POLL_INTERVAL_MS)
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && navigator.onLine) {
-        void fetchOrders({ silent: true })
+        refreshOrders()
       }
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
-    const ws = connectWS('/ws/pdv', (data) => {
-      if (document.visibilityState !== 'visible') {
-        return
-      }
-      if (data?.event === 'order_created' && data?.source === 'delivery') {
-        if (wsRefreshTimerRef.current !== null) {
-          window.clearTimeout(wsRefreshTimerRef.current)
-        }
-        wsRefreshTimerRef.current = window.setTimeout(() => {
-          void fetchOrders({ silent: true })
-        }, DELIVERY_REFRESH_DEBOUNCE_MS)
-      }
-    })
-
     return () => {
-      ws.close()
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       if (wsRefreshTimerRef.current !== null) {
         window.clearTimeout(wsRefreshTimerRef.current)
@@ -151,17 +89,49 @@ const PedidosDelivery: React.FC = () => {
         window.clearInterval(pollTimerRef.current)
       }
     }
-  }, [fetchOrders])
+  }, [refreshOrders])
+
+  const handleRealtimeOrderMessage = useCallback((data: unknown) => {
+    if (document.visibilityState !== 'visible') {
+      return
+    }
+
+    if (
+      typeof data !== 'object' ||
+      data === null ||
+      !('event' in data)
+    ) {
+      return
+    }
+
+    const eventName = String((data as { event?: unknown }).event ?? '')
+    const source = String((data as { source?: unknown }).source ?? '')
+    const isRelevantDeliveryEvent =
+      (eventName === 'order_created' && source === 'delivery') ||
+      eventName === 'order_status_changed' ||
+      eventName === 'order_paid' ||
+      eventName === 'order_canceled'
+
+    if (!isRelevantDeliveryEvent) {
+      return
+    }
+
+    if (wsRefreshTimerRef.current !== null) {
+      window.clearTimeout(wsRefreshTimerRef.current)
+    }
+    wsRefreshTimerRef.current = window.setTimeout(() => {
+      refreshOrders()
+    }, DELIVERY_REFRESH_DEBOUNCE_MS)
+  }, [refreshOrders])
+
+  useSocket('/ws/pdv', {
+    onMessage: handleRealtimeOrderMessage,
+  })
 
   const updateStatus = async (id: string, status: string) => {
     setBusyOrderId(id)
     try {
-      const response = await api.patch<Order>(`/api/orders/${id}/`, { status })
-      setOrders((current) => {
-        const nextOrders = current.map((order) => (order.id === id ? response.data : order))
-        ordersSnapshotRef.current = buildOrdersSnapshot(nextOrders)
-        return nextOrders
-      })
+      await updateStatusMutation.mutateAsync({ id, status })
       setFeedback({ type: 'ok', text: 'Status do pedido atualizado.' })
     } catch (err: any) {
       const msg = err.response?.data?.detail || 'Nao foi possivel atualizar o status do pedido.'
@@ -171,19 +141,14 @@ const PedidosDelivery: React.FC = () => {
     }
   }
 
-  const handleDeleteOrder = async (order: Order) => {
+  const handleDeleteOrder = async (order: DeliveryOrder) => {
     const confirmed = window.confirm(`Excluir o pedido #${order.id}? Essa acao nao pode ser desfeita.`)
     if (!confirmed) {
       return
     }
     setBusyOrderId(order.id)
     try {
-      await api.delete(`/api/orders/${order.id}/`)
-      setOrders((current) => {
-        const nextOrders = current.filter((item) => item.id !== order.id)
-        ordersSnapshotRef.current = buildOrdersSnapshot(nextOrders)
-        return nextOrders
-      })
+      await deleteOrderMutation.mutateAsync(order.id)
       setFeedback({ type: 'ok', text: 'Pedido excluido com sucesso.' })
     } catch (err: any) {
       const msg = err.response?.data?.detail || 'Nao foi possivel excluir o pedido.'
@@ -206,58 +171,73 @@ const PedidosDelivery: React.FC = () => {
 
   return (
     <div className="mx-auto max-w-[1200px] p-6">
-      <div className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-center">
-        <h1 className="text-3xl font-bold">Gestao de Delivery</h1>
-
-        <div className="flex gap-2">
-          <button
-            onClick={() => window.open(publicMenuUrl, '_blank', 'noopener,noreferrer')}
-            className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50"
-          >
-            <span>Web</span> Abrir Cardapio
-          </button>
-          <button
-            onClick={() => void handleCopyCatalogLink()}
-            className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
-          >
-            <span>Link</span> Copiar Link
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        eyebrow="Delivery"
+        title="Gestao de delivery"
+        description="Acompanhe os pedidos do dia com leitura mais clara, mantendo as mesmas acoes de status e exclusao."
+        meta={
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="brand">{orders.length} pedido(s)</Badge>
+            <Badge variant="info">Tempo real</Badge>
+          </div>
+        }
+        actions={
+          <>
+            <Button variant="success" onClick={() => window.open(publicMenuUrl, '_blank', 'noopener,noreferrer')}>
+              Abrir cardapio
+            </Button>
+            <Button variant="primary" onClick={() => void handleCopyCatalogLink()}>
+              Copiar link
+            </Button>
+          </>
+        }
+      />
 
       {feedback ? (
-        <div
-          className={`mb-6 rounded-xl border p-4 ${
-            feedback.type === 'ok'
-              ? 'border-emerald-100 bg-emerald-50 text-emerald-800'
-              : 'border-rose-100 bg-rose-50 text-rose-800'
-          }`}
-        >
+        <Card className="p-4" tone={feedback.type === 'ok' ? 'success' : 'danger'}>
           <p className="text-sm font-medium">{feedback.text}</p>
-        </div>
+        </Card>
       ) : null}
 
-      {loading ? (
-        <div className="py-20 text-center text-slate-500">Carregando pedidos de hoje...</div>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <StatCard label="Pedidos no painel" value={orders.length} description="Fila total carregada." tone="accent" />
+        <StatCard label="Em preparo" value={preparingCount} description="Pedidos em producao." tone="warning" />
+        <StatCard label="Saiu para entrega" value={dispatchedCount} description="Pedidos em rota." />
+        <StatCard label="Entregues" value={deliveredCount} description="Concluidos no dia." tone="success" />
+      </div>
+
+      {ordersQuery.isLoading ? (
+        <LoadingState title="Carregando pedidos de hoje" description="Preparando a fila atual de delivery." />
+      ) : ordersQuery.isError ? (
+        <Card className="p-6 text-center" tone="danger">Erro ao carregar pedidos de delivery.</Card>
       ) : (
         <>
-          <h2 className="mb-4 text-sm font-bold uppercase tracking-widest text-slate-400">Pedidos Disponiveis</h2>
+          <Card className="mb-4 p-4 sm:p-5" tone="accent">
+            <SectionHeader
+              title="Fila de atendimento"
+              description="Os cards mantem o mesmo comportamento operacional, com mais contraste e melhor separacao entre dados e acoes."
+              meta={<Badge variant={orders.length > 0 ? 'warning' : 'neutral'}>{orders.length > 0 ? 'Pedidos ativos' : 'Sem pedidos'}</Badge>}
+            />
+          </Card>
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
             {orders.length === 0 ? (
-              <div className="col-span-full rounded-3xl border-2 border-dashed border-slate-200 bg-slate-50 py-20 text-center text-slate-400">
-                Nenhum pedido de delivery para exibir no momento.
+              <div className="col-span-full">
+                <EmptyState
+                  title="Nenhum pedido de delivery para exibir"
+                  description="Quando um novo pedido chegar, ele sera listado aqui sem alterar o fluxo atual."
+                />
               </div>
             ) : (
               orders.map((order) => (
-                <div
+                <Card
                   key={order.id}
-                  className="flex flex-col justify-between rounded-3xl border border-slate-100 bg-white p-6 shadow-sm transition hover:shadow-md"
+                  className="flex flex-col justify-between p-6 transition hover:-translate-y-0.5"
                 >
                   <div>
                     <div className="mb-4 flex items-start justify-between">
-                      <span className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-blue-700">
+                      <Badge variant="info" className="uppercase">
                         {sourceLabel[order.source] || order.source}
-                      </span>
+                      </Badge>
                       <div className="text-right">
                         <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Total</p>
                         <p className="text-xl font-black text-slate-800">{formatBRL(order.total)}</p>
@@ -265,7 +245,10 @@ const PedidosDelivery: React.FC = () => {
                     </div>
 
                     <div className="mb-6">
-                      <h3 className="text-lg font-bold text-slate-800">{order.customer_name}</h3>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-lg font-bold text-slate-800">{order.customer_name}</h3>
+                        <Badge variant={statusVariant(order.status)}>{statusLabel[order.status] || order.status}</Badge>
+                      </div>
                       <p className="mt-1 text-xs font-semibold text-slate-400">
                         #{order.id} • {new Date(order.created_at).toLocaleTimeString()}
                       </p>
@@ -278,7 +261,7 @@ const PedidosDelivery: React.FC = () => {
                         </p>
                       </div>
                       {order.items && order.items.length > 0 ? (
-                        <div className="mt-4 rounded-2xl bg-slate-50 p-3">
+                        <Card className="mt-4 p-3" tone="muted">
                           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Itens do pedido</p>
                           <div className="mt-2 space-y-2">
                             {order.items.map((item, index) => (
@@ -291,13 +274,13 @@ const PedidosDelivery: React.FC = () => {
                               </div>
                             ))}
                           </div>
-                        </div>
+                        </Card>
                       ) : null}
                     </div>
                   </div>
 
                   <div className="space-y-4">
-                    <div className="rounded-2xl border border-slate-100 bg-white p-4">
+                    <Card className="p-4">
                       <div className="flex items-center justify-between text-sm text-slate-600">
                         <span>Subtotal dos itens</span>
                         <span className="font-semibold text-slate-800">{formatBRL(order.subtotal)}</span>
@@ -310,61 +293,60 @@ const PedidosDelivery: React.FC = () => {
                         <span className="text-sm font-bold uppercase tracking-wider text-slate-500">Total</span>
                         <span className="text-base font-black text-slate-900">{formatBRL(order.total)}</span>
                       </div>
-                    </div>
+                    </Card>
 
                     {order.pix_payload ? (
-                      <div className="rounded-2xl bg-slate-50 p-4">
+                      <Card className="p-4" tone="muted">
                         <div className="mb-2 flex items-center justify-between">
                           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Copia e Cola PIX</p>
-                          <button
+                          <Button
                             onClick={() => navigator.clipboard.writeText(order.pix_payload || '')}
-                            className="text-[10px] font-bold uppercase text-brand-600"
+                            size="sm"
+                            variant="ghost"
                           >
                             Copiar
-                          </button>
+                          </Button>
                         </div>
                         <code className="block break-all text-[10px] text-slate-500">{order.pix_payload}</code>
-                      </div>
+                      </Card>
                     ) : null}
 
                     <div className="grid grid-cols-2 gap-2">
-                      <button
+                      <Button
                         disabled={busyOrderId === order.id}
                         onClick={() => void updateStatus(order.id, 'preparo')}
-                        className={`rounded-2xl py-2 text-[10px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                          order.status === 'preparo' ? 'bg-orange-500 text-white shadow-lg shadow-orange-200' : 'bg-slate-100 text-slate-600'
-                        }`}
+                        variant={order.status === 'preparo' ? 'warning' : 'secondary'}
+                        size="sm"
                       >
                         Preparo
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         disabled={busyOrderId === order.id}
                         onClick={() => void updateStatus(order.id, 'despachado')}
-                        className={`rounded-2xl py-2 text-[10px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                          order.status === 'despachado' ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-200' : 'bg-slate-100 text-slate-600'
-                        }`}
+                        variant={order.status === 'despachado' ? 'primary' : 'secondary'}
+                        size="sm"
                       >
                         Saiu
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         disabled={busyOrderId === order.id}
                         onClick={() => void updateStatus(order.id, 'entregue')}
-                        className={`rounded-2xl py-2 text-[10px] font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
-                          order.status === 'entregue' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-200' : 'bg-slate-100 text-slate-600'
-                        }`}
+                        variant={order.status === 'entregue' ? 'success' : 'secondary'}
+                        size="sm"
                       >
                         Entregue
-                      </button>
-                      <button
+                      </Button>
+                      <Button
                         disabled={busyOrderId === order.id}
                         onClick={() => void handleDeleteOrder(order)}
-                        className="rounded-2xl bg-rose-50 py-2 text-[10px] font-bold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        variant="danger"
+                        size="sm"
                       >
                         {busyOrderId === order.id ? 'Excluindo...' : 'Excluir'}
-                      </button>
+                      </Button>
                     </div>
                   </div>
-                </div>
+                </Card>
               ))
             )}
           </div>

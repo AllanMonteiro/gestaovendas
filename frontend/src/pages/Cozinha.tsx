@@ -1,19 +1,31 @@
-﻿import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
-import { connectWS } from '../api/ws'
+import {
+  useMarkKitchenOrderReadyMutation,
+  useMoveKitchenOrderBackToPrepMutation,
+  useQueueKitchenOrderPrintMutation,
+} from '../features/orders/hooks/useDeliveryOrderMutations'
+import { useKitchenQueue } from '../features/orders/hooks/useKitchenQueue'
+import { ordersQueryKeys } from '../features/orders/queryKeys'
+import type { KitchenOrder } from '../features/orders/types'
+import { useSocket } from '../hooks/useSocket'
+import {
+  Badge,
+  Button,
+  Card,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  EmptyState,
+  LoadingState,
+  PageHeader,
+  SectionHeader,
+  StatCard,
+} from '../components/ui'
 
-type KitchenOrder = {
-  id: string
-  display_number?: string
-  status: string
-  created_at: string
-  subtotal?: string | number
-  discount?: string | number
-  total?: string | number
-  items: Array<{ id: number; product?: number; qty?: string | number; total?: string | number; weight_grams?: number | null; notes?: string | null }>
-}
-
-const getOrderDisplayNumber = (order: Pick<KitchenOrder, 'id' | 'display_number'>) => order.display_number || order.id.slice(0, 8)
+const getOrderDisplayNumber = (order: Pick<KitchenOrder, 'id' | 'display_number'>) =>
+  order.display_number || order.id.slice(0, 8)
 
 type StoreConfigResponse = {
   store_name?: string
@@ -43,45 +55,58 @@ const waitLabel = (createdAt: string) => {
 }
 
 const Cozinha: React.FC = () => {
-  const [orders, setOrders] = useState<KitchenOrder[]>([])
+  const queryClient = useQueryClient()
+  const kitchenQueueQuery = useKitchenQueue()
+  const markReadyMutation = useMarkKitchenOrderReadyMutation()
+  const moveBackToPrepMutation = useMoveKitchenOrderBackToPrepMutation()
+  const queueKitchenPrintMutation = useQueueKitchenOrderPrintMutation()
   const [feedback, setFeedback] = useState('')
   const [agentUrl, setAgentUrl] = useState('')
   const [storeLabel, setStoreLabel] = useState('Sorveteria POS')
   const [storeAddress, setStoreAddress] = useState('')
+  const orders = kitchenQueueQuery.data ?? []
+  const newOrdersCount = orders.filter((order) => order.status === 'OPEN').length
+  const sentOrdersCount = orders.filter((order) => order.status === 'SENT').length
+  const readyOrdersCount = orders.filter((order) => order.status === 'READY').length
 
-  const loadQueue = useCallback(async () => {
+  const refreshKitchenQueue = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ordersQueryKeys.kitchen.all })
+  }, [queryClient])
+
+  const loadKitchenConfig = useCallback(async () => {
     try {
-      const [queueResponse, configResponse] = await Promise.all([
-        api.get<KitchenOrder[]>('/api/kitchen/queue'),
-        api.get<StoreConfigResponse>('/api/config/ui')
-      ])
-      setOrders(queueResponse.data)
+      const configResponse = await api.get<StoreConfigResponse>('/api/config/ui')
       setAgentUrl(configResponse.data.printer?.agent_url?.trim() ?? '')
       setStoreLabel(configResponse.data.company_name || configResponse.data.store_name || 'Sorveteria POS')
       setStoreAddress(configResponse.data.address || '')
     } catch {
-      setFeedback('Falha ao carregar fila da cozinha.')
+      setFeedback('Falha ao carregar configuracoes da cozinha.')
     }
   }, [])
 
   useEffect(() => {
-    void loadQueue()
-  }, [loadQueue])
+    void loadKitchenConfig()
+  }, [loadKitchenConfig])
 
-  useEffect(() => {
-    const ws = connectWS('/ws/kitchen', (data) => {
-      if (data?.event === 'order_sent' || data?.event === 'order_ready' || data?.event === 'order_status_changed') {
-        void loadQueue()
-      }
-    })
-    return () => ws.close()
-  }, [loadQueue])
+  const handleKitchenRealtimeMessage = useCallback((data: unknown) => {
+    if (typeof data !== 'object' || data === null || !('event' in data)) {
+      return
+    }
+
+    const eventName = String((data as { event?: unknown }).event ?? '')
+    if (eventName === 'order_sent' || eventName === 'order_ready' || eventName === 'order_status_changed') {
+      refreshKitchenQueue()
+    }
+  }, [refreshKitchenQueue])
+
+  useSocket('/ws/kitchen', {
+    onMessage: handleKitchenRealtimeMessage,
+  })
 
   const handleReady = async (orderId: string) => {
     try {
-      await api.post(`/api/kitchen/${orderId}/ready`)
+      await markReadyMutation.mutateAsync({ orderId })
       setFeedback('Pedido marcado como pronto.')
-      await loadQueue()
     } catch {
       setFeedback('Falha ao marcar pedido como pronto.')
     }
@@ -89,9 +114,8 @@ const Cozinha: React.FC = () => {
 
   const handleBackToPrep = async (orderId: string) => {
     try {
-      await api.post(`/api/kitchen/${orderId}/back-to-prep`)
+      await moveBackToPrepMutation.mutateAsync({ orderId })
       setFeedback('Pedido voltou para preparo.')
-      await loadQueue()
     } catch {
       setFeedback('Falha ao voltar pedido para preparo.')
     }
@@ -118,18 +142,18 @@ const Cozinha: React.FC = () => {
           order_id: getOrderDisplayNumber(order),
           cashier: 'COZINHA',
           items: order.items.map((item) => ({
-            name: `Produto ${item.product ?? item.id}`,
+            name: item.product_name || `Produto ${item.product ?? item.id}`,
             qty: Number(item.qty ?? 1),
             weight_grams: item.weight_grams ?? undefined,
             unit_price: Number(item.total ?? 0) / Math.max(Number(item.qty ?? 1) || 1, 1),
             total: Number(item.total ?? 0),
-            notes: item.notes ?? undefined
+            notes: item.notes ?? undefined,
           })),
           subtotal: Number(order.subtotal ?? 0),
           discount: Number(order.discount ?? 0),
           total: Number(order.total ?? 0),
-          payments: []
-        })
+          payments: [],
+        }),
       })
       if (!response.ok) {
         setFeedback('Falha ao imprimir pedido.')
@@ -148,7 +172,7 @@ const Cozinha: React.FC = () => {
     }
     try {
       for (const order of orders) {
-        await api.post(`/api/kitchen/${order.id}/print`)
+        await queueKitchenPrintMutation.mutateAsync({ orderId: order.id })
       }
       setFeedback('Lote de pedidos enviado para impressao.')
     } catch {
@@ -158,53 +182,87 @@ const Cozinha: React.FC = () => {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-2xl font-semibold">KDS - Fila da cozinha</h2>
-        <div className="flex gap-2">
-          <button onClick={() => void loadQueue()} className="rounded-xl border border-brand-200 bg-white px-3 py-2 text-sm font-semibold text-brand-700">
-            Atualizar
-          </button>
-          <button onClick={() => void handlePrintBatch()} className="rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 px-3 py-2 text-sm font-semibold text-white">
-            Imprimir lote
-          </button>
-        </div>
+      <PageHeader
+        eyebrow="Cozinha"
+        title="KDS - fila da cozinha"
+        description="Visualizacao operacional para preparo, impressao e liberacao de pedidos, agora com mais contraste e separacao visual."
+        meta={<Badge variant="brand">{orders.length} pedido(s)</Badge>}
+        actions={
+          <>
+            <Button variant="secondary" onClick={() => void refreshKitchenQueue()}>Atualizar</Button>
+            <Button variant="primary" onClick={() => void handlePrintBatch()}>Imprimir lote</Button>
+          </>
+        }
+      />
+
+      {feedback ? (
+        <Card className="p-4" tone="accent">
+          <p className="text-sm font-medium text-slate-700">{feedback}</p>
+        </Card>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <StatCard label="Fila total" value={orders.length} description="Pedidos exibidos no KDS." tone="accent" />
+        <StatCard label="Novos" value={newOrdersCount} description="Aguardando inicio." />
+        <StatCard label="Preparando" value={sentOrdersCount} description="Em producao." tone="warning" />
+        <StatCard label="Prontos" value={readyOrdersCount} description="Aguardando retirada." tone="success" />
       </div>
 
-      {feedback ? <p className="text-sm text-brand-700">{feedback}</p> : null}
+      {kitchenQueueQuery.isLoading ? (
+        <LoadingState title="Carregando fila da cozinha" description="Sincronizando os pedidos em preparo." />
+      ) : kitchenQueueQuery.isError ? (
+        <Card className="p-6 text-center" tone="danger">Falha ao carregar fila da cozinha.</Card>
+      ) : (
+        <>
+          <Card className="p-4 sm:p-5" tone="accent">
+            <SectionHeader
+              title="Painel de preparo"
+              description="Cards compactos para decidir rapido entre marcar pronto, voltar para preparo ou imprimir."
+              meta={<Badge variant={orders.length > 0 ? 'warning' : 'neutral'}>{orders.length > 0 ? 'Fila ativa' : 'Sem fila'}</Badge>}
+            />
+          </Card>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {orders.map((order) => (
+            <Card key={order.id} className="p-4 md:p-5">
+              <CardHeader className="mb-4">
+                <div>
+                  <CardTitle>Pedido #{getOrderDisplayNumber(order)}</CardTitle>
+                  <CardDescription>{order.items?.length || 0} itens</CardDescription>
+                </div>
+                <Badge
+                  variant={
+                    order.status === 'READY'
+                      ? 'success'
+                      : order.status === 'OPEN'
+                        ? 'info'
+                        : 'warning'
+                  }
+                >
+                  {statusLabel(order.status)}
+                </Badge>
+              </CardHeader>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {orders.map((order) => (
-          <article key={order.id} className="panel p-4 md:p-5">
-            <div className="mb-4 flex items-start justify-between">
-              <div>
-                <h3 className="text-xl font-semibold">Pedido #{getOrderDisplayNumber(order)}</h3>
-                <p className="text-sm text-slate-500">{order.items?.length || 0} itens</p>
+              <Card className="mb-4 px-3 py-2" tone="muted">
+                Tempo de espera: <span className="font-semibold text-slate-800">{waitLabel(order.created_at)}</span>
+              </Card>
+
+              <div className="grid grid-cols-3 gap-2">
+                <Button onClick={() => void handleReady(order.id)} variant="success" size="sm">Pronto</Button>
+                <Button onClick={() => void handleBackToPrep(order.id)} variant="warning" size="sm">Voltar</Button>
+                <Button onClick={() => void handlePrint(order.id)} variant="secondary" size="sm">Imprimir</Button>
               </div>
-              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClass(order.status)}`}>
-                {statusLabel(order.status)}
-              </span>
-            </div>
+            </Card>
+          ))}
+          </div>
+        </>
+      )}
 
-            <div className="mb-4 rounded-xl border border-brand-100 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-              Tempo de espera: <span className="font-semibold text-slate-800">{waitLabel(order.created_at)}</span>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              <button onClick={() => void handleReady(order.id)} className="rounded-lg bg-emerald-600 px-2 py-2 text-xs font-semibold text-white">
-                Pronto
-              </button>
-              <button onClick={() => void handleBackToPrep(order.id)} className="rounded-lg border border-amber-300 bg-amber-50 px-2 py-2 text-xs font-semibold text-amber-700">
-                Voltar
-              </button>
-              <button onClick={() => void handlePrint(order.id)} className="rounded-lg border border-slate-300 bg-white px-2 py-2 text-xs font-semibold text-slate-700">
-                Imprimir
-              </button>
-            </div>
-          </article>
-        ))}
-      </div>
-
-      {orders.length === 0 ? <p className="text-sm text-slate-500">Nenhum pedido na fila da cozinha.</p> : null}
+      {!kitchenQueueQuery.isLoading && orders.length === 0 ? (
+        <EmptyState
+          title="Nenhum pedido na fila da cozinha"
+          description="Assim que um pedido entrar em preparo, ele aparecera aqui."
+        />
+      ) : null}
     </div>
   )
 }

@@ -208,7 +208,7 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           )}
         </div>
 
-        <div className="space-y-4 p-5">
+        <div className="space-y-4 p-5 overflow-y-auto max-h-[70vh]">
           <div className="space-y-1.5 rounded-xl border border-brand-100 bg-brand-50 px-4 py-3">
             <div className="flex items-center justify-between text-sm">
               <span className="text-slate-500">Subtotal</span>

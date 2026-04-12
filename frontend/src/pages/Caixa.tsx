@@ -1,7 +1,38 @@
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api } from '../api/client'
+import { useQueryClient } from '@tanstack/react-query'
 import { openThermalReceiptPdf, type ThermalReceiptPayload } from '../app/thermalReceipt'
-import { connectWS } from '../api/ws'
+import { useSocket } from '../hooks/useSocket'
+import { useCashDashboard } from '../features/sales/hooks/useCashDashboard'
+import { api } from '../api/client'
+import { ChartCard, ChartEmptyState, ChartLegend, ChartPill } from '../components/ChartCard'
+import {
+  useCloseCashSessionMutation,
+  useCreateCashMoveMutation,
+  useOpenCashSessionMutation,
+} from '../features/sales/hooks/useCashMutations'
+import { salesQueryKeys } from '../features/sales/queryKeys'
+import {
+  Badge,
+  Button,
+  Card,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  FilterBar,
+  Input,
+  Modal,
+  PageHeader,
+  SectionHeader,
+  StatCard,
+  Table,
+  TableBody,
+  TableCell,
+  TableElement,
+  TableHead,
+  TableHeaderCell,
+  TableRow,
+  TextArea,
+} from '../components/ui'
 
 type Order = {
   id: string
@@ -13,6 +44,18 @@ type Order = {
   total: string
   created_at: string
   closed_at?: string | null
+}
+
+type OrderPayment = {
+  method: 'CASH' | 'PIX' | 'CARD' | 'CARD_CREDIT' | 'CARD_DEBIT'
+  amount: string
+  meta?: {
+    card_type?: 'CREDIT' | 'DEBIT'
+  } | null
+}
+
+type OrderDetailResponse = {
+  payments?: OrderPayment[]
 }
 
 type CashStatusResponse = {
@@ -56,6 +99,7 @@ type Reconciliation = {
 
 type CashMove = {
   id: number
+  session?: number | null
   type: 'SANGRIA' | 'REFORCO'
   amount: string
   reason: string
@@ -71,6 +115,12 @@ type CashHistoryEntry = {
   reconciliation_data?: Reconciliation
 }
 
+type SessionCashReason = {
+  amount: number
+  reason: string
+  createdAt: string
+}
+
 type FlowEntry = {
   id: string
   at: string
@@ -78,6 +128,7 @@ type FlowEntry = {
   description: string
   input: number
   output: number
+  paymentLabel?: string
 }
 
 type Summary = {
@@ -112,7 +163,7 @@ type CashDashboardResponse = {
 }
 
 const CASH_DASHBOARD_ORDERS_LIMIT = 50
-const CASH_DASHBOARD_MOVES_LIMIT = 50
+const CASH_DASHBOARD_MOVES_LIMIT = 120
 const CASH_DASHBOARD_HISTORY_LIMIT = 30
 const CASH_REFRESH_DEBOUNCE_MS = 150
 
@@ -144,6 +195,38 @@ const getApiErrorText = (error: unknown, fallback: string) => {
   return fallback
 }
 
+const getPaymentDisplayLabel = (payment: OrderPayment) => {
+  if (payment.method === 'CARD_CREDIT' || (payment.method === 'CARD' && payment.meta?.card_type === 'CREDIT')) {
+    return 'Cartao credito'
+  }
+  if (payment.method === 'CARD_DEBIT' || (payment.method === 'CARD' && payment.meta?.card_type === 'DEBIT')) {
+    return 'Cartao debito'
+  }
+  if (payment.method === 'PIX') {
+    return 'PIX'
+  }
+  if (payment.method === 'CASH') {
+    return 'Dinheiro'
+  }
+  return 'Cartao'
+}
+
+const formatOrderPaymentSummary = (payments?: OrderPayment[]) => {
+  if (!payments || payments.length === 0) {
+    return 'Nao informado'
+  }
+
+  const labels: string[] = []
+  payments.forEach((payment) => {
+    const label = getPaymentDisplayLabel(payment)
+    if (!labels.includes(label)) {
+      labels.push(label)
+    }
+  })
+
+  return labels.join(' + ')
+}
+
 const todayISO = () => {
   const now = new Date()
   const y = now.getFullYear()
@@ -169,8 +252,13 @@ const buildDashboardSnapshot = (payload: CashDashboardResponse) =>
   })
 
 const Caixa: React.FC = () => {
+  const queryClient = useQueryClient()
+  const openCashMutation = useOpenCashSessionMutation()
+  const createCashMoveMutation = useCreateCashMoveMutation()
+  const closeCashMutation = useCloseCashSessionMutation()
   const [cashStatus, setCashStatus] = useState<CashStatusResponse>({ open: false })
   const [orders, setOrders] = useState<Order[]>([])
+  const [orderPaymentLabels, setOrderPaymentLabels] = useState<Record<string, string>>({})
   const [openOrders, setOpenOrders] = useState<Order[]>([])
   const [cashMoves, setCashMoves] = useState<CashMove[]>([])
   const [cashHistory, setCashHistory] = useState<CashHistoryEntry[]>([])
@@ -187,6 +275,11 @@ const Caixa: React.FC = () => {
   const [cashMoveType, setCashMoveType] = useState<'SANGRIA' | 'REFORCO'>('REFORCO')
   const [cashMoveAmount, setCashMoveAmount] = useState('')
   const [cashMoveReason, setCashMoveReason] = useState('')
+  const [historyReasonSession, setHistoryReasonSession] = useState<{
+    openedAt: string
+    total: number
+    reasons: SessionCashReason[]
+  } | null>(null)
   const [agentUrl, setAgentUrl] = useState('')
   const [storeLabel, setStoreLabel] = useState('Sorveteria POS')
   const [storeCnpj, setStoreCnpj] = useState('')
@@ -194,43 +287,28 @@ const Caixa: React.FC = () => {
   const wsRefreshTimerRef = useRef<number | null>(null)
   const loadDataRequestIdRef = useRef(0)
   const dashboardSnapshotRef = useRef('')
+  const dashboardQuery = useCashDashboard({
+    from: appliedFromDate,
+    to: appliedToDate,
+    ordersLimit: CASH_DASHBOARD_ORDERS_LIMIT,
+    movesLimit: CASH_DASHBOARD_MOVES_LIMIT,
+    historyLimit: CASH_DASHBOARD_HISTORY_LIMIT,
+  })
+
+  const refreshDashboard = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: salesQueryKeys.cashDashboard.all })
+  }, [queryClient])
 
   const loadData = useCallback(async () => {
     const requestId = ++loadDataRequestIdRef.current
-    try {
-      const response = await api.get<CashDashboardResponse>(
-        `/api/cash/dashboard?from=${appliedFromDate}&to=${appliedToDate}&orders_limit=${CASH_DASHBOARD_ORDERS_LIMIT}&moves_limit=${CASH_DASHBOARD_MOVES_LIMIT}&history_limit=${CASH_DASHBOARD_HISTORY_LIMIT}`
-      )
-      if (requestId !== loadDataRequestIdRef.current) {
-        return
-      }
-      const payload = response.data
-      const sortedOrders = sortClosedOrders(payload.closed_orders)
-      const snapshot = buildDashboardSnapshot({ ...payload, closed_orders: sortedOrders })
-      if (snapshot !== dashboardSnapshotRef.current) {
-        dashboardSnapshotRef.current = snapshot
-        startTransition(() => {
-          setCashStatus(payload.cash_status)
-          setOrders(sortedOrders)
-          setOpenOrders(payload.open_orders ?? [])
-          setCashMoves(payload.cash_moves)
-          setCashHistory(payload.cash_history)
-          setPaymentsAgg(payload.payments)
-          setDailySummary(payload.today_summary)
-          setOpenOrdersCount(payload.open_orders_count)
-          setAgentUrl(payload.config.printer?.agent_url?.trim() ?? '')
-          setStoreLabel(payload.config.company_name || payload.config.store_name || 'Sorveteria POS')
-          setStoreCnpj(payload.config.cnpj || '')
-          setStoreAddress(payload.config.address || '')
-        })
-      }
-      setFeedback((current) => (current ? '' : current))
-    } catch {
-      if (requestId === loadDataRequestIdRef.current) {
-        setFeedback('Alguns dados do caixa falharam ao atualizar. Tente novamente.')
-      }
+    const result = await dashboardQuery.refetch()
+    if (requestId !== loadDataRequestIdRef.current) {
+      return
     }
-  }, [appliedFromDate, appliedToDate])
+    if (result.error) {
+      setFeedback('Alguns dados do caixa falharam ao atualizar. Tente novamente.')
+    }
+  }, [dashboardQuery])
 
   const postToAgent = useCallback(async (payload: ThermalReceiptPayload) => {
     const normalizedAgentUrl = agentUrl.trim().replace(/\/$/, '')
@@ -260,52 +338,129 @@ const Caixa: React.FC = () => {
   }), [storeAddress, storeCnpj, storeLabel])
 
   useEffect(() => {
-    void loadData()
-  }, [loadData])
+    if (!dashboardQuery.data) {
+      return
+    }
+
+    const payload = dashboardQuery.data
+    const sortedOrders = sortClosedOrders(payload.closed_orders)
+    const snapshot = buildDashboardSnapshot({ ...payload, closed_orders: sortedOrders })
+    if (snapshot === dashboardSnapshotRef.current) {
+      return
+    }
+
+    dashboardSnapshotRef.current = snapshot
+    startTransition(() => {
+      setCashStatus(payload.cash_status)
+      setOrders(sortedOrders)
+      setOpenOrders(payload.open_orders ?? [])
+      setCashMoves(payload.cash_moves)
+      setCashHistory(payload.cash_history)
+      setPaymentsAgg(payload.payments)
+      setDailySummary(payload.today_summary)
+      setOpenOrdersCount(payload.open_orders_count)
+      setAgentUrl(payload.config.printer?.agent_url?.trim() ?? '')
+      setStoreLabel(payload.config.company_name || payload.config.store_name || 'Sorveteria POS')
+      setStoreCnpj(payload.config.cnpj || '')
+      setStoreAddress(payload.config.address || '')
+    })
+    setFeedback((current) => (current === 'Alguns dados do caixa falharam ao atualizar. Tente novamente.' ? '' : current))
+  }, [dashboardQuery.data])
+
+  useEffect(() => {
+    let cancelled = false
+    const missingOrders = orders.filter((order) => !(order.id in orderPaymentLabels))
+
+    if (!missingOrders.length) {
+      return
+    }
+
+    void (async () => {
+      const results = await Promise.all(
+        missingOrders.map(async (order) => {
+          try {
+            const response = await api.get<OrderDetailResponse>(`/api/orders/${order.id}/detail`)
+            return [order.id, formatOrderPaymentSummary(response.data.payments)] as const
+          } catch {
+            return [order.id, 'Nao informado'] as const
+          }
+        })
+      )
+
+      if (cancelled) {
+        return
+      }
+
+      setOrderPaymentLabels((current) => {
+        const next = { ...current }
+        results.forEach(([orderId, paymentLabel]) => {
+          next[orderId] = paymentLabel
+        })
+        return next
+      })
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [orderPaymentLabels, orders])
 
   const applyDateFilter = () => {
     setAppliedFromDate(fromDate)
     setAppliedToDate(toDate)
   }
 
+  const handleCashRealtimeMessage = useCallback((data: unknown) => {
+    if (document.visibilityState !== 'visible') {
+      return
+    }
+    if (
+      typeof data !== 'object' ||
+      data === null ||
+      !('event' in data)
+    ) {
+      return
+    }
+
+    const eventName = String((data as { event?: unknown }).event ?? '')
+    if (
+      eventName === 'order_paid' ||
+      eventName === 'order_canceled' ||
+      eventName === 'cash_move_created' ||
+      eventName === 'cash_status_changed'
+    ) {
+      if (wsRefreshTimerRef.current !== null) {
+        window.clearTimeout(wsRefreshTimerRef.current)
+      }
+      wsRefreshTimerRef.current = window.setTimeout(() => {
+        refreshDashboard()
+      }, CASH_REFRESH_DEBOUNCE_MS)
+    }
+  }, [refreshDashboard])
+
+  useSocket('/ws/pdv', {
+    onMessage: handleCashRealtimeMessage,
+  })
+
   useEffect(() => {
-    const ws = connectWS('/ws/pdv', (data) => {
-      if (document.visibilityState !== 'visible') {
-        return
-      }
-      if (
-        data?.event === 'order_paid' ||
-        data?.event === 'order_canceled' ||
-        data?.event === 'cash_move_created' ||
-        data?.event === 'cash_status_changed'
-      ) {
-        if (wsRefreshTimerRef.current !== null) {
-          window.clearTimeout(wsRefreshTimerRef.current)
-        }
-        wsRefreshTimerRef.current = window.setTimeout(() => {
-          void loadData()
-        }, CASH_REFRESH_DEBOUNCE_MS)
-      }
-    })
     return () => {
-      ws.close()
       if (wsRefreshTimerRef.current !== null) {
         window.clearTimeout(wsRefreshTimerRef.current)
       }
     }
-  }, [loadData])
+  }, [])
 
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && navigator.onLine) {
-        void loadData()
+        refreshDashboard()
       }
     }
     document.addEventListener('visibilitychange', handleVisibilityChange)
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
-  }, [loadData])
+  }, [refreshDashboard])
 
   const totalsByMethod = useMemo(() => {
     const initial = { CASH: 0, PIX: 0, CARD: 0, CARD_CREDIT: 0, CARD_DEBIT: 0 }
@@ -319,6 +474,26 @@ const Caixa: React.FC = () => {
     return initial
   }, [paymentsAgg])
 
+  const paymentMixItems = useMemo(() => {
+    const rows = [
+      { label: 'Dinheiro', value: totalsByMethod.CASH, color: '#e55c2f' },
+      { label: 'PIX', value: totalsByMethod.PIX, color: '#f08b55' },
+      { label: 'Cartao credito', value: totalsByMethod.CARD_CREDIT, color: '#f6b287' },
+      { label: 'Cartao debito', value: totalsByMethod.CARD_DEBIT, color: '#facfb5' },
+    ].filter((row) => row.value > 0)
+
+    const total = rows.reduce((sum, row) => sum + row.value, 0)
+
+    return {
+      total,
+      top: rows[0] ?? null,
+      items: rows.map((row) => ({
+        ...row,
+        percentage: total > 0 ? Math.round((row.value / total) * 100) : 0,
+      })),
+    }
+  }, [totalsByMethod])
+
   const flowEntries = useMemo<FlowEntry[]>(() => {
     const salesEntries: FlowEntry[] = orders.map((order) => ({
       id: `sale-${order.id}`,
@@ -327,6 +502,7 @@ const Caixa: React.FC = () => {
       description: `Comanda #${getOrderDisplayNumber(order)} finalizada`,
       input: Number(order.total || 0),
       output: 0,
+      paymentLabel: orderPaymentLabels[order.id] || 'Carregando...',
     }))
     const moveEntries: FlowEntry[] = cashMoves.map((move) => ({
       id: `move-${move.id}`,
@@ -338,10 +514,30 @@ const Caixa: React.FC = () => {
           : `Sangria: ${move.reason || 'sem motivo'}`,
       input: move.type === 'REFORCO' ? Number(move.amount || 0) : 0,
       output: move.type === 'SANGRIA' ? Number(move.amount || 0) : 0,
+      paymentLabel: move.type === 'REFORCO' ? 'Aporte manual' : '-',
     }))
 
     return [...salesEntries, ...moveEntries].sort((a, b) => (a.at < b.at ? 1 : -1))
-  }, [orders, cashMoves])
+  }, [orders, cashMoves, orderPaymentLabels])
+
+  const cashHistorySangriaBySession = useMemo(() => {
+    const grouped: Record<number, SessionCashReason[]> = {}
+
+    cashMoves.forEach((move) => {
+      if (move.type !== 'SANGRIA' || !move.session) {
+        return
+      }
+
+      grouped[move.session] = grouped[move.session] || []
+      grouped[move.session].push({
+        amount: Number(move.amount || 0),
+        reason: move.reason || 'Sem motivo informado',
+        createdAt: move.created_at,
+      })
+    })
+
+    return grouped
+  }, [cashMoves])
 
   const reconciliationRows = useMemo(() => [
     {
@@ -379,7 +575,7 @@ const Caixa: React.FC = () => {
     }
     try {
       const normalizedInitialFloat = initialFloat.replace(',', '.')
-      const response = await api.post<CashSessionOpenResponse>('/api/cash/open', { initial_float: normalizedInitialFloat })
+      const response = await openCashMutation.mutateAsync(normalizedInitialFloat)
       setCashStatus({
         open: true,
         session: {
@@ -412,7 +608,7 @@ const Caixa: React.FC = () => {
             ? 'Caixa aberto. Cupom aberto para imprimir/salvar em PDF.'
             : 'Caixa aberto, mas a impressao do cupom falhou.'
       )
-      await loadData()
+      refreshDashboard()
     } catch (error: unknown) {
       setFeedback(getApiErrorText(error, 'Falha ao abrir caixa.'))
     }
@@ -441,7 +637,7 @@ const Caixa: React.FC = () => {
       return
     }
     try {
-      await api.post('/api/cash/move', {
+      await createCashMoveMutation.mutateAsync({
         type: cashMoveType,
         amount: normalizedAmount,
         reason: cashMoveReason.trim()
@@ -450,7 +646,7 @@ const Caixa: React.FC = () => {
       setCashMoveAmount('')
       setCashMoveReason('')
       setFeedback(cashMoveType === 'REFORCO' ? 'Reforco registrado.' : 'Sangria registrada.')
-      await loadData()
+      refreshDashboard()
     } catch (error: unknown) {
       setFeedback(getApiErrorText(error, 'Falha ao registrar movimentacao.'))
     }
@@ -475,7 +671,7 @@ const Caixa: React.FC = () => {
     }
 
     try {
-      const response = await api.post<Reconciliation>('/api/cash/close', {
+      const response = await closeCashMutation.mutateAsync({
         counted_cash: countedCash.replace(',', '.'),
         counted_pix: countedPix.replace(',', '.'),
         counted_card: countedCard.replace(',', '.')
@@ -510,7 +706,7 @@ const Caixa: React.FC = () => {
             ? 'Caixa fechado. Cupom aberto para imprimir/salvar em PDF.'
             : 'Caixa fechado, mas a impressao do cupom falhou.'
       )
-      await loadData()
+      refreshDashboard()
     } catch (error: unknown) {
       setFeedback(getApiErrorText(error, 'Falha ao fechar caixa.'))
     }
@@ -518,75 +714,118 @@ const Caixa: React.FC = () => {
 
   return (
     <div className="space-y-5">
+      <PageHeader
+        eyebrow="Financeiro"
+        title="Caixa"
+        description="Resumo operacional do caixa com foco em leitura rapida, conciliacao e movimentos do dia."
+        meta={
+          <div className="flex flex-wrap gap-2">
+            <Badge variant={cashStatus.open ? 'success' : 'warning'}>
+              {cashStatus.open ? 'Sessao aberta' : 'Sessao fechada'}
+            </Badge>
+            <Badge variant="brand">{openOrdersCount} pedido(s) em aberto</Badge>
+          </div>
+        }
+      />
+
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <article className="panel p-4 md:p-5">
-          <p className="text-sm text-slate-500">Caixa atual</p>
-          <p className="mt-2 text-2xl font-semibold tracking-tight">
-            {formatBRL(cashStatus.totals?.current_cash_estimated ?? 0)}
-          </p>
-          <p className="text-xs text-slate-500 mt-1">{cashStatus.open ? 'Sessao aberta' : 'Sessao fechada'}</p>
-        </article>
-        <article className="panel p-4 md:p-5">
-          <p className="text-sm text-slate-500">Abertura do caixa</p>
-          <p className="mt-2 text-2xl font-semibold tracking-tight">
-            {formatBRL(cashStatus.session?.initial_float ?? 0)}
-          </p>
-          <p className="text-xs text-slate-500 mt-1">{cashStatus.open ? 'Fundo inicial da sessao aberta' : 'Sem sessao aberta'}</p>
-        </article>
-        <article className="panel p-4 md:p-5">
-          <p className="text-sm text-slate-500">Entrada PIX</p>
-          <p className="mt-2 text-2xl font-semibold tracking-tight">{formatBRL(totalsByMethod.PIX)}</p>
-        </article>
-        <article className="panel p-4 md:p-5">
-          <p className="text-sm text-slate-500">Entrada cartao credito</p>
-          <p className="mt-2 text-2xl font-semibold tracking-tight">{formatBRL(totalsByMethod.CARD_CREDIT)}</p>
-        </article>
-        <article className="panel p-4 md:p-5">
-          <p className="text-sm text-slate-500">Entrada cartao debito</p>
-          <p className="mt-2 text-2xl font-semibold tracking-tight">{formatBRL(totalsByMethod.CARD_DEBIT)}</p>
-        </article>
-        <article className="panel p-4 md:p-5">
-          <p className="text-sm text-slate-500">Entrada dinheiro</p>
-          <p className="mt-2 text-2xl font-semibold tracking-tight">{formatBRL(totalsByMethod.CASH)}</p>
-        </article>
-        <article className="panel p-4 md:p-5">
-          <p className="text-sm text-slate-500">Total reforco</p>
-          <p className="mt-2 text-2xl font-semibold tracking-tight">{formatBRL(cashStatus.totals?.reforco ?? 0)}</p>
-        </article>
-        <article className="panel p-4 md:p-5">
-          <p className="text-sm text-slate-500">Total sangria</p>
-          <p className="mt-2 text-2xl font-semibold tracking-tight">{formatBRL(cashStatus.totals?.sangria ?? 0)}</p>
-        </article>
+        <StatCard label="Caixa atual" value={formatBRL(cashStatus.totals?.current_cash_estimated ?? 0)} description={cashStatus.open ? 'Sessao aberta' : 'Sessao fechada'} tone="accent" />
+        <StatCard label="Abertura do caixa" value={formatBRL(cashStatus.session?.initial_float ?? 0)} description={cashStatus.open ? 'Fundo inicial da sessao aberta' : 'Sem sessao aberta'} />
+        <StatCard label="Entrada PIX" value={formatBRL(totalsByMethod.PIX)} />
+        <StatCard label="Cartao credito" value={formatBRL(totalsByMethod.CARD_CREDIT)} />
+        <StatCard label="Cartao debito" value={formatBRL(totalsByMethod.CARD_DEBIT)} />
+        <StatCard label="Entrada dinheiro" value={formatBRL(totalsByMethod.CASH)} />
+        <StatCard label="Total reforco" value={formatBRL(cashStatus.totals?.reforco ?? 0)} />
+        <StatCard label="Total sangria" value={formatBRL(cashStatus.totals?.sangria ?? 0)} />
       </div>
 
-      <section className="panel p-4 md:p-5">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Caixa atual (dinheiro)</h2>
-        <input
-          type="text"
-          readOnly
-          value={formatBRL(cashStatus.totals?.current_cash_estimated ?? 0)}
-          className="mt-2 w-full rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-lg font-semibold text-brand-700"
-        />
+      <ChartCard
+        title="Mix de pagamentos do dia"
+        description="Distribuicao visual das entradas ja registradas no caixa para leitura rapida durante a operacao."
+        meta={<ChartPill>Caixa</ChartPill>}
+        actions={<ChartPill>{formatBRL(paymentMixItems.total)}</ChartPill>}
+        footer={
+          paymentMixItems.items.length > 0 ? (
+            <ChartLegend
+              items={paymentMixItems.items.map((item) => ({
+                label: item.label,
+                value: formatBRL(item.value),
+                color: item.color,
+              }))}
+            />
+          ) : null
+        }
+      >
+        {paymentMixItems.items.length === 0 ? (
+          <ChartEmptyState
+            title="Sem pagamentos registrados"
+            description="Assim que houver vendas finalizadas no filtro atual, o mix de pagamentos aparecera aqui."
+          />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.7fr)_minmax(260px,0.9fr)]">
+            <div className="space-y-3">
+              {paymentMixItems.items.map((item) => (
+                <div key={item.label} className="rounded-2xl border border-[rgba(240,214,191,0.78)] bg-white/80 px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-3">
+                      <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                      <span className="text-sm font-medium text-slate-800">{item.label}</span>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-slate-900">{formatBRL(item.value)}</p>
+                      <p className="text-xs text-slate-500">{item.percentage}% do total</p>
+                    </div>
+                  </div>
+                  <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className="h-full rounded-full transition-[width]"
+                      style={{ width: `${item.percentage}%`, backgroundColor: item.color }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <Card className="p-4" tone="muted">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Leitura executiva</p>
+              <p className="mt-3 text-2xl font-semibold tracking-tight text-slate-900">{formatBRL(paymentMixItems.total)}</p>
+              <p className="mt-2 text-sm text-slate-500">Total consolidado entre dinheiro, PIX e cartoes no periodo aplicado.</p>
+              <div className="mt-4 space-y-2 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-slate-500">Metodo dominante</span>
+                  <span className="font-semibold text-slate-900">{paymentMixItems.top?.label ?? 'Sem dados'}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-slate-500">Participacao</span>
+                  <span className="font-semibold text-slate-900">{paymentMixItems.top ? `${paymentMixItems.top.percentage}%` : '--'}</span>
+                </div>
+              </div>
+            </Card>
+          </div>
+        )}
+      </ChartCard>
+
+      <Card className="p-4 md:p-5" tone="accent">
+        <CardTitle className="text-sm uppercase tracking-[0.16em] text-slate-500">Caixa atual (dinheiro)</CardTitle>
+        <Input type="text" readOnly value={formatBRL(cashStatus.totals?.current_cash_estimated ?? 0)} className="mt-3 text-lg font-semibold text-brand-700" />
         <p className="mt-2 text-xs text-slate-500">
           Fundo: {formatBRL(cashStatus.session?.initial_float ?? 0)} | Dinheiro vendas: {formatBRL(cashStatus.totals?.cash_sales ?? 0)} | Reforco: {formatBRL(cashStatus.totals?.reforco ?? 0)} | Sangria: {formatBRL(cashStatus.totals?.sangria ?? 0)}
         </p>
-      </section>
+      </Card>
 
-      <section className="panel p-5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-lg font-semibold">Fluxo diario do caixa</h2>
-          <button onClick={() => void loadData()} className="rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-semibold text-brand-700">
-            Atualizar fluxo
-          </button>
-        </div>
+      <Card className="p-5 space-y-4">
+        <SectionHeader
+          title="Fluxo diario do caixa"
+          description="Visao resumida da abertura, das vendas do dia e da divergencia atual."
+          actions={<Button variant="secondary" size="sm" onClick={() => void loadData()}>Atualizar fluxo</Button>}
+        />
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="rounded-xl border border-brand-100 p-3">
+          <Card className="p-3" tone="muted">
             <p className="text-xs uppercase tracking-wide text-slate-500">1. Abertura</p>
             <p className={`mt-1 text-sm font-semibold ${cashStatus.open ? 'text-emerald-700' : 'text-amber-700'}`}>
               {cashStatus.open ? 'Caixa aberto' : 'Caixa fechado'}
             </p>
-          </div>
-          <div className="rounded-xl border border-brand-100 p-3">
+          </Card>
+          <Card className="p-3" tone="muted">
             <p className="text-xs uppercase tracking-wide text-slate-500">2. Vendas de hoje</p>
             <p className="mt-1 text-sm font-semibold text-slate-800">
               {dailySummary?.total_orders ?? 0} pedidos | {formatBRL(dailySummary?.total_sales ?? 0)}
@@ -594,65 +833,68 @@ const Caixa: React.FC = () => {
             <p className="text-xs text-slate-500">
               Finalizados: {dailySummary?.total_orders ?? 0} | Cancelados: {dailySummary?.canceled_count ?? 0}
             </p>
-          </div>
-          <div className="rounded-xl border border-brand-100 p-3">
+          </Card>
+          <Card className="p-3" tone={divergenceTotal === 0 ? 'success' : 'warning'}>
             <p className="text-xs uppercase tracking-wide text-slate-500">3. Fechamento</p>
             <p className="mt-1 text-sm font-semibold text-slate-800">
               Divergencia atual: {formatSignedBRL(divergenceTotal)}
             </p>
-          </div>
+          </Card>
         </div>
-      </section>
+      </Card>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <section className="panel p-5 space-y-4">
-          <h2 className="text-lg font-semibold">Abertura e movimentacoes</h2>
+        <Card className="p-5 space-y-4">
+          <SectionHeader
+            title="Abertura e movimentacoes"
+            description="Abra o caixa, registre reforcos e sangrias com os mesmos atalhos de antes."
+          />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {!cashStatus.open ? (
-              <button
+              <Button
                 onClick={() => void handleOpenCash()}
-                className="rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 px-3 py-2 text-sm font-semibold text-white"
+                variant="primary"
               >
                 Abrir caixa
-              </button>
+              </Button>
             ) : (
-              <button
+              <Button
                 type="button"
                 disabled
-                className="rounded-xl border border-slate-300 bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-500"
+                variant="secondary"
               >
                 Caixa ja aberto
-              </button>
+              </Button>
             )}
-            <button
+            <Button
               onClick={() => openCashMoveModal('SANGRIA')}
               disabled={!cashStatus.open}
-              className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+              variant="warning"
             >
               Sangria
-            </button>
-            <button
+            </Button>
+            <Button
               onClick={() => openCashMoveModal('REFORCO')}
               disabled={!cashStatus.open}
-              className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+              variant="success"
             >
               Reforco
-            </button>
+            </Button>
           </div>
-        <div className="rounded-xl border border-brand-100 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+        <Card className="px-3 py-2 text-sm text-slate-600" tone="muted">
           {cashStatus.open
             ? `Sessao aberta em ${new Date(cashStatus.session?.opened_at || '').toLocaleString('pt-BR')}`
             : 'Nenhuma sessao de caixa aberta.'}
-        </div>
-        <div className="rounded-xl border border-brand-100 bg-white px-3 py-2 text-sm text-slate-700">
+        </Card>
+        <Card className="px-3 py-2 text-sm text-slate-700">
           Pedidos em aberto: <span className="font-semibold">{openOrdersCount}</span>
-        </div>
+        </Card>
         {openOrdersCount > 0 ? (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <Card className="p-3 text-sm text-amber-800" tone="warning">
             <p className="font-semibold">Pedidos bloqueando o fechamento</p>
             <div className="mt-2 space-y-2">
               {openOrders.map((order) => (
-                <div key={order.id} className="rounded-lg bg-white/80 px-3 py-2">
+                <div key={order.id} className="rounded-lg bg-white/80 px-3 py-2 shadow-sm">
                   <div className="font-semibold">
                     #{getOrderDisplayNumber(order)} | {getOpenOrderLabel(order)} | {order.status}
                   </div>
@@ -662,12 +904,16 @@ const Caixa: React.FC = () => {
                 </div>
               ))}
             </div>
-          </div>
+          </Card>
         ) : null}
-      </section>
+      </Card>
 
-        <section className="panel p-5 space-y-4">
-          <h2 className="text-lg font-semibold">Fechamento</h2>
+        <Card className="p-5 space-y-4">
+          <SectionHeader
+            title="Fechamento"
+            description="Conferencia do previsto, informado e divergencia antes de concluir a sessao."
+            meta={<Badge variant={openOrdersCount > 0 ? 'warning' : 'success'}>{openOrdersCount > 0 ? 'Bloqueado por pedidos abertos' : 'Pronto para conciliar'}</Badge>}
+          />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 text-sm">
             <div className="rounded-2xl border border-brand-100 bg-slate-50 p-4">
               <p className="text-xs uppercase tracking-wide text-slate-500">Previsto</p>
@@ -710,155 +956,225 @@ const Caixa: React.FC = () => {
           ) : (
             <div className="rounded-xl border border-brand-100 p-3 text-sm text-slate-500">Ainda sem conciliacao nesta sessao. O resumo acima ja mostra o previsto para conferencia.</div>
           )}
-          <button
+          <Button
             onClick={() => void handleCloseCash()}
             disabled={openOrdersCount > 0}
-            className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            variant="primary"
           >
             Fechar e conciliar
-          </button>
+          </Button>
           {openOrdersCount > 0 ? (
             <p className="text-xs text-amber-700">Nao e possivel fechar o caixa com pedidos em aberto.</p>
           ) : null}
-        </section>
+        </Card>
       </div>
 
-      <section className="panel p-5">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Fluxo de caixa (finalizadas, sangria e reforco)</h2>
-          <div className="flex flex-wrap items-center gap-2">
-            <input value={fromDate} onChange={(event) => setFromDate(event.target.value)} type="date" className="rounded-lg border border-brand-200 px-2 py-1 text-sm" />
-            <input value={toDate} onChange={(event) => setToDate(event.target.value)} type="date" className="rounded-lg border border-brand-200 px-2 py-1 text-sm" />
-            <button onClick={applyDateFilter} className="text-sm font-semibold text-brand-700">Filtrar periodo</button>
-          </div>
-        </div>
+      <FilterBar
+        title="Fluxo de caixa"
+        description="Vendas finalizadas, sangrias e reforcos dentro do periodo filtrado."
+        actions={<Badge variant="neutral">{flowEntries.length} movimento(s)</Badge>}
+      >
+        <Input value={fromDate} onChange={(event) => setFromDate(event.target.value)} type="date" className="w-auto min-w-[150px]" label="De" />
+        <Input value={toDate} onChange={(event) => setToDate(event.target.value)} type="date" className="w-auto min-w-[150px]" label="Ate" />
+        <Button variant="secondary" size="sm" onClick={applyDateFilter}>Filtrar periodo</Button>
+      </FilterBar>
 
-        {feedback ? <p className="mb-3 text-sm text-brand-700">{feedback}</p> : null}
+      {feedback ? (
+        <Card className="p-3" tone="accent">
+          <p className="text-sm font-medium text-slate-700">{feedback}</p>
+        </Card>
+      ) : null}
 
-        <div className="overflow-x-auto">
-          <table className="responsive-table w-full text-sm">
-            <thead>
-              <tr className="text-left text-slate-500">
-                <th className="pb-2">Data/Hora</th>
-                <th className="pb-2">Operacao</th>
-                <th className="pb-2">Entrada</th>
-                <th className="pb-2">Saida</th>
-              </tr>
-            </thead>
-            <tbody>
+      <Card className="p-5">
+        <Table>
+          <TableElement>
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell>Data/Hora</TableHeaderCell>
+                <TableHeaderCell>Operacao</TableHeaderCell>
+                <TableHeaderCell>Forma de entrada</TableHeaderCell>
+                <TableHeaderCell>Entrada</TableHeaderCell>
+                <TableHeaderCell>Saida</TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
               {flowEntries.map((entry) => (
-                <tr key={entry.id} className="border-t border-brand-100">
-                  <td className="py-2">{new Date(entry.at).toLocaleString('pt-BR')}</td>
-                  <td className="py-2">{entry.description}</td>
-                  <td className="py-2 text-emerald-700">{entry.input > 0 ? formatBRL(entry.input) : '-'}</td>
-                  <td className="py-2 text-rose-700">{entry.output > 0 ? formatBRL(entry.output) : '-'}</td>
-                </tr>
+                <TableRow key={entry.id}>
+                  <TableCell>{new Date(entry.at).toLocaleString('pt-BR')}</TableCell>
+                  <TableCell>{entry.description}</TableCell>
+                  <TableCell>{entry.paymentLabel || '-'}</TableCell>
+                  <TableCell className="text-emerald-700">{entry.input > 0 ? formatBRL(entry.input) : '-'}</TableCell>
+                  <TableCell className="text-rose-700">{entry.output > 0 ? formatBRL(entry.output) : '-'}</TableCell>
+                </TableRow>
               ))}
               {flowEntries.length === 0 ? (
-                <tr className="border-t border-brand-100">
-                  <td colSpan={4} className="py-3 text-center text-slate-500">
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-slate-500">
                     Nenhum movimento de fluxo no periodo.
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
+            </TableBody>
+          </TableElement>
+        </Table>
+      </Card>
 
-      <section className="panel p-5">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Historico de Caixa Fechado</h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="responsive-table w-full text-sm">
-            <thead>
-              <tr className="text-left text-slate-500">
-                <th className="pb-2">Abertura</th>
-                <th className="pb-2">Fechamento</th>
-                <th className="pb-2">Fundo Inicial</th>
-                <th className="pb-2">Divergencia (Dinheiro / PIX / Cartao)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cashHistory.map((session) => (
-                <tr key={session.id} className="border-t border-brand-100">
-                  <td className="py-2">{new Date(session.opened_at).toLocaleString('pt-BR')}</td>
-                  <td className="py-2">{new Date(session.closed_at).toLocaleString('pt-BR')}</td>
-                  <td className="py-2 font-medium">{formatBRL(session.initial_float)}</td>
-                  <td className="py-2">
-                    {session.reconciliation_data ? (
-                      <div className="flex gap-2 text-xs">
-                        <span className={Number(session.reconciliation_data.divergence.cash) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
-                          Din: {formatSignedBRL(session.reconciliation_data.divergence.cash)}
-                        </span>
-                        <span className={Number(session.reconciliation_data.divergence.pix) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
-                          PIX: {formatSignedBRL(session.reconciliation_data.divergence.pix)}
-                        </span>
-                        <span className={Number(session.reconciliation_data.divergence.card) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
-                          Car: {formatSignedBRL(session.reconciliation_data.divergence.card)}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-slate-400">Sem dados</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
+      <Card className="p-5">
+        <SectionHeader
+          title="Historico de caixa fechado"
+          description="Consulte aberturas, saidas, fechamento em dinheiro e divergencias das sessoes encerradas."
+          meta={<Badge variant="neutral">{cashHistory.length} sessao(oes)</Badge>}
+        />
+        <Table>
+          <TableElement>
+            <TableHead>
+              <TableRow>
+                <TableHeaderCell>Abertura</TableHeaderCell>
+                <TableHeaderCell>Fechamento</TableHeaderCell>
+                <TableHeaderCell>Abertura em dinheiro</TableHeaderCell>
+                <TableHeaderCell>Saida em dinheiro</TableHeaderCell>
+                <TableHeaderCell>Fechamento em dinheiro</TableHeaderCell>
+                <TableHeaderCell>Divergencia (Dinheiro / PIX / Cartao)</TableHeaderCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {cashHistory.map((session) => {
+                const sangrias = cashHistorySangriaBySession[session.id] || []
+                const totalCashOut = sangrias.reduce((total, item) => total + item.amount, 0)
+                const closingCash = session.reconciliation_data
+                  ? Number(session.reconciliation_data.counted.cash || session.reconciliation_data.expected.cash || 0)
+                  : null
+
+                return (
+                  <TableRow key={session.id}>
+                    <TableCell>{new Date(session.opened_at).toLocaleString('pt-BR')}</TableCell>
+                    <TableCell>{new Date(session.closed_at).toLocaleString('pt-BR')}</TableCell>
+                    <TableCell className="font-medium">{formatBRL(session.initial_float)}</TableCell>
+                    <TableCell>
+                      {totalCashOut > 0 ? (
+                        <button
+                          type="button"
+                          className="font-medium text-rose-700 underline decoration-dotted underline-offset-4"
+                          onClick={() =>
+                            setHistoryReasonSession({
+                              openedAt: session.opened_at,
+                              total: totalCashOut,
+                              reasons: sangrias,
+                            })
+                          }
+                        >
+                          {formatBRL(totalCashOut)}
+                        </button>
+                      ) : (
+                        <span className="text-slate-400">-</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="font-medium">
+                      {closingCash !== null ? formatBRL(closingCash) : <span className="text-slate-400">Sem dados</span>}
+                    </TableCell>
+                    <TableCell>
+                      {session.reconciliation_data ? (
+                        <div className="flex gap-2 text-xs">
+                          <span className={Number(session.reconciliation_data.divergence.cash) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
+                            Din: {formatSignedBRL(session.reconciliation_data.divergence.cash)}
+                          </span>
+                          <span className={Number(session.reconciliation_data.divergence.pix) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
+                            PIX: {formatSignedBRL(session.reconciliation_data.divergence.pix)}
+                          </span>
+                          <span className={Number(session.reconciliation_data.divergence.card) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
+                            Car: {formatSignedBRL(session.reconciliation_data.divergence.card)}
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-slate-400">Sem dados</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                )
+              })}
               {cashHistory.length === 0 ? (
-                <tr className="border-t border-brand-100">
-                  <td colSpan={4} className="py-3 text-center text-slate-500">
+                <TableRow>
+                  <TableCell colSpan={6} className="text-center text-slate-500">
                     Nenhum caixa fechado no periodo.
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
+            </TableBody>
+          </TableElement>
+        </Table>
+      </Card>
 
-      {showCashMoveModal ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 px-4 pb-4 sm:items-center sm:pb-0">
-          <div className="mobile-sheet w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
-            <h3 className="text-lg font-semibold">{cashMoveType === 'REFORCO' ? 'Registrar reforco' : 'Registrar sangria'}</h3>
-            <p className="mt-1 text-sm text-slate-500">Preencha o valor e o motivo para registrar a movimentacao no caixa.</p>
-            <div className="mt-4 space-y-3">
-              <input
-                value={cashMoveAmount}
-                onChange={(event) => setCashMoveAmount(event.target.value)}
-                placeholder="Valor em R$"
-                inputMode="decimal"
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-              />
-              <textarea
-                value={cashMoveReason}
-                onChange={(event) => setCashMoveReason(event.target.value)}
-                placeholder="Motivo da movimentacao"
-                rows={3}
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
-              />
-            </div>
-            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button
-                type="button"
-                onClick={() => setShowCashMoveModal(false)}
-                className="rounded-xl border border-slate-300 px-4 py-2 text-sm"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={() => void handleCashMove()}
-                className={`rounded-xl px-4 py-2 text-sm font-semibold text-white ${
-                  cashMoveType === 'REFORCO' ? 'bg-emerald-600' : 'bg-amber-600'
-                }`}
-              >
-                Confirmar
-              </button>
+      <Modal
+        open={Boolean(historyReasonSession)}
+        onClose={() => setHistoryReasonSession(null)}
+        title="Motivos das saidas em dinheiro"
+        description={
+          historyReasonSession
+            ? `Sessao aberta em ${new Date(historyReasonSession.openedAt).toLocaleString('pt-BR')}.`
+            : undefined
+        }
+        footer={
+          <Button type="button" onClick={() => setHistoryReasonSession(null)} variant="secondary">
+            Fechar
+          </Button>
+        }
+      >
+        {historyReasonSession ? (
+          <div className="space-y-4">
+            <Card className="p-4" tone="accent">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Total de saidas</p>
+              <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">{formatBRL(historyReasonSession.total)}</p>
+            </Card>
+            <div className="space-y-3">
+              {historyReasonSession.reasons.map((reason, index) => (
+                <Card key={`${reason.createdAt}-${index}`} className="p-4" tone="muted">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-slate-900">{reason.reason || 'Sem motivo informado'}</p>
+                      <p className="text-xs text-slate-500">{new Date(reason.createdAt).toLocaleString('pt-BR')}</p>
+                    </div>
+                    <Badge variant="warning">{formatBRL(reason.amount)}</Badge>
+                  </div>
+                </Card>
+              ))}
             </div>
           </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        open={showCashMoveModal}
+        onClose={() => setShowCashMoveModal(false)}
+        title={cashMoveType === 'REFORCO' ? 'Registrar reforco' : 'Registrar sangria'}
+        description="Preencha o valor e o motivo para registrar a movimentacao no caixa."
+        footer={
+          <>
+            <Button type="button" onClick={() => setShowCashMoveModal(false)} variant="secondary">
+              Cancelar
+            </Button>
+            <Button type="button" onClick={() => void handleCashMove()} variant={cashMoveType === 'REFORCO' ? 'success' : 'warning'}>
+              Confirmar
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <Input
+            value={cashMoveAmount}
+            onChange={(event) => setCashMoveAmount(event.target.value)}
+            placeholder="Valor em R$"
+            inputMode="decimal"
+            label="Valor"
+          />
+          <TextArea
+            value={cashMoveReason}
+            onChange={(event) => setCashMoveReason(event.target.value)}
+            placeholder="Motivo da movimentacao"
+            rows={3}
+            label="Motivo"
+          />
         </div>
-      ) : null}
+      </Modal>
     </div>
   )
 }
