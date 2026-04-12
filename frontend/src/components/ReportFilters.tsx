@@ -1,4 +1,5 @@
-﻿import React from 'react'
+import React from 'react'
+import { Badge, Button, FilterBar, Input } from './ui'
 
 type ReportFiltersProps = {
   fromDate: string
@@ -9,24 +10,51 @@ type ReportFiltersProps = {
   onApply: () => void
 }
 
-export const ReportFilters: React.FC<ReportFiltersProps> = ({ fromDate, toDate, onChangeFrom, onChangeTo, onQuickRange, onApply }) => {
+export const ReportFilters: React.FC<ReportFiltersProps> = ({
+  fromDate,
+  toDate,
+  onChangeFrom,
+  onChangeTo,
+  onQuickRange,
+  onApply,
+}) => {
   return (
-    <div className="panel p-4 md:p-5">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-wrap gap-2">
-          <input value={fromDate} onChange={(event) => onChangeFrom(event.target.value)} className="rounded-lg border border-brand-200 px-3 py-2 text-sm" type="date" />
-          <input value={toDate} onChange={(event) => onChangeTo(event.target.value)} className="rounded-lg border border-brand-200 px-3 py-2 text-sm" type="date" />
-          <button onClick={onApply} className="rounded-lg bg-brand-600 px-3 py-2 text-sm font-semibold text-white">
-            Aplicar
-          </button>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={() => onQuickRange(0)} className="rounded-lg border border-brand-200 bg-white px-3 py-2 text-sm font-semibold text-brand-700">Hoje</button>
-          <button onClick={() => onQuickRange(1)} className="rounded-lg border border-brand-200 bg-white px-3 py-2 text-sm font-semibold text-brand-700">Ontem</button>
-          <button onClick={() => onQuickRange(7)} className="rounded-lg border border-brand-200 bg-white px-3 py-2 text-sm font-semibold text-brand-700">7 dias</button>
-          <button onClick={() => onQuickRange(30)} className="rounded-lg border border-brand-200 bg-white px-3 py-2 text-sm font-semibold text-brand-700">30 dias</button>
-        </div>
+    <FilterBar
+      title="Periodo do relatorio"
+      description="Filtre vendas, pagamentos e desempenho operacional sem sair da mesma visao."
+      actions={<Badge variant="brand">Atualizacao manual</Badge>}
+    >
+      <Input
+        label="Data inicial"
+        value={fromDate}
+        onChange={(event) => onChangeFrom(event.target.value)}
+        type="date"
+        className="min-w-[11rem]"
+      />
+      <Input
+        label="Data final"
+        value={toDate}
+        onChange={(event) => onChangeTo(event.target.value)}
+        type="date"
+        className="min-w-[11rem]"
+      />
+      <Button onClick={onApply} variant="primary">
+        Aplicar filtro
+      </Button>
+      <div className="flex flex-wrap gap-2 lg:ml-auto">
+        <Button onClick={() => onQuickRange(0)} variant="secondary" size="sm">
+          Hoje
+        </Button>
+        <Button onClick={() => onQuickRange(1)} variant="secondary" size="sm">
+          Ontem
+        </Button>
+        <Button onClick={() => onQuickRange(7)} variant="secondary" size="sm">
+          7 dias
+        </Button>
+        <Button onClick={() => onQuickRange(30)} variant="secondary" size="sm">
+          30 dias
+        </Button>
       </div>
-    </div>
+    </FilterBar>
   )
 }

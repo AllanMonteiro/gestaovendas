@@ -1,5 +1,7 @@
-import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { ReportsAnalyticsTabs } from '../components/ReportsAnalyticsTabs'
 import { ReportFilters } from '../components/ReportFilters'
+import { Badge, Button, Card, PageHeader, StatCard } from '../components/ui'
 import { api } from '../api/client'
 
 type SummaryResponse = {
@@ -23,12 +25,6 @@ type CategoryRow = {
   product__category__id: number | null
   product__category__name: string | null
   total: string
-}
-
-type DailySalesRow = {
-  day: string
-  total: string
-  count: number
 }
 
 type PaymentRow = {
@@ -72,8 +68,6 @@ type CashSummary = {
   divergence_cash_total: string | number
 }
 
-type ChartGranularity = 'day' | 'week' | 'month'
-
 type OrderItem = {
   id: string
   product_name: string
@@ -108,7 +102,6 @@ type ReportsDashboardResponse = {
   summary: SummaryResponse
   categories: CategoryRow[]
   products: ProductRow[]
-  daily_sales: DailySalesRow[]
   payments: PaymentRow[]
   cash_summary: CashSummary
   cash_history: CashHistoryRow[]
@@ -125,38 +118,23 @@ const formatSignedBRL = (value: string | number | null | undefined) => {
 }
 const formatNumber = (value: number | null | undefined) => Number(value || 0).toLocaleString('pt-BR')
 const toISODate = (date: Date) => date.toISOString().slice(0, 10)
-const toMonthValue = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 const getPaymentMethodOption = (payment?: OrderPayment | null) => {
   if (!payment) return 'CASH'
   if (payment.method === 'CARD' && payment.meta?.card_type === 'CREDIT') return 'CARD_CREDIT'
   if (payment.method === 'CARD' && payment.meta?.card_type === 'DEBIT') return 'CARD_DEBIT'
   return payment.method
 }
-const monthRange = (value: string) => {
-  const [year, month] = value.split('-').map(Number)
-  const start = new Date(year, month - 1, 1)
-  const end = new Date(year, month, 0)
-  return { from: toISODate(start), to: toISODate(end) }
-}
 const getOrderDisplayNumber = (order: Pick<OrderRow, 'id' | 'display_number'>) => order.display_number || order.id.slice(0, 8)
 const REPORT_ORDER_PAGE_SIZE = 50
-const Charts = lazy(async () => {
-  const module = await import('../components/Charts')
-  return { default: module.Charts }
-})
 
 const Relatorios: React.FC = () => {
-  const initialMonth = toMonthValue(new Date())
-  const initialRange = monthRange(initialMonth)
+  const initialDate = toISODate(new Date())
 
-  const [selectedMonth, setSelectedMonth] = useState(initialMonth)
-  const [chartGranularity, setChartGranularity] = useState<ChartGranularity>('day')
-  const [fromDate, setFromDate] = useState(initialRange.from)
-  const [toDate, setToDate] = useState(initialRange.to)
+  const [fromDate, setFromDate] = useState(initialDate)
+  const [toDate, setToDate] = useState(initialDate)
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
   const [categories, setCategories] = useState<CategoryRow[]>([])
   const [products, setProducts] = useState<ProductRow[]>([])
-  const [dailySales, setDailySales] = useState<DailySalesRow[]>([])
   const [payments, setPayments] = useState<PaymentRow[]>([])
   const [cashSummary, setCashSummary] = useState<CashSummary | null>(null)
   const [cashHistory, setCashHistory] = useState<CashHistoryRow[]>([])
@@ -174,6 +152,8 @@ const Relatorios: React.FC = () => {
   const [salePaymentMethod, setSalePaymentMethod] = useState<'CASH' | 'PIX' | 'CARD_CREDIT' | 'CARD_DEBIT'>('CASH')
   const [saleDatePassword, setSaleDatePassword] = useState('')
   const [savingSaleDateOrderId, setSavingSaleDateOrderId] = useState<string | null>(null)
+  const [isReportsLoading, setIsReportsLoading] = useState(false)
+  const [reportsLoadError, setReportsLoadError] = useState('')
   const loadReportsRequestIdRef = useRef(0)
 
   const loadReports = useCallback(async (
@@ -188,6 +168,9 @@ const Relatorios: React.FC = () => {
     const requestId = ++loadReportsRequestIdRef.current
     const nextFinalizedLimit = options?.finalizedLimit ?? finalizedLimit
     const nextCanceledLimit = options?.canceledLimit ?? canceledLimit
+    if (!options?.preserveDetails) {
+      setIsReportsLoading(true)
+    }
     try {
       const [dashboardResp, finalizedResp, canceledResp] = await Promise.all([
         api.get<ReportsDashboardResponse>(`/api/reports/dashboard?from=${from}&to=${to}&limit=20`),
@@ -200,7 +183,6 @@ const Relatorios: React.FC = () => {
       setSummary(dashboardResp.data.summary)
       setCategories(dashboardResp.data.categories)
       setProducts(dashboardResp.data.products)
-      setDailySales(dashboardResp.data.daily_sales)
       setPayments(dashboardResp.data.payments)
       setCashSummary(dashboardResp.data.cash_summary)
       setCashHistory(dashboardResp.data.cash_history)
@@ -218,10 +200,16 @@ const Relatorios: React.FC = () => {
         setSalePaymentMethod('CASH')
         setSaleDatePassword('')
       }
+      setReportsLoadError('')
       setFeedback('')
     } catch {
       if (requestId === loadReportsRequestIdRef.current) {
+        setReportsLoadError('Nao foi possivel carregar a distribuicao financeira para o periodo selecionado.')
         setFeedback('Falha ao carregar relatorios.')
+      }
+    } finally {
+      if (requestId === loadReportsRequestIdRef.current) {
+        setIsReportsLoading(false)
       }
     }
   }, [canceledLimit, finalizedLimit, fromDate, toDate])
@@ -293,30 +281,17 @@ const Relatorios: React.FC = () => {
   }
 
   useEffect(() => {
-    void loadReports(initialRange.from, initialRange.to, {
+    void loadReports(initialDate, initialDate, {
       finalizedLimit: REPORT_ORDER_PAGE_SIZE,
       canceledLimit: REPORT_ORDER_PAGE_SIZE,
       preserveDetails: false,
     })
-  }, [loadReports])
-
-  const handleMonthChange = (value: string) => {
-    setSelectedMonth(value)
-    const range = monthRange(value)
-    setFromDate(range.from)
-    setToDate(range.to)
-    void loadReports(range.from, range.to, {
-      finalizedLimit: REPORT_ORDER_PAGE_SIZE,
-      canceledLimit: REPORT_ORDER_PAGE_SIZE,
-      preserveDetails: false,
-    })
-  }
+  }, [initialDate, loadReports])
 
   const handleQuickRange = (days: 0 | 1 | 7 | 30) => {
     const now = new Date()
     if (days === 0) {
       const today = toISODate(now)
-      setSelectedMonth(toMonthValue(now))
       setFromDate(today)
       setToDate(today)
       void loadReports(today, today, {
@@ -330,7 +305,6 @@ const Relatorios: React.FC = () => {
       const yesterday = new Date(now)
       yesterday.setDate(now.getDate() - 1)
       const y = toISODate(yesterday)
-      setSelectedMonth(toMonthValue(yesterday))
       setFromDate(y)
       setToDate(y)
       void loadReports(y, y, {
@@ -344,7 +318,6 @@ const Relatorios: React.FC = () => {
     start.setDate(now.getDate() - (days - 1))
     const from = toISODate(start)
     const to = toISODate(now)
-    setSelectedMonth(toMonthValue(now))
     setFromDate(from)
     setToDate(to)
     void loadReports(from, to, {
@@ -381,21 +354,32 @@ const Relatorios: React.FC = () => {
   }, [canceledLimit, finalizedLimit, fromDate, loadReports, toDate])
 
   const cards = [
-    { label: 'Faturamento finalizado', value: formatBRL(summary?.total_sales) },
-    { label: 'Pedidos finalizados', value: formatNumber(summary?.total_orders) },
-    { label: 'Ticket medio', value: formatBRL(summary?.avg_ticket) },
-    { label: 'Descontos', value: formatBRL(summary?.total_discount) },
-    { label: 'Pedidos cancelados', value: formatNumber(summary?.canceled_count) },
-    { label: 'Total cancelado', value: formatBRL(summary?.canceled_total) },
+    { label: 'Faturamento finalizado', value: formatBRL(summary?.total_sales), description: 'Receita consolidada do periodo', tone: 'accent' as const },
+    { label: 'Pedidos finalizados', value: formatNumber(summary?.total_orders), description: 'Operacoes concluidas com sucesso' },
+    { label: 'Ticket medio', value: formatBRL(summary?.avg_ticket), description: 'Media por pedido finalizado' },
+    { label: 'Descontos', value: formatBRL(summary?.total_discount), description: 'Valor concedido no periodo' },
+    { label: 'Pedidos cancelados', value: formatNumber(summary?.canceled_count), description: 'Ocorrencias de cancelamento', tone: 'warning' as const },
+    { label: 'Total cancelado', value: formatBRL(summary?.canceled_total), description: 'Impacto financeiro dos cancelamentos', tone: 'danger' as const },
   ]
 
-  const selectedMonthLabel = new Date(`${selectedMonth}-01T00:00:00`).toLocaleDateString('pt-BR', {
-    month: 'long',
-    year: 'numeric'
-  })
+  const selectedPeriodLabel = fromDate === toDate
+    ? new Date(`${fromDate}T00:00:00`).toLocaleDateString('pt-BR')
+    : `${new Date(`${fromDate}T00:00:00`).toLocaleDateString('pt-BR')} ate ${new Date(`${toDate}T00:00:00`).toLocaleDateString('pt-BR')}`
 
   return (
     <div className="space-y-5">
+      <PageHeader
+        eyebrow="Analytics"
+        title="Relatorios"
+        description="Acompanhe vendas, pagamentos e comportamento operacional com leitura mais clara e foco em decisao rapida."
+        meta={
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="brand">{selectedPeriodLabel}</Badge>
+            <Badge variant="neutral">{formatNumber(summary?.total_orders)} pedidos no periodo</Badge>
+          </div>
+        }
+      />
+
       <ReportFilters
         fromDate={fromDate}
         toDate={toDate}
@@ -405,63 +389,31 @@ const Relatorios: React.FC = () => {
         onApply={handleApplyFilters}
       />
 
-      {feedback ? <p className="text-sm text-brand-700">{feedback}</p> : null}
-
-      <section className="panel p-4 md:p-5">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h3 className="text-lg font-semibold">Filtro mensal dos graficos</h3>
-            <p className="text-sm text-slate-500">Selecione um mes para ver a distribuicao diaria das vendas.</p>
-          </div>
-          <label className="flex items-center gap-3 text-sm font-medium text-slate-700">
-            <span>Mes</span>
-            <input
-              value={selectedMonth}
-              onChange={(event) => handleMonthChange(event.target.value)}
-              type="month"
-              className="rounded-lg border border-brand-200 px-3 py-2 text-sm"
-            />
-          </label>
-        </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {[
-            { value: 'day', label: 'Dia' },
-            { value: 'week', label: 'Semana' },
-            { value: 'month', label: 'Mes' }
-          ].map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => setChartGranularity(option.value as ChartGranularity)}
-              className={`rounded-full px-4 py-2 text-sm font-semibold ${
-                chartGranularity === option.value
-                  ? 'bg-gradient-to-r from-brand-600 to-brand-500 text-white shadow'
-                  : 'border border-brand-200 bg-white text-brand-700'
-              }`}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </section>
+      {feedback ? (
+        <Card className="p-4 text-sm text-amber-900" tone="warning">
+          {feedback}
+        </Card>
+      ) : null}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         {cards.map((card) => (
-          <article key={card.label} className="panel p-4">
-            <p className="text-sm text-slate-500">{card.label}</p>
-            <p className="mt-2 text-2xl font-semibold tracking-tight">{card.value}</p>
-          </article>
+          <StatCard
+            key={card.label}
+            label={card.label}
+            value={card.value}
+            description={card.description}
+            tone={card.tone}
+          />
         ))}
       </div>
 
-      <Suspense fallback={<div className="panel p-5 text-sm text-slate-500">Carregando graficos...</div>}>
-        <Charts
-          dailySales={dailySales}
-          payments={payments}
-          chartGranularity={chartGranularity}
-          selectedPeriodLabel={selectedMonthLabel}
-        />
-      </Suspense>
+      <ReportsAnalyticsTabs
+        fromDate={fromDate}
+        toDate={toDate}
+        payments={payments}
+        paymentsError={!isReportsLoading ? reportsLoadError : ''}
+        selectedPeriodLabel={selectedPeriodLabel}
+      />
 
       <section className="panel p-5">
         <div className="mb-3 flex items-center justify-between gap-3">
@@ -489,65 +441,6 @@ const Relatorios: React.FC = () => {
                 <tr className="border-t border-brand-100">
                   <td colSpan={2} className="py-3 text-center text-slate-500">
                     Sem categorias com vendas no periodo.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section className="panel p-5">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold">Fechamentos de caixa</h3>
-            <p className="text-sm text-slate-500">Resumo em dinheiro seguindo o mesmo filtro do relatorio.</p>
-          </div>
-          <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
-            {formatNumber(cashSummary?.sessions_count)} fechamento(s)
-          </span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-slate-500">
-                <th className="pb-2">Abertura</th>
-                <th className="pb-2">Fechamento</th>
-                <th className="pb-2">Entradas dinheiro</th>
-                <th className="pb-2">Saldo esperado</th>
-                <th className="pb-2">Divergencia (Dinheiro / PIX / Cartao)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cashHistory.map((session) => (
-                <tr key={session.id} className="border-t border-brand-100">
-                  <td className="py-2">{new Date(session.opened_at).toLocaleString('pt-BR')}</td>
-                  <td className="py-2">{session.closed_at ? new Date(session.closed_at).toLocaleString('pt-BR') : '-'}</td>
-                  <td className="py-2 font-medium">{formatBRL(session.cash_breakdown?.cash_sales ?? 0)}</td>
-                  <td className="py-2 font-medium">{formatBRL(session.cash_breakdown?.expected_cash ?? 0)}</td>
-                  <td className="py-2">
-                    {session.reconciliation_data?.divergence ? (
-                      <div className="flex flex-wrap gap-2 text-xs">
-                        <span className={Number(session.reconciliation_data.divergence.cash ?? 0) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
-                          Din: {formatSignedBRL(session.reconciliation_data.divergence.cash)}
-                        </span>
-                        <span className={Number(session.reconciliation_data.divergence.pix ?? 0) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
-                          PIX: {formatSignedBRL(session.reconciliation_data.divergence.pix)}
-                        </span>
-                        <span className={Number(session.reconciliation_data.divergence.card ?? 0) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
-                          Car: {formatSignedBRL(session.reconciliation_data.divergence.card)}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className="text-slate-400">Sem dados</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {cashHistory.length === 0 ? (
-                <tr className="border-t border-brand-100">
-                  <td colSpan={5} className="py-3 text-center text-slate-500">
-                    Nenhum fechamento de caixa no periodo.
                   </td>
                 </tr>
               ) : null}
