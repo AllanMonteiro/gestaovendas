@@ -14,4 +14,7 @@ export const useCashDashboard = (params: UseCashDashboardParams) =>
   useQuery({
     queryKey: salesQueryKeys.cashDashboard.detail(params),
     queryFn: () => listCashDashboard(params),
+    staleTime: 15_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })

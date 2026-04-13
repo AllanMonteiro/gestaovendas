@@ -168,7 +168,7 @@ type CashDashboardResponse = {
 const CASH_DASHBOARD_ORDERS_LIMIT = 50
 const CASH_DASHBOARD_MOVES_LIMIT = 120
 const CASH_DASHBOARD_HISTORY_LIMIT = 30
-const CASH_REFRESH_DEBOUNCE_MS = 150
+const CASH_REFRESH_DEBOUNCE_MS = 350
 
 const formatBRL = (value: string | number) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const getOrderDisplayNumber = (order: Pick<Order, 'id' | 'display_number'>) => order.display_number || order.id.slice(0, 8)
@@ -615,7 +615,6 @@ const Caixa: React.FC = () => {
             ? 'Caixa aberto. Cupom aberto para imprimir/salvar em PDF.'
             : 'Caixa aberto, mas a impressao do cupom falhou.'
       )
-      refreshDashboard()
     } catch (error: unknown) {
       setFeedback(getApiErrorText(error, 'Falha ao abrir caixa.'))
     }
@@ -653,7 +652,6 @@ const Caixa: React.FC = () => {
       setCashMoveAmount('')
       setCashMoveReason('')
       setFeedback(cashMoveType === 'REFORCO' ? 'Reforco registrado.' : 'Sangria registrada.')
-      refreshDashboard()
     } catch (error: unknown) {
       setFeedback(getApiErrorText(error, 'Falha ao registrar movimentacao.'))
     }
@@ -673,7 +671,6 @@ const Caixa: React.FC = () => {
     try {
       await deleteCashMoveMutation.mutateAsync(entry.moveId)
       setFeedback(entry.kind === 'REFORCO' ? 'Reforco excluido.' : 'Sangria excluida.')
-      refreshDashboard()
     } catch (error: unknown) {
       setFeedback(getApiErrorText(error, 'Falha ao excluir movimentacao.'))
     }
@@ -733,7 +730,6 @@ const Caixa: React.FC = () => {
             ? 'Caixa fechado. Cupom aberto para imprimir/salvar em PDF.'
             : 'Caixa fechado, mas a impressao do cupom falhou.'
       )
-      refreshDashboard()
     } catch (error: unknown) {
       setFeedback(getApiErrorText(error, 'Falha ao fechar caixa.'))
     }
@@ -881,6 +877,7 @@ const Caixa: React.FC = () => {
               <Button
                 onClick={() => void handleOpenCash()}
                 variant="primary"
+                fullWidth
               >
                 Abrir caixa
               </Button>
@@ -889,6 +886,7 @@ const Caixa: React.FC = () => {
                 type="button"
                 disabled
                 variant="secondary"
+                fullWidth
               >
                 Caixa ja aberto
               </Button>
@@ -897,15 +895,17 @@ const Caixa: React.FC = () => {
               onClick={() => openCashMoveModal('SANGRIA')}
               disabled={!cashStatus.open}
               variant="warning"
+              fullWidth
             >
-              Sangria
+              Registrar sangria
             </Button>
             <Button
               onClick={() => openCashMoveModal('REFORCO')}
               disabled={!cashStatus.open}
               variant="success"
+              fullWidth
             >
-              Reforco
+              Registrar reforco
             </Button>
           </div>
         <Card className="px-3 py-2 text-sm text-slate-600" tone="muted">
