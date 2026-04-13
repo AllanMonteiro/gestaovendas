@@ -51,6 +51,7 @@ export type Reconciliation = {
 
 export type CashMove = {
   id: number
+  session?: number | null
   type: 'SANGRIA' | 'REFORCO'
   amount: string
   reason: string

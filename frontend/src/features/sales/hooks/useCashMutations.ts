@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { closeCashSession, createCashMove, openCashSession } from '../mutations'
+import { closeCashSession, createCashMove, deleteCashMove, openCashSession } from '../mutations'
 import { salesQueryKeys } from '../queryKeys'
 
 const invalidateCashDashboard = (queryClient: ReturnType<typeof useQueryClient>) => {
@@ -22,6 +22,17 @@ export const useCreateCashMoveMutation = () => {
 
   return useMutation({
     mutationFn: createCashMove,
+    onSuccess: () => {
+      invalidateCashDashboard(queryClient)
+    },
+  })
+}
+
+export const useDeleteCashMoveMutation = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: deleteCashMove,
     onSuccess: () => {
       invalidateCashDashboard(queryClient)
     },

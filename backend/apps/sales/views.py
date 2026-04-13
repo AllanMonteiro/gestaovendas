@@ -543,6 +543,34 @@ class CashMoveView(APIView):
         return Response(CashMoveSerializer(move).data)
 
 
+class CashMoveDetailView(APIView):
+    def delete(self, request, move_id):
+        if auth_is_required() and not user_has_permission(request.user, 'cash.manage'):
+            return Response({'detail': 'Forbidden'}, status=403)
+
+        move = CashMove.objects.select_related('session').filter(id=move_id).first()
+        if not move:
+            return Response({'detail': 'Movimentacao nao encontrada'}, status=404)
+
+        deleted_payload = {
+            'id': move.id,
+            'type': move.type,
+            'amount': str(move.amount),
+            'session_id': move.session_id,
+        }
+        try:
+            services.delete_cash_move(move=move, user=request.user)
+        except ValueError as exc:
+            return Response({'detail': str(exc)}, status=400)
+
+        try:
+            broadcast_pdv_event('cash_move_deleted', deleted_payload)
+            broadcast_pdv_event('cash_status_changed', {'open': True, 'session_id': deleted_payload['session_id']})
+        except Exception:
+            logger.exception('Failed to broadcast cash move delete event')
+        return Response({'status': 'deleted'})
+
+
 class CashCloseView(APIView):
     def post(self, request):
         if auth_is_required() and not user_has_permission(request.user, 'cash.manage'):

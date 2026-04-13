@@ -8,6 +8,7 @@ import { ChartCard, ChartEmptyState, ChartLegend, ChartPill } from '../component
 import {
   useCloseCashSessionMutation,
   useCreateCashMoveMutation,
+  useDeleteCashMoveMutation,
   useOpenCashSessionMutation,
 } from '../features/sales/hooks/useCashMutations'
 import { salesQueryKeys } from '../features/sales/queryKeys'
@@ -129,6 +130,8 @@ type FlowEntry = {
   input: number
   output: number
   paymentLabel?: string
+  moveId?: number
+  canDelete?: boolean
 }
 
 type Summary = {
@@ -255,6 +258,7 @@ const Caixa: React.FC = () => {
   const queryClient = useQueryClient()
   const openCashMutation = useOpenCashSessionMutation()
   const createCashMoveMutation = useCreateCashMoveMutation()
+  const deleteCashMoveMutation = useDeleteCashMoveMutation()
   const closeCashMutation = useCloseCashSessionMutation()
   const [cashStatus, setCashStatus] = useState<CashStatusResponse>({ open: false })
   const [orders, setOrders] = useState<Order[]>([])
@@ -427,6 +431,7 @@ const Caixa: React.FC = () => {
       eventName === 'order_paid' ||
       eventName === 'order_canceled' ||
       eventName === 'cash_move_created' ||
+      eventName === 'cash_move_deleted' ||
       eventName === 'cash_status_changed'
     ) {
       if (wsRefreshTimerRef.current !== null) {
@@ -515,10 +520,12 @@ const Caixa: React.FC = () => {
       input: move.type === 'REFORCO' ? Number(move.amount || 0) : 0,
       output: move.type === 'SANGRIA' ? Number(move.amount || 0) : 0,
       paymentLabel: move.type === 'REFORCO' ? 'Aporte manual' : '-',
+      moveId: move.id,
+      canDelete: Boolean(cashStatus.open && move.session && move.session === cashStatus.session?.id),
     }))
 
     return [...salesEntries, ...moveEntries].sort((a, b) => (a.at < b.at ? 1 : -1))
-  }, [orders, cashMoves, orderPaymentLabels])
+  }, [orders, cashMoves, orderPaymentLabels, cashStatus.open, cashStatus.session?.id])
 
   const cashHistorySangriaBySession = useMemo(() => {
     const grouped: Record<number, SessionCashReason[]> = {}
@@ -649,6 +656,26 @@ const Caixa: React.FC = () => {
       refreshDashboard()
     } catch (error: unknown) {
       setFeedback(getApiErrorText(error, 'Falha ao registrar movimentacao.'))
+    }
+  }
+
+  const handleDeleteCashMove = async (entry: FlowEntry) => {
+    if (!entry.moveId || !entry.canDelete) {
+      return
+    }
+    const confirmed = window.confirm(
+      `Excluir ${entry.kind === 'REFORCO' ? 'este reforco' : 'esta sangria'} do caixa?`
+    )
+    if (!confirmed) {
+      return
+    }
+
+    try {
+      await deleteCashMoveMutation.mutateAsync(entry.moveId)
+      setFeedback(entry.kind === 'REFORCO' ? 'Reforco excluido.' : 'Sangria excluida.')
+      refreshDashboard()
+    } catch (error: unknown) {
+      setFeedback(getApiErrorText(error, 'Falha ao excluir movimentacao.'))
     }
   }
 
@@ -995,6 +1022,7 @@ const Caixa: React.FC = () => {
                 <TableHeaderCell>Forma de entrada</TableHeaderCell>
                 <TableHeaderCell>Entrada</TableHeaderCell>
                 <TableHeaderCell>Saida</TableHeaderCell>
+                <TableHeaderCell>Acao</TableHeaderCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -1005,11 +1033,26 @@ const Caixa: React.FC = () => {
                   <TableCell>{entry.paymentLabel || '-'}</TableCell>
                   <TableCell className="text-emerald-700">{entry.input > 0 ? formatBRL(entry.input) : '-'}</TableCell>
                   <TableCell className="text-rose-700">{entry.output > 0 ? formatBRL(entry.output) : '-'}</TableCell>
+                  <TableCell>
+                    {entry.canDelete ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="danger"
+                        disabled={deleteCashMoveMutation.isPending}
+                        onClick={() => void handleDeleteCashMove(entry)}
+                      >
+                        Apagar
+                      </Button>
+                    ) : (
+                      <span className="text-slate-400">-</span>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
               {flowEntries.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className="text-center text-slate-500">
+                  <TableCell colSpan={6} className="text-center text-slate-500">
                     Nenhum movimento de fluxo no periodo.
                   </TableCell>
                 </TableRow>

@@ -475,6 +475,37 @@ def cash_move(*, user, move_type: str, amount: Decimal, reason: str) -> CashMove
 
 
 @transaction.atomic
+def delete_cash_move(*, move: CashMove, user=None) -> None:
+    effective_user = resolve_effective_user(user)
+    if move.type not in {CashMove.TYPE_REFORCO, CashMove.TYPE_SANGRIA}:
+        raise ValueError('Tipo de movimentacao nao pode ser excluido.')
+    if move.session.status != CashSession.STATUS_OPEN:
+        raise ValueError('Somente movimentacoes da sessao aberta podem ser excluidas.')
+
+    current_session = CashSession.objects.filter(status=CashSession.STATUS_OPEN).first()
+    if current_session is None or move.session_id != current_session.id:
+        raise ValueError('Somente movimentacoes da sessao aberta podem ser excluidas.')
+
+    move_id = move.id
+    before = {
+        'move_id': move.id,
+        'type': move.type,
+        'amount': str(move.amount),
+        'reason': move.reason,
+        'user_id': move.user_id,
+    }
+    move.delete()
+    log_audit(
+        user=effective_user,
+        action='cash.move.delete',
+        entity='cash_session',
+        entity_id=current_session.id,
+        before=before,
+        after={'deleted_move_id': move_id},
+    )
+
+
+@transaction.atomic
 def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_card: Decimal):
     effective_user = resolve_effective_user(user)
     session = CashSession.objects.filter(status=CashSession.STATUS_OPEN).first()

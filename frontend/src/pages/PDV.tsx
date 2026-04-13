@@ -853,7 +853,7 @@ const PDV: React.FC = () => {
       if (data?.event === 'order_paid' || data?.event === 'order_canceled') {
         scheduleRefresh({ orders: true, cash: true })
       }
-      if (data?.event === 'cash_move_created' || data?.event === 'cash_status_changed') {
+      if (data?.event === 'cash_move_created' || data?.event === 'cash_move_deleted' || data?.event === 'cash_status_changed') {
         scheduleRefresh({ cash: true })
       }
       if (data?.event === 'order_status_changed' || data?.event === 'order_ready') {

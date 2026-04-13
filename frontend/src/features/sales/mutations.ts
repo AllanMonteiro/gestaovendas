@@ -11,6 +11,11 @@ export const createCashMove = async (input: CashMoveInput) => {
   return response.data
 }
 
+export const deleteCashMove = async (moveId: number) => {
+  const response = await api.delete(`/api/cash/move/${moveId}`)
+  return response.data
+}
+
 export const closeCashSession = async (input: CashCloseInput) => {
   const response = await api.post<Reconciliation>('/api/cash/close', input)
   return response.data

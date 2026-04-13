@@ -62,7 +62,7 @@ npm run dev
 
 - `SECURE_SSL_REDIRECT=1`
 - `DJANGO_LOG_LEVEL=INFO`
-- `WEB_CONCURRENCY=2`
+- `WEB_CONCURRENCY=1`
 - `REDIS_URL` se quiser Redis externo para Channels
 
 ### Frontend na Vercel
@@ -80,8 +80,11 @@ npm run dev
 Exemplo:
 
 ```text
-postgresql://postgres:SENHA@db.xxxxxxxxx.supabase.co:5432/postgres?sslmode=require
+postgresql://postgres:SENHA@aws-REGIAO.pooler.supabase.com:6543/postgres?sslmode=require
 ```
+
+Para Render e outros hosts com limite baixo de conexoes, prefira o pooler transacional do Supabase na porta `6543`.
+Evite a porta `5432` do pooler em session mode quando o app usa mais de um processo.
 
 Se a senha tiver caracteres especiais, use URL encoding.
 
@@ -234,10 +237,10 @@ Correcao:
 ### Falha na conexao com Supabase
 
 Causa:
-- `DATABASE_URL` incorreta ou sem `sslmode=require`
+- `DATABASE_URL` incorreta, sem `sslmode=require` ou apontando para o pooler `5432` em session mode
 
 Correcao:
-- revise a string e confirme `sslmode=require`
+- revise a string, confirme `sslmode=require` e prefira o pooler transacional na porta `6543`
 
 ### WebSocket nao conecta
 

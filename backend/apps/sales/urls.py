@@ -17,6 +17,7 @@ urlpatterns = [
     path('cash/open', views.CashOpenView.as_view()),
     path('cash/dashboard', views.CashDashboardView.as_view()),
     path('cash/move', views.CashMoveView.as_view()),
+    path('cash/move/<int:move_id>', views.CashMoveDetailView.as_view()),
     path('cash/close', views.CashCloseView.as_view()),
     path('cash/status', views.CashStatusView.as_view()),
     path('cash/history', views.CashHistoryView.as_view()),

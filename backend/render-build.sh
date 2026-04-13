@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
+export DJANGO_SETTINGS_MODULE="${DJANGO_SETTINGS_MODULE:-config.settings.production}"
+
 echo "Python version:"
 python --version
 

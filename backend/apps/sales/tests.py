@@ -9,7 +9,7 @@ from apps.accounts.models import User
 from apps.audit.models import AuditLog
 from apps.catalog.models import Category, Product, ProductPrice
 from apps.loyalty.models import Customer, LoyaltyAccount, LoyaltyMove
-from apps.sales.models import Order, Payment, StoreConfig
+from apps.sales.models import CashMove, Order, Payment, StoreConfig
 from apps.sales import services
 
 
@@ -151,6 +151,49 @@ class CashPaymentMetaTests(TestCase):
 
         payment = Payment.objects.get(order=order)
         self.assertEqual(payment.meta, {'cash_received': '20.00', 'change_amount': '7.50'})
+
+
+class CashMoveDeleteApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.user = User.objects.create_superuser(email='cash-delete@test.com', password='test123', name='Cash Delete Admin')
+        self.client.force_authenticate(user=self.user)
+        services.open_cash(user=self.user, initial_float=Decimal('100.00'))
+
+    def test_delete_cash_move_removes_open_session_move(self):
+        move = services.cash_move(
+            user=self.user,
+            move_type=CashMove.TYPE_SANGRIA,
+            amount=Decimal('12.50'),
+            reason='Digitado errado',
+        )
+
+        response = self.client.delete(f'/api/cash/move/{move.id}')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(CashMove.objects.filter(id=move.id).exists())
+        audit = AuditLog.objects.get(action='cash.move.delete', entity='cash_session')
+        self.assertEqual(audit.before['move_id'], move.id)
+        self.assertEqual(audit.before['type'], CashMove.TYPE_SANGRIA)
+
+    def test_delete_cash_move_rejects_closed_session_move(self):
+        move = services.cash_move(
+            user=self.user,
+            move_type=CashMove.TYPE_REFORCO,
+            amount=Decimal('10.00'),
+            reason='Aporte',
+        )
+        services.close_cash(
+            user=self.user,
+            counted_cash=Decimal('110.00'),
+            counted_pix=Decimal('0.00'),
+            counted_card=Decimal('0.00'),
+        )
+
+        response = self.client.delete(f'/api/cash/move/{move.id}')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data.get('detail'), 'Somente movimentacoes da sessao aberta podem ser excluidas.')
 
 
 class AddItemTotalsTests(TestCase):
