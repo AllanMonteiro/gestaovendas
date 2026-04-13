@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState, Suspense, lazy } from 'react'
-import { createBrowserRouter, NavLink, Outlet, useLocation, useNavigate, useRouteError } from 'react-router-dom'
+import { Navigate, createBrowserRouter, NavLink, Outlet, useLocation, useNavigate, useRouteError } from 'react-router-dom'
 import { useOutboxSync } from './useSync'
 import { api } from '../api/client'
 import { type AuthSession } from './auth'
@@ -192,7 +192,7 @@ const Layout: React.FC = () => {
   const fetchDeliveryOrdersRef = useRef<(options?: { notifyOnNew?: boolean }) => void>(() => undefined)
 
   const links = [
-    { to: '/', label: 'Caixa' },
+    { to: '/caixa', label: 'Caixa' },
     { to: '/pdv', label: 'PDV' },
     { to: '/cozinha', label: 'Cozinha' },
     { to: '/produtos', label: 'Produtos' },
@@ -502,10 +502,19 @@ const Layout: React.FC = () => {
 export const router = createBrowserRouter([
   {
     path: '/',
+    element: <Navigate to="/entrar" replace />,
+  },
+  {
+    path: '/entrar',
+    element: <LoginGate mode="entry" />,
+    errorElement: <RouteErrorBoundary />,
+  },
+  {
+    path: '/',
     element: <LoginGate><Layout /></LoginGate>,
     errorElement: <RouteErrorBoundary />,
     children: [
-      { index: true, element: <Caixa /> },
+      { index: true, element: <Navigate to="/caixa" replace /> },
       { path: 'pdv', element: <PDV /> },
       { path: 'caixa', element: <Caixa /> },
       { path: 'cozinha', element: <Cozinha /> },
