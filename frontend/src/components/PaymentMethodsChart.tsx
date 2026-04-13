@@ -14,7 +14,7 @@ type PaymentMethodsChartProps = {
 }
 
 type PaymentBucket = {
-  label: 'Pix' | 'Cartao' | 'Dinheiro' | 'Prazo'
+  label: 'Pix' | 'Cartao credito' | 'Cartao debito' | 'Cartao' | 'Dinheiro' | 'Prazo'
   total: number
   color: string
   percent: number
@@ -25,16 +25,20 @@ const formatBRL = (value: number) =>
 
 const paymentPalette: Record<PaymentBucket['label'], string> = {
   Pix: '#e55c2f',
-  Cartao: '#f08b55',
-  Dinheiro: '#f6b287',
-  Prazo: '#facfb5',
+  'Cartao credito': '#f08b55',
+  'Cartao debito': '#f6b287',
+  Cartao: '#f3c39d',
+  Dinheiro: '#facfb5',
+  Prazo: '#fde6d7',
 }
 
 const getPaymentBucket = (method?: string): PaymentBucket['label'] => {
   const normalized = String(method || '').toUpperCase()
   if (normalized === 'PIX') return 'Pix'
   if (normalized === 'CASH') return 'Dinheiro'
-  if (normalized === 'CARD' || normalized === 'CARD_CREDIT' || normalized === 'CARD_DEBIT') return 'Cartao'
+  if (normalized === 'CARD_CREDIT') return 'Cartao credito'
+  if (normalized === 'CARD_DEBIT') return 'Cartao debito'
+  if (normalized === 'CARD') return 'Cartao'
   return 'Prazo'
 }
 
@@ -67,6 +71,8 @@ export const PaymentMethodsChart: React.FC<PaymentMethodsChartProps> = ({ paymen
   const paymentData = useMemo(() => {
     const base: PaymentBucket[] = [
       { label: 'Pix', total: 0, color: paymentPalette.Pix, percent: 0 },
+      { label: 'Cartao credito', total: 0, color: paymentPalette['Cartao credito'], percent: 0 },
+      { label: 'Cartao debito', total: 0, color: paymentPalette['Cartao debito'], percent: 0 },
       { label: 'Cartao', total: 0, color: paymentPalette.Cartao, percent: 0 },
       { label: 'Dinheiro', total: 0, color: paymentPalette.Dinheiro, percent: 0 },
       { label: 'Prazo', total: 0, color: paymentPalette.Prazo, percent: 0 },

@@ -38,15 +38,33 @@ export type PaymentAgg = {
 }
 
 export type Reconciliation = {
-  expected: { cash: string; pix: string; card: string }
+  expected: {
+    cash: string
+    pix: string
+    card: string
+    card_credit?: string | null
+    card_debit?: string | null
+  }
   breakdown?: {
     initial_float: string
     cash_sales: string
     reforco: string
     sangria: string
   }
-  counted: { cash: string; pix: string; card: string }
-  divergence: { cash: string; pix: string; card: string }
+  counted: {
+    cash: string
+    pix: string
+    card: string
+    card_credit?: string | null
+    card_debit?: string | null
+  }
+  divergence: {
+    cash: string
+    pix: string
+    card: string
+    card_credit?: string | null
+    card_debit?: string | null
+  }
 }
 
 export type CashMove = {
@@ -108,4 +126,6 @@ export type CashCloseInput = {
   counted_cash: string
   counted_pix: string
   counted_card: string
+  counted_card_credit?: string
+  counted_card_debit?: string
 }

@@ -196,6 +196,52 @@ class CashMoveDeleteApiTests(TestCase):
         self.assertEqual(response.data.get('detail'), 'Somente movimentacoes da sessao aberta podem ser excluidas.')
 
 
+class CashCloseCardSplitTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser(email='cash-close-split@test.com', password='test123', name='Cash Close Split')
+        services.open_cash(user=self.user, initial_float=Decimal('50.00'))
+        self.order = services.create_order_idempotent(
+            order_type='COUNTER',
+            table_label=None,
+            customer=None,
+            client_request_id=uuid4(),
+        )
+        self.order.subtotal = Decimal('30.00')
+        self.order.total = Decimal('30.00')
+        self.order.save(update_fields=['subtotal', 'total'])
+        services.close_order(
+            order=self.order,
+            discount=Decimal('0'),
+            payments=[
+                {'method': 'CARD', 'amount': '18.00', 'meta': {'card_type': 'CREDIT'}},
+                {'method': 'CARD', 'amount': '12.00', 'meta': {'card_type': 'DEBIT'}},
+            ],
+            use_loyalty_points=False,
+            client_request_id=uuid4(),
+            user=self.user,
+        )
+
+    def test_close_cash_preserves_credit_and_debit_breakdown(self):
+        reconciliation = services.close_cash(
+            user=self.user,
+            counted_cash=Decimal('50.00'),
+            counted_pix=Decimal('0.00'),
+            counted_card_credit=Decimal('18.00'),
+            counted_card_debit=Decimal('12.00'),
+            counted_card=Decimal('30.00'),
+        )
+
+        self.assertEqual(reconciliation['expected']['card_credit'], 18.0)
+        self.assertEqual(reconciliation['expected']['card_debit'], 12.0)
+        self.assertEqual(reconciliation['expected']['card'], 30.0)
+        self.assertEqual(reconciliation['counted']['card_credit'], 18.0)
+        self.assertEqual(reconciliation['counted']['card_debit'], 12.0)
+        self.assertEqual(reconciliation['counted']['card'], 30.0)
+        self.assertEqual(reconciliation['divergence']['card_credit'], 0.0)
+        self.assertEqual(reconciliation['divergence']['card_debit'], 0.0)
+        self.assertEqual(reconciliation['divergence']['card'], 0.0)
+
+
 class AddItemTotalsTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(email='cash-item@test.com', password='test', name='Cash Item')

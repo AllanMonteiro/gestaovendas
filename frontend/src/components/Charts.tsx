@@ -66,11 +66,12 @@ const formatCompactCount = (value: number) =>
   })
 
 const paymentLabel = (method?: string) => {
-  if (method === 'CARD_CREDIT') return 'Credito'
-  if (method === 'CARD_DEBIT') return 'Debito'
+  if (method === 'CARD_CREDIT') return 'Cartao credito'
+  if (method === 'CARD_DEBIT') return 'Cartao debito'
+  if (method === 'CARD') return 'Cartao'
   if (method === 'PIX') return 'PIX'
   if (method === 'CASH') return 'Dinheiro'
-  return 'Cartao'
+  return 'Prazo'
 }
 
 const paymentPalette = ['#e55c2f', '#f08b55', '#f6b287', '#facfb5', '#fde6d7']

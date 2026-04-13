@@ -52,6 +52,8 @@ type CashHistoryRow = {
       cash?: string | number
       pix?: string | number
       card?: string | number
+      card_credit?: string | number | null
+      card_debit?: string | number | null
     }
   } | null
   cash_breakdown?: CashBreakdown | null
@@ -118,6 +120,10 @@ const formatSignedBRL = (value: string | number | null | undefined) => {
 }
 const formatNumber = (value: number | null | undefined) => Number(value || 0).toLocaleString('pt-BR')
 const toISODate = (date: Date) => date.toISOString().slice(0, 10)
+const getPaymentTotal = (rows: PaymentRow[], method: string) => {
+  const row = rows.find((entry) => entry.payment_method === method)
+  return Number(row?.total || 0)
+}
 const getPaymentMethodOption = (payment?: OrderPayment | null) => {
   if (!payment) return 'CASH'
   if (payment.method === 'CARD' && payment.meta?.card_type === 'CREDIT') return 'CARD_CREDIT'
@@ -361,6 +367,15 @@ const Relatorios: React.FC = () => {
     { label: 'Pedidos cancelados', value: formatNumber(summary?.canceled_count), description: 'Ocorrencias de cancelamento', tone: 'warning' as const },
     { label: 'Total cancelado', value: formatBRL(summary?.canceled_total), description: 'Impacto financeiro dos cancelamentos', tone: 'danger' as const },
   ]
+  const paymentCards = [
+    { label: 'Dinheiro', value: formatBRL(getPaymentTotal(payments, 'CASH')), description: 'Vendas em especie no periodo' },
+    { label: 'PIX', value: formatBRL(getPaymentTotal(payments, 'PIX')), description: 'Transferencias confirmadas' },
+    { label: 'Cartao credito', value: formatBRL(getPaymentTotal(payments, 'CARD_CREDIT')), description: 'Recebimentos em credito' },
+    { label: 'Cartao debito', value: formatBRL(getPaymentTotal(payments, 'CARD_DEBIT')), description: 'Recebimentos em debito' },
+    ...(getPaymentTotal(payments, 'CARD') > 0
+      ? [{ label: 'Cartao sem classificacao', value: formatBRL(getPaymentTotal(payments, 'CARD')), description: 'Lancamentos antigos sem detalhe de tipo', tone: 'warning' as const }]
+      : []),
+  ]
 
   const selectedPeriodLabel = fromDate === toDate
     ? new Date(`${fromDate}T00:00:00`).toLocaleDateString('pt-BR')
@@ -406,6 +421,24 @@ const Relatorios: React.FC = () => {
           />
         ))}
       </div>
+
+      <section className="panel p-5">
+        <div className="mb-4">
+          <h3 className="text-lg font-semibold">Resumo por pagamento</h3>
+          <p className="text-sm text-slate-500">Separacao financeira do periodo entre dinheiro, PIX, credito e debito.</p>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+          {paymentCards.map((card) => (
+            <StatCard
+              key={card.label}
+              label={card.label}
+              value={card.value}
+              description={card.description}
+              tone={card.tone}
+            />
+          ))}
+        </div>
+      </section>
 
       <ReportsAnalyticsTabs
         fromDate={fromDate}

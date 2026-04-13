@@ -87,15 +87,33 @@ type PaymentAgg = {
 }
 
 type Reconciliation = {
-  expected: { cash: string; pix: string; card: string }
+  expected: {
+    cash: string
+    pix: string
+    card: string
+    card_credit?: string | null
+    card_debit?: string | null
+  }
   breakdown?: {
     initial_float: string
     cash_sales: string
     reforco: string
     sangria: string
   }
-  counted: { cash: string; pix: string; card: string }
-  divergence: { cash: string; pix: string; card: string }
+  counted: {
+    cash: string
+    pix: string
+    card: string
+    card_credit?: string | null
+    card_debit?: string | null
+  }
+  divergence: {
+    cash: string
+    pix: string
+    card: string
+    card_credit?: string | null
+    card_debit?: string | null
+  }
 }
 
 type CashMove = {
@@ -186,6 +204,8 @@ const formatSignedBRL = (value: string | number) => {
   const prefix = numeric > 0 ? '+' : numeric < 0 ? '-' : ''
   return `${prefix}${formatBRL(Math.abs(numeric))}`
 }
+const parseNullableAmount = (value: string | number | null | undefined) =>
+  value === null || value === undefined || value === '' ? null : Number(value)
 const getApiErrorText = (error: unknown, fallback: string) => {
   if (
     typeof error === 'object' &&
@@ -485,6 +505,7 @@ const Caixa: React.FC = () => {
       { label: 'PIX', value: totalsByMethod.PIX, color: '#f08b55' },
       { label: 'Cartao credito', value: totalsByMethod.CARD_CREDIT, color: '#f6b287' },
       { label: 'Cartao debito', value: totalsByMethod.CARD_DEBIT, color: '#facfb5' },
+      { label: 'Cartao', value: totalsByMethod.CARD, color: '#f3c39d' },
     ].filter((row) => row.value > 0)
 
     const total = rows.reduce((sum, row) => sum + row.value, 0)
@@ -550,26 +571,74 @@ const Caixa: React.FC = () => {
     {
       label: 'Dinheiro',
       expected: Number(reconciliation?.expected.cash ?? cashStatus.totals?.current_cash_estimated ?? 0),
-      counted: Number(reconciliation?.counted.cash ?? 0),
-      divergence: Number(reconciliation?.divergence.cash ?? 0),
+      counted: parseNullableAmount(reconciliation?.counted.cash),
+      divergence: parseNullableAmount(reconciliation?.divergence.cash),
     },
     {
       label: 'PIX',
       expected: Number(reconciliation?.expected.pix ?? totalsByMethod.PIX),
-      counted: Number(reconciliation?.counted.pix ?? 0),
-      divergence: Number(reconciliation?.divergence.pix ?? 0),
+      counted: parseNullableAmount(reconciliation?.counted.pix),
+      divergence: parseNullableAmount(reconciliation?.divergence.pix),
     },
     {
-      label: 'Cartao',
+      label: 'Cartao credito',
+      expected: Number(reconciliation?.expected.card_credit ?? totalsByMethod.CARD_CREDIT),
+      counted: parseNullableAmount(reconciliation?.counted.card_credit),
+      divergence: parseNullableAmount(reconciliation?.divergence.card_credit),
+    },
+    {
+      label: 'Cartao debito',
+      expected: Number(reconciliation?.expected.card_debit ?? totalsByMethod.CARD_DEBIT),
+      counted: parseNullableAmount(reconciliation?.counted.card_debit),
+      divergence: parseNullableAmount(reconciliation?.divergence.card_debit),
+    },
+    ...(totalsByMethod.CARD > 0 ||
+      (
+        Number(reconciliation?.expected.card ?? 0) -
+        Number(reconciliation?.expected.card_credit ?? 0) -
+        Number(reconciliation?.expected.card_debit ?? 0)
+      ) > 0 ||
+      (
+        reconciliation?.counted.card !== undefined &&
+        reconciliation?.counted.card_credit == null &&
+        reconciliation?.counted.card_debit == null
+      )
+      ? [{
+          label: 'Cartao sem classificacao',
+          expected: Math.max(
+            Number(reconciliation?.expected.card ?? totalsByMethod.CARD) -
+              Number(reconciliation?.expected.card_credit ?? totalsByMethod.CARD_CREDIT) -
+              Number(reconciliation?.expected.card_debit ?? totalsByMethod.CARD_DEBIT),
+            0
+          ),
+          counted:
+            reconciliation?.counted.card_credit == null &&
+            reconciliation?.counted.card_debit == null
+              ? parseNullableAmount(reconciliation?.counted.card)
+              : null,
+          divergence:
+            reconciliation?.divergence.card_credit == null &&
+            reconciliation?.divergence.card_debit == null
+              ? parseNullableAmount(reconciliation?.divergence.card)
+              : null,
+        }]
+      : []),
+    {
+      label: 'Cartao total',
       expected: Number(reconciliation?.expected.card ?? (totalsByMethod.CARD + totalsByMethod.CARD_CREDIT + totalsByMethod.CARD_DEBIT)),
-      counted: Number(reconciliation?.counted.card ?? 0),
-      divergence: Number(reconciliation?.divergence.card ?? 0),
+      counted: parseNullableAmount(reconciliation?.counted.card),
+      divergence: parseNullableAmount(reconciliation?.divergence.card),
     }
   ], [reconciliation, totalsByMethod])
 
-  const expectedTotal = reconciliationRows.reduce((total, row) => total + row.expected, 0)
-  const countedTotal = reconciliationRows.reduce((total, row) => total + row.counted, 0)
-  const divergenceTotal = reconciliationRows.reduce((total, row) => total + row.divergence, 0)
+  const reconciliationDisplayRows = useMemo(
+    () => reconciliationRows.filter((row) => row.label !== 'Cartao total'),
+    [reconciliationRows]
+  )
+
+  const expectedTotal = reconciliationDisplayRows.reduce((total, row) => total + row.expected, 0)
+  const countedTotal = reconciliationDisplayRows.reduce((total, row) => total + (row.counted ?? 0), 0)
+  const divergenceTotal = reconciliationDisplayRows.reduce((total, row) => total + (row.divergence ?? 0), 0)
 
   const handleOpenCash = async () => {
     if (cashStatus.open) {
@@ -689,16 +758,33 @@ const Caixa: React.FC = () => {
     if (!countedPix) {
       return
     }
-    const countedCard = window.prompt('Contagem cartao (R$):', String(totalsByMethod.CARD + totalsByMethod.CARD_CREDIT + totalsByMethod.CARD_DEBIT))
-    if (!countedCard) {
+    const countedCardCredit = window.prompt('Contagem cartao credito (R$):', String(totalsByMethod.CARD_CREDIT))
+    if (!countedCardCredit) {
       return
     }
+    const countedCardDebit = window.prompt('Contagem cartao debito (R$):', String(totalsByMethod.CARD_DEBIT))
+    if (!countedCardDebit) {
+      return
+    }
+    const countedCardOther = totalsByMethod.CARD > 0
+      ? window.prompt('Contagem cartao sem classificacao (R$):', String(totalsByMethod.CARD))
+      : null
+    if (totalsByMethod.CARD > 0 && !countedCardOther) {
+      return
+    }
+    const countedCardCombined = (
+      Number(countedCardCredit.replace(',', '.')) +
+      Number(countedCardDebit.replace(',', '.')) +
+      Number((countedCardOther || '0').replace(',', '.'))
+    ).toFixed(2)
 
     try {
       const response = await closeCashMutation.mutateAsync({
         counted_cash: countedCash.replace(',', '.'),
         counted_pix: countedPix.replace(',', '.'),
-        counted_card: countedCard.replace(',', '.')
+        counted_card_credit: countedCardCredit.replace(',', '.'),
+        counted_card_debit: countedCardDebit.replace(',', '.'),
+        counted_card: countedCardCombined
       })
       setReconciliation(response.data)
       const slipPayload = buildCashSlipPayload('FECHAMENTO DE CAIXA', [
@@ -708,13 +794,19 @@ const Caixa: React.FC = () => {
         { label: 'Sangrias', value: formatBRL(response.data.breakdown?.sangria ?? 0) },
         { label: 'Dinheiro esperado', value: formatBRL(response.data.expected.cash) },
         { label: 'PIX esperado', value: formatBRL(response.data.expected.pix) },
-        { label: 'Cartao esperado', value: formatBRL(response.data.expected.card) },
+        { label: 'Credito esperado', value: formatBRL(response.data.expected.card_credit ?? 0) },
+        { label: 'Debito esperado', value: formatBRL(response.data.expected.card_debit ?? 0) },
+        { label: 'Cartao total esperado', value: formatBRL(response.data.expected.card) },
         { label: 'Dinheiro contado', value: formatBRL(response.data.counted.cash) },
         { label: 'PIX contado', value: formatBRL(response.data.counted.pix) },
-        { label: 'Cartao contado', value: formatBRL(response.data.counted.card) },
+        { label: 'Credito contado', value: formatBRL(response.data.counted.card_credit ?? 0) },
+        { label: 'Debito contado', value: formatBRL(response.data.counted.card_debit ?? 0) },
+        { label: 'Cartao total contado', value: formatBRL(response.data.counted.card) },
         { label: 'Divergencia dinheiro', value: formatSignedBRL(response.data.divergence.cash) },
         { label: 'Divergencia PIX', value: formatSignedBRL(response.data.divergence.pix) },
-        { label: 'Divergencia cartao', value: formatSignedBRL(response.data.divergence.card) }
+        { label: 'Divergencia credito', value: formatSignedBRL(response.data.divergence.card_credit ?? 0) },
+        { label: 'Divergencia debito', value: formatSignedBRL(response.data.divergence.card_debit ?? 0) },
+        { label: 'Divergencia cartao total', value: formatSignedBRL(response.data.divergence.card) }
       ])
       let printed = false
       try {
@@ -965,13 +1057,13 @@ const Caixa: React.FC = () => {
               <span>Informado</span>
               <span>Divergencia</span>
             </div>
-            {reconciliationRows.map((row) => (
+            {reconciliationDisplayRows.map((row) => (
               <div key={row.label} className="grid min-w-[560px] grid-cols-4 items-center border-t border-brand-100 px-4 py-3 text-sm">
                 <span className="font-semibold text-slate-800">{row.label}</span>
                 <span className="text-slate-700">{formatBRL(row.expected)}</span>
-                <span className="text-slate-700">{reconciliation ? formatBRL(row.counted) : '--'}</span>
-                <span className={row.divergence === 0 ? 'text-emerald-700' : 'font-semibold text-rose-700'}>
-                  {reconciliation ? formatSignedBRL(row.divergence) : '--'}
+                <span className="text-slate-700">{reconciliation && row.counted !== null ? formatBRL(row.counted) : '--'}</span>
+                <span className={row.divergence === null || row.divergence === 0 ? 'text-emerald-700' : 'font-semibold text-rose-700'}>
+                  {reconciliation && row.divergence !== null ? formatSignedBRL(row.divergence) : '--'}
                 </span>
               </div>
             ))}
@@ -1077,7 +1169,7 @@ const Caixa: React.FC = () => {
                 <TableHeaderCell>Abertura em dinheiro</TableHeaderCell>
                 <TableHeaderCell>Saida em dinheiro</TableHeaderCell>
                 <TableHeaderCell>Fechamento em dinheiro</TableHeaderCell>
-                <TableHeaderCell>Divergencia (Dinheiro / PIX / Cartao)</TableHeaderCell>
+                <TableHeaderCell>Divergencia (Dinheiro / PIX / Credito / Debito)</TableHeaderCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -1117,16 +1209,27 @@ const Caixa: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       {session.reconciliation_data ? (
-                        <div className="flex gap-2 text-xs">
+                        <div className="flex flex-wrap gap-2 text-xs">
                           <span className={Number(session.reconciliation_data.divergence.cash) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
                             Din: {formatSignedBRL(session.reconciliation_data.divergence.cash)}
                           </span>
                           <span className={Number(session.reconciliation_data.divergence.pix) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
                             PIX: {formatSignedBRL(session.reconciliation_data.divergence.pix)}
                           </span>
-                          <span className={Number(session.reconciliation_data.divergence.card) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
-                            Car: {formatSignedBRL(session.reconciliation_data.divergence.card)}
-                          </span>
+                          {session.reconciliation_data.divergence.card_credit != null || session.reconciliation_data.divergence.card_debit != null ? (
+                            <>
+                              <span className={Number(session.reconciliation_data.divergence.card_credit || 0) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
+                                Cred: {formatSignedBRL(session.reconciliation_data.divergence.card_credit || 0)}
+                              </span>
+                              <span className={Number(session.reconciliation_data.divergence.card_debit || 0) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
+                                Deb: {formatSignedBRL(session.reconciliation_data.divergence.card_debit || 0)}
+                              </span>
+                            </>
+                          ) : (
+                            <span className={Number(session.reconciliation_data.divergence.card) === 0 ? 'text-emerald-700' : 'text-rose-700 font-medium'}>
+                              Car: {formatSignedBRL(session.reconciliation_data.divergence.card)}
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <span className="text-slate-400">Sem dados</span>

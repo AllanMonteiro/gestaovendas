@@ -581,7 +581,17 @@ class CashCloseView(APIView):
                 user=request.user,
                 counted_cash=Decimal(str(data.get('counted_cash', '0'))),
                 counted_pix=Decimal(str(data.get('counted_pix', '0'))),
-                counted_card=Decimal(str(data.get('counted_card', '0'))),
+                counted_card=Decimal(str(data.get('counted_card', '0'))) if data.get('counted_card') not in (None, '') else None,
+                counted_card_credit=(
+                    Decimal(str(data.get('counted_card_credit')))
+                    if data.get('counted_card_credit') not in (None, '')
+                    else None
+                ),
+                counted_card_debit=(
+                    Decimal(str(data.get('counted_card_debit')))
+                    if data.get('counted_card_debit') not in (None, '')
+                    else None
+                ),
             )
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=400)

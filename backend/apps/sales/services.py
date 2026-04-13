@@ -506,7 +506,15 @@ def delete_cash_move(*, move: CashMove, user=None) -> None:
 
 
 @transaction.atomic
-def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_card: Decimal):
+def close_cash(
+    *,
+    user,
+    counted_cash: Decimal,
+    counted_pix: Decimal,
+    counted_card: Decimal | None = None,
+    counted_card_credit: Decimal | None = None,
+    counted_card_debit: Decimal | None = None,
+):
     effective_user = resolve_effective_user(user)
     session = CashSession.objects.filter(status=CashSession.STATUS_OPEN).first()
     if not session:
@@ -527,6 +535,14 @@ def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_car
     ).aggregate(
         cash=models.Sum('amount', filter=models.Q(method=Payment.METHOD_CASH)),
         pix=models.Sum('amount', filter=models.Q(method=Payment.METHOD_PIX)),
+        card_credit=models.Sum(
+            'amount',
+            filter=models.Q(method=Payment.METHOD_CARD, meta__card_type='CREDIT'),
+        ),
+        card_debit=models.Sum(
+            'amount',
+            filter=models.Q(method=Payment.METHOD_CARD, meta__card_type='DEBIT'),
+        ),
         card=models.Sum(
             'amount',
             filter=models.Q(method=Payment.METHOD_CARD),
@@ -541,17 +557,29 @@ def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_car
     sangria = cash_moves['sangria'] or Decimal('0')
     expected_cash = q2(session.initial_float + cash_sales + reforco - sangria)
     expected_pix = totals['pix'] or Decimal('0')
+    expected_card_credit = totals['card_credit'] or Decimal('0')
+    expected_card_debit = totals['card_debit'] or Decimal('0')
     expected_card = totals['card'] or Decimal('0')
+    normalized_counted_card_credit = None if counted_card_credit is None else q2(Decimal(counted_card_credit))
+    normalized_counted_card_debit = None if counted_card_debit is None else q2(Decimal(counted_card_debit))
+    if counted_card is None:
+        counted_card_total = q2((normalized_counted_card_credit or Decimal('0')) + (normalized_counted_card_debit or Decimal('0')))
+    else:
+        counted_card_total = q2(Decimal(counted_card))
     divergence = {
         'cash': q2(Decimal(counted_cash) - expected_cash),
         'pix': q2(Decimal(counted_pix) - expected_pix),
-        'card': q2(Decimal(counted_card) - expected_card),
+        'card': q2(counted_card_total - expected_card),
+        'card_credit': None if normalized_counted_card_credit is None else q2(normalized_counted_card_credit - expected_card_credit),
+        'card_debit': None if normalized_counted_card_debit is None else q2(normalized_counted_card_debit - expected_card_debit),
     }
 
     reconciliation_data = {
         'expected': {
             'cash': float(expected_cash),
             'pix': float(expected_pix),
+            'card_credit': float(expected_card_credit),
+            'card_debit': float(expected_card_debit),
             'card': float(expected_card),
         },
         'breakdown': {
@@ -563,11 +591,15 @@ def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_car
         'counted': {
             'cash': float(counted_cash),
             'pix': float(counted_pix),
-            'card': float(counted_card),
+            'card_credit': None if normalized_counted_card_credit is None else float(normalized_counted_card_credit),
+            'card_debit': None if normalized_counted_card_debit is None else float(normalized_counted_card_debit),
+            'card': float(counted_card_total),
         },
         'divergence': {
             'cash': float(divergence['cash']),
             'pix': float(divergence['pix']),
+            'card_credit': None if divergence['card_credit'] is None else float(divergence['card_credit']),
+            'card_debit': None if divergence['card_debit'] is None else float(divergence['card_debit']),
             'card': float(divergence['card']),
         },
     }
