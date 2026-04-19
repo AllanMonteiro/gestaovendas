@@ -3,13 +3,14 @@ import { catalogQueryKeys } from '../queryKeys'
 import {
   createCategory,
   createProduct,
+  createProductStockEntry,
   deleteCategory,
   toggleProductActive,
   updateProduct,
   updateProductPrice,
 } from '../mutations'
 import { sortCategories } from '../queries'
-import type { Category, Product, ProductPrice } from '../types'
+import type { Category, Product, ProductPrice, ProductStockEntry } from '../types'
 
 const sortProducts = (items: Product[]) =>
   [...items].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR'))
@@ -114,6 +115,28 @@ export const useUpdateProductPriceMutation = () => {
     mutationFn: updateProductPrice,
     onSuccess: (price) => {
       syncProductPriceQueries(queryClient, (current) => upsertPrice(current, price))
+    },
+  })
+}
+
+export const useCreateProductStockEntryMutation = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: createProductStockEntry,
+    onSuccess: (entry) => {
+      queryClient.setQueryData<Product[]>(catalogQueryKeys.products.list(), (current) =>
+        sortProducts(
+          (current ?? []).map((item) =>
+            item.id === entry.product ? { ...item, stock: entry.current_stock ?? item.stock } : item
+          )
+        )
+      )
+
+      queryClient.setQueryData<ProductStockEntry[]>(catalogQueryKeys.stockEntries.list(entry.product), (current) => [
+        entry,
+        ...(current ?? []),
+      ])
     },
   })
 }

@@ -1,6 +1,6 @@
 from datetime import datetime, time, timedelta
 from decimal import Decimal
-from django.db.models import Sum, Count, Avg, Case, When, Value, CharField, F
+from django.db.models import Sum, Count, Avg, Case, When, Value, CharField, F, Max, DecimalField, ExpressionWrapper
 from django.db.models.functions import ExtractHour, TruncDate
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
@@ -86,7 +86,21 @@ def by_product(from_date=None, to_date=None, limit=20):
         order__status=Order.STATUS_PAID,
     )
     qs = _apply_range_filter(qs, 'order__closed_at', from_date, to_date)
-    return list(qs.values('product__id', 'product__name').annotate(total=Sum('total'), qty=Sum('qty')).order_by('-total')[:limit])
+    return list(
+        qs.values('product__id', 'product__name')
+        .annotate(
+            total=Sum('total'),
+            qty=Sum('qty'),
+            current_stock=Max('product__stock'),
+        )
+        .annotate(
+            initial_stock=ExpressionWrapper(
+                F('current_stock') + F('qty'),
+                output_field=DecimalField(max_digits=12, decimal_places=3),
+            )
+        )
+        .order_by('-total')[:limit]
+    )
 
 
 def hourly_heatmap(from_date=None, to_date=None):

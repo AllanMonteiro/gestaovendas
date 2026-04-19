@@ -1,10 +1,13 @@
 from decimal import Decimal
 
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.accounts.models import User
+from apps.catalog.models import Category, Product
 from apps.reports import queries
+from apps.sales.models import Order, OrderItem
 
 
 class CashSummaryFromHistoryTests(TestCase):
@@ -50,3 +53,35 @@ class ReportsDashboardViewTests(TestCase):
         self.assertIn('payments', response.data)
         self.assertIn('cash_summary', response.data)
         self.assertIn('cash_history', response.data)
+
+
+class ProductStockReportTests(TestCase):
+    def test_by_product_includes_initial_and_current_stock(self):
+        category = Category.objects.create(name='Sorvetes')
+        product = Product.objects.create(
+            category=category,
+            name='Acai 500ml',
+            stock=Decimal('7.000'),
+        )
+        order = Order.objects.create(
+            status=Order.STATUS_PAID,
+            type=Order.TYPE_COUNTER,
+            subtotal=Decimal('15.00'),
+            total=Decimal('15.00'),
+            closed_at=timezone.now(),
+        )
+        OrderItem.objects.create(
+            order=order,
+            product=product,
+            qty=Decimal('3.000'),
+            unit_price=Decimal('5.00'),
+            total=Decimal('15.00'),
+        )
+
+        rows = queries.by_product()
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['product__name'], 'Acai 500ml')
+        self.assertEqual(rows[0]['qty'], Decimal('3'))
+        self.assertEqual(rows[0]['current_stock'], Decimal('7'))
+        self.assertEqual(rows[0]['initial_stock'], Decimal('10'))

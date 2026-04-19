@@ -12,4 +12,8 @@ export const catalogQueryKeys = {
     all: ['catalog', 'product-prices'] as const,
     list: (productIds: number[]) => ['catalog', 'product-prices', 'list', productIds.join(',')] as const,
   },
+  stockEntries: {
+    all: ['catalog', 'stock-entries'] as const,
+    list: (productId: number) => ['catalog', 'stock-entries', 'list', productId] as const,
+  },
 }

@@ -1,6 +1,6 @@
 import { api } from '../../core/api'
 import { getCategories, getProducts, saveCategories, saveProducts } from '../../offline/catalog'
-import type { Category, Product, ProductPrice } from './types'
+import type { Category, Product, ProductPrice, ProductStockEntry } from './types'
 
 const sortProducts = (items: Product[]) =>
   [...items].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR'))
@@ -51,5 +51,10 @@ export const listProductPrices = async (productIds: number[]) => {
   }
 
   const response = await api.get<ProductPrice[]>(`/api/products/prices?product_ids=${productIds.join(',')}`)
+  return response.data
+}
+
+export const listProductStockEntries = async (productId: number) => {
+  const response = await api.get<ProductStockEntry[]>(`/api/products/${productId}/stock-entries`)
   return response.data
 }

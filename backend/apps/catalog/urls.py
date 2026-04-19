@@ -9,4 +9,5 @@ urlpatterns = [
     path('products/prices', views.ProductPriceListView.as_view()),
     path('products/<int:pk>', views.ProductUpsertView.as_view()),
     path('products/<int:id>/price', views.ProductPriceView.as_view()),
+    path('products/<int:id>/stock-entries', views.ProductStockEntryListCreateView.as_view()),
 ]

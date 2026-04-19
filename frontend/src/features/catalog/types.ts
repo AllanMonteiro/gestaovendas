@@ -34,3 +34,12 @@ export type ProductPrice = {
   cost_base?: string | number
   profit: string | number
 }
+
+export type ProductStockEntry = {
+  id: number
+  product: number
+  arrival_date: string
+  quantity: string | number
+  created_at: string
+  current_stock?: string | number
+}

@@ -1,5 +1,5 @@
 import { api } from '../../core/api'
-import type { Category, Product, ProductPrice } from './types'
+import type { Category, Product, ProductPrice, ProductStockEntry } from './types'
 
 export type CreateCategoryInput = {
   name: string
@@ -51,6 +51,12 @@ export type UpdateProductPriceInput = {
 export type ProductMutationResult = {
   product: Product
   price: ProductPrice
+}
+
+export type CreateProductStockEntryInput = {
+  productId: number
+  arrival_date: string
+  quantity: string
 }
 
 export const createCategory = async (input: CreateCategoryInput) => {
@@ -129,6 +135,14 @@ export const updateProductPrice = async (input: UpdateProductPriceInput) => {
   const response = await api.put<ProductPrice>(`/api/products/${input.productId}/price`, {
     price: input.price,
     cost: input.cost,
+  })
+  return response.data
+}
+
+export const createProductStockEntry = async (input: CreateProductStockEntryInput) => {
+  const response = await api.post<ProductStockEntry>(`/api/products/${input.productId}/stock-entries`, {
+    arrival_date: input.arrival_date,
+    quantity: input.quantity,
   })
   return response.data
 }

@@ -19,6 +19,8 @@ type ProductRow = {
   product__name: string
   total: string
   qty: string
+  initial_stock: string
+  current_stock: string
 }
 
 type CategoryRow = {
@@ -119,6 +121,8 @@ const formatSignedBRL = (value: string | number | null | undefined) => {
   return formatted
 }
 const formatNumber = (value: number | null | undefined) => Number(value || 0).toLocaleString('pt-BR')
+const formatQty = (value: string | number | null | undefined) =>
+  Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })
 const toISODate = (date: Date) => date.toISOString().slice(0, 10)
 const getPaymentTotal = (rows: PaymentRow[], method: string) => {
   const row = rows.find((entry) => entry.payment_method === method)
@@ -489,7 +493,9 @@ const Relatorios: React.FC = () => {
             <thead>
               <tr className="text-left text-slate-500">
                 <th className="pb-2">Produto</th>
-                <th className="pb-2">Qtd</th>
+                <th className="pb-2">Qtd vendida</th>
+                <th className="pb-2">Qtd inicial</th>
+                <th className="pb-2">Qtd atual</th>
                 <th className="pb-2">Receita</th>
               </tr>
             </thead>
@@ -497,13 +503,15 @@ const Relatorios: React.FC = () => {
               {products.map((row) => (
                 <tr key={row.product__id} className="border-t border-brand-100">
                   <td className="py-2">{row.product__name}</td>
-                  <td className="py-2">{Number(row.qty || 0).toLocaleString('pt-BR')}</td>
+                  <td className="py-2">{formatQty(row.qty)}</td>
+                  <td className="py-2">{formatQty(row.initial_stock)}</td>
+                  <td className="py-2">{formatQty(row.current_stock)}</td>
                   <td className="py-2">{formatBRL(row.total)}</td>
                 </tr>
               ))}
               {products.length === 0 ? (
                 <tr className="border-t border-brand-100">
-                  <td colSpan={3} className="py-3 text-center text-slate-500">
+                  <td colSpan={5} className="py-3 text-center text-slate-500">
                     Sem dados no periodo.
                   </td>
                 </tr>

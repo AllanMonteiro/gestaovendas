@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from apps.catalog.models import Category, Product, ProductPrice
+from apps.catalog.models import Category, Product, ProductPrice, ProductStockEntry
 
 
 class CategorySerializer(serializers.ModelSerializer):
@@ -41,3 +41,12 @@ class ProductPriceSerializer(serializers.ModelSerializer):
 
     def get_profit(self, obj):
         return obj.profit()
+
+
+class ProductStockEntrySerializer(serializers.ModelSerializer):
+    current_stock = serializers.DecimalField(source='product.stock', max_digits=12, decimal_places=3, read_only=True)
+
+    class Meta:
+        model = ProductStockEntry
+        fields = ['id', 'product', 'arrival_date', 'quantity', 'created_at', 'current_stock']
+        read_only_fields = ['product', 'created_at', 'current_stock']

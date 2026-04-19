@@ -6,7 +6,7 @@ from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from apps.accounts.models import User
-from apps.catalog.models import Category, Product, ProductPrice
+from apps.catalog.models import Category, Product, ProductPrice, ProductStockEntry
 
 
 @override_settings(REQUIRE_AUTH=False)
@@ -96,3 +96,42 @@ class ProductCompactListTests(TestCase):
             sorted(response.data[0].keys()),
             ['active', 'category', 'id', 'name', 'sold_by_weight', 'stock'],
         )
+
+
+@override_settings(REQUIRE_AUTH=False)
+class ProductStockEntryTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        category = Category.objects.create(name='Estoque', price=Decimal('10.00'))
+        self.product = Product.objects.create(
+            category=category,
+            name='Pote 1L',
+            active=True,
+            stock=Decimal('4.000'),
+        )
+
+    def test_create_stock_entry_increases_product_stock(self):
+        response = self.client.post(
+            f'/api/products/{self.product.id}/stock-entries',
+            {
+                'arrival_date': '2026-04-19',
+                'quantity': '6.500',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, Decimal('10.500'))
+        self.assertEqual(ProductStockEntry.objects.count(), 1)
+        self.assertEqual(response.data['current_stock'], '10.500')
+
+    def test_list_stock_entries_returns_latest_entries_first(self):
+        ProductStockEntry.objects.create(product=self.product, arrival_date='2026-04-01', quantity=Decimal('2.000'))
+        ProductStockEntry.objects.create(product=self.product, arrival_date='2026-04-10', quantity=Decimal('1.000'))
+
+        response = self.client.get(f'/api/products/{self.product.id}/stock-entries')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 2)
+        self.assertEqual(response.data[0]['arrival_date'], '2026-04-10')

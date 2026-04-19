@@ -1,10 +1,17 @@
 from decimal import Decimal
 from django.db import transaction
+from django.db.models import F
 from rest_framework import generics, permissions
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from apps.catalog.models import Category, Product, ProductPrice
-from apps.catalog.serializers import CategorySerializer, ProductCompactSerializer, ProductSerializer, ProductPriceSerializer
+from apps.catalog.models import Category, Product, ProductPrice, ProductStockEntry
+from apps.catalog.serializers import (
+    CategorySerializer,
+    ProductCompactSerializer,
+    ProductSerializer,
+    ProductPriceSerializer,
+    ProductStockEntrySerializer,
+)
 from apps.accounts.permissions import auth_is_required, user_has_permission
 
 
@@ -214,3 +221,34 @@ class ProductPriceListView(APIView):
             else:
                 qs = qs.none()
         return Response(ProductPriceSerializer(qs, many=True).data)
+
+
+class ProductStockEntryListCreateView(generics.ListCreateAPIView):
+    serializer_class = ProductStockEntrySerializer
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            if auth_is_required() and not user_has_permission(self.request.user, 'catalog.manage'):
+                return [permissions.IsAdminUser()]
+            return [permissions.IsAuthenticated()] if auth_is_required() else [permissions.AllowAny()]
+        return [permissions.AllowAny()]
+
+    def get_queryset(self):
+        return ProductStockEntry.objects.filter(product_id=self.kwargs['id']).select_related('product').order_by('-arrival_date', '-created_at')
+
+    @transaction.atomic
+    def create(self, request, *args, **kwargs):
+        product = Product.objects.filter(id=kwargs['id']).first()
+        if product is None:
+            return Response({'detail': 'Product not found'}, status=404)
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        quantity = Decimal(str(serializer.validated_data['quantity']))
+        if quantity <= 0:
+            return Response({'detail': 'Quantidade deve ser maior que zero.'}, status=400)
+
+        entry = serializer.save(product=product)
+        Product.objects.filter(id=product.id).update(stock=F('stock') + quantity)
+        entry.refresh_from_db()
+        return Response(self.get_serializer(entry).data, status=201)

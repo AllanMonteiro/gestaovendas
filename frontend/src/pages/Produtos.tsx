@@ -3,6 +3,7 @@ import { useCategories } from '../features/catalog/hooks/useCategories'
 import {
   useCreateCategoryMutation,
   useCreateProductMutation,
+  useCreateProductStockEntryMutation,
   useDeleteCategoryMutation,
   useToggleProductActiveMutation,
   useUpdateProductMutation,
@@ -10,7 +11,8 @@ import {
 } from '../features/catalog/hooks/useCatalogMutations'
 import { useProducts } from '../features/catalog/hooks/useProducts'
 import { useProductPrices } from '../features/catalog/hooks/useProductPrices'
-import type { Category, Product, ProductPrice } from '../features/catalog/types'
+import { useProductStockEntries } from '../features/catalog/hooks/useProductStockEntries'
+import type { Category, Product, ProductPrice, ProductStockEntry } from '../features/catalog/types'
 import {
   Badge,
   Button,
@@ -52,6 +54,9 @@ const buildFallbackPriceMap = (productList: Product[], categoryList: Category[])
   Object.fromEntries(productList.map((product) => [product.id, buildFallbackPrice(product, categoryList)]))
 
 const formatBRL = (value: string | number) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const formatQty = (value: string | number) =>
+  Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })
+const todayIso = () => new Date().toISOString().slice(0, 10)
 const getApiErrorText = (error: unknown, fallback: string) => {
   if (
     typeof error === 'object' &&
@@ -70,6 +75,7 @@ const Produtos: React.FC = () => {
   const createCategoryMutation = useCreateCategoryMutation()
   const deleteCategoryMutation = useDeleteCategoryMutation()
   const createProductMutation = useCreateProductMutation()
+  const createProductStockEntryMutation = useCreateProductStockEntryMutation()
   const toggleProductActiveMutation = useToggleProductActiveMutation()
   const updateProductMutation = useUpdateProductMutation()
   const updateProductPriceMutation = useUpdateProductPriceMutation()
@@ -78,6 +84,9 @@ const Produtos: React.FC = () => {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showCreateCategoryModal, setShowCreateCategoryModal] = useState(false)
   const [showDeleteCategoryModal, setShowDeleteCategoryModal] = useState(false)
+  const [stockEntryProduct, setStockEntryProduct] = useState<Product | null>(null)
+  const [stockEntryArrivalDate, setStockEntryArrivalDate] = useState(todayIso())
+  const [stockEntryQuantity, setStockEntryQuantity] = useState('0,000')
   const [createCategory, setCreateCategory] = useState('')
   const [createName, setCreateName] = useState('')
   const [createCost, setCreateCost] = useState('0,00')
@@ -111,6 +120,7 @@ const Produtos: React.FC = () => {
   const creatingCategory = createCategoryMutation.isPending
   const deletingCategory = deleteCategoryMutation.isPending
   const creatingProduct = createProductMutation.isPending
+  const creatingStockEntry = createProductStockEntryMutation.isPending
   const savingEdit = updateProductMutation.isPending
   const productIds = useMemo(
     () => products.map((product) => product.id),
@@ -118,6 +128,9 @@ const Produtos: React.FC = () => {
   )
   const productPricesQuery = useProductPrices(productIds, {
     enabled: productsQuery.isSuccess,
+  })
+  const stockEntriesQuery = useProductStockEntries(stockEntryProduct?.id ?? null, {
+    enabled: stockEntryProduct !== null,
   })
 
   const priceMap = useMemo(() => {
@@ -139,8 +152,11 @@ const Produtos: React.FC = () => {
     if (productPricesQuery.isError) {
       return 'Falha ao carregar precos auxiliares.'
     }
+    if (stockEntriesQuery.isError && stockEntryProduct) {
+      return 'Falha ao carregar entradas de estoque.'
+    }
     return ''
-  }, [categoriesQuery.isError, productPricesQuery.isError])
+  }, [categoriesQuery.isError, productPricesQuery.isError, stockEntriesQuery.isError, stockEntryProduct])
 
   const categoryById = useMemo(() => {
     const map = new Map<number, string>()
@@ -193,6 +209,7 @@ const Produtos: React.FC = () => {
       productsQuery.refetch(),
       categoriesQuery.refetch(),
       productPricesQuery.refetch(),
+      stockEntryProduct ? stockEntriesQuery.refetch() : Promise.resolve(),
     ])
   }
 
@@ -280,6 +297,19 @@ const Produtos: React.FC = () => {
     }
     setDeleteCategoryId(String(categories[0].id))
     setShowDeleteCategoryModal(true)
+  }
+
+  const openStockEntryModal = (product: Product) => {
+    setStockEntryProduct(product)
+    setStockEntryArrivalDate(todayIso())
+    setStockEntryQuantity('0,000')
+    setFeedback('')
+  }
+
+  const closeStockEntryModal = () => {
+    setStockEntryProduct(null)
+    setStockEntryArrivalDate(todayIso())
+    setStockEntryQuantity('0,000')
   }
 
   const handleCreateCategory = async () => {
@@ -491,6 +521,34 @@ const Produtos: React.FC = () => {
     setEditPrice(formatInputBRL(ideal))
   }
 
+  const handleCreateStockEntry = async () => {
+    if (!stockEntryProduct) {
+      return
+    }
+    if (!stockEntryArrivalDate) {
+      setFeedback('Informe a data de chegada do estoque.')
+      return
+    }
+
+    const quantity = toDecimal(stockEntryQuantity || '0')
+    if (!Number.isFinite(Number(quantity)) || Number(quantity) <= 0) {
+      setFeedback('Informe uma quantidade valida maior que zero.')
+      return
+    }
+
+    try {
+      await createProductStockEntryMutation.mutateAsync({
+        productId: stockEntryProduct.id,
+        arrival_date: stockEntryArrivalDate,
+        quantity,
+      })
+      setFeedback('Entrada de estoque registrada com sucesso.')
+      closeStockEntryModal()
+    } catch (error: unknown) {
+      setFeedback(getApiErrorText(error, 'Falha ao registrar entrada de estoque.'))
+    }
+  }
+
   return (
     <div className="space-y-4">
       <PageHeader
@@ -605,6 +663,7 @@ const Produtos: React.FC = () => {
                     <TableCell>
                       <div className="flex flex-wrap gap-2">
                         <Button size="sm" variant="secondary" onClick={() => void handleSetPrice(product)}>Preco</Button>
+                        <Button size="sm" variant="success" onClick={() => openStockEntryModal(product)}>Entrada</Button>
                         <Button size="sm" variant="ghost" onClick={() => openEditProduct(product)}>Editar</Button>
                         <Button size="sm" variant="success" onClick={() => void handleApplyIdealPrice(product)}>Aplicar ideal</Button>
                         <Button size="sm" variant={product.active ? 'warning' : 'secondary'} onClick={() => void handleToggleActive(product)}>
@@ -726,6 +785,97 @@ const Produtos: React.FC = () => {
           </div>
         </div>
       ) : null}
+
+      <Modal
+        open={stockEntryProduct !== null}
+        onClose={creatingStockEntry ? undefined : closeStockEntryModal}
+        title="Cadastrar entrada de estoque"
+        description={stockEntryProduct ? `Registre a chegada de estoque para ${stockEntryProduct.name}.` : undefined}
+        size="lg"
+        footer={
+          <>
+            <Button variant="secondary" onClick={closeStockEntryModal} disabled={creatingStockEntry}>Cancelar</Button>
+            <Button variant="primary" onClick={() => void handleCreateStockEntry()} disabled={creatingStockEntry}>
+              {creatingStockEntry ? 'Salvando...' : 'Salvar entrada'}
+            </Button>
+          </>
+        }
+      >
+        {stockEntryProduct ? (
+          <div className="space-y-5">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <StatCard
+                label="Produto"
+                value={stockEntryProduct.name}
+                description={categoryById.get(stockEntryProduct.category) || 'Sem categoria'}
+              />
+              <StatCard
+                label="Estoque atual"
+                value={formatQty(stockEntryProduct.stock)}
+                description="Quantidade disponivel antes desta entrada"
+                tone="accent"
+              />
+              <StatCard
+                label="Ultimas entradas"
+                value={String(stockEntriesQuery.data?.length ?? 0)}
+                description="Registros encontrados para este item"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <Input
+                label="Data de chegada"
+                type="date"
+                value={stockEntryArrivalDate}
+                onChange={(event) => setStockEntryArrivalDate(event.target.value)}
+              />
+              <Input
+                label="Quantidade"
+                value={stockEntryQuantity}
+                onChange={(event) => setStockEntryQuantity(event.target.value)}
+                placeholder="0,000"
+              />
+            </div>
+
+            <div className="space-y-3">
+              <SectionHeader
+                title="Historico recente"
+                description="As entradas abaixo ajudam a conferir reposicoes recentes do produto."
+              />
+              <Table>
+                <TableElement>
+                  <TableHead>
+                    <TableRow>
+                      <TableHeaderCell>Data de chegada</TableHeaderCell>
+                      <TableHeaderCell>Quantidade</TableHeaderCell>
+                      <TableHeaderCell>Criado em</TableHeaderCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {stockEntriesQuery.isLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={3}>Carregando entradas...</TableCell>
+                      </TableRow>
+                    ) : (stockEntriesQuery.data ?? []).length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={3}>Nenhuma entrada registrada para este produto.</TableCell>
+                      </TableRow>
+                    ) : (
+                      (stockEntriesQuery.data ?? []).slice(0, 8).map((entry: ProductStockEntry) => (
+                        <TableRow key={entry.id}>
+                          <TableCell>{new Date(`${entry.arrival_date}T00:00:00`).toLocaleDateString('pt-BR')}</TableCell>
+                          <TableCell>{formatQty(entry.quantity)}</TableCell>
+                          <TableCell>{new Date(entry.created_at).toLocaleString('pt-BR')}</TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </TableElement>
+              </Table>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
 
       {showCreateModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4">

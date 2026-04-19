@@ -31,6 +31,19 @@ class Product(models.Model):
         ]
 
 
+class ProductStockEntry(models.Model):
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='stock_entries')
+    arrival_date = models.DateField()
+    quantity = models.DecimalField(max_digits=12, decimal_places=3)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['product', 'arrival_date']),
+            models.Index(fields=['-created_at']),
+        ]
+
+
 class ProductBarcode(models.Model):
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     ean = models.CharField(max_length=32, unique=True)
