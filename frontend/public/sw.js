@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sorveteria-pos-v10'
+const CACHE_NAME = 'sorveteria-pos-v11'
 const ASSETS = ['/', '/index.html', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png']
 
 const extractAssetUrls = (html) => {
@@ -78,13 +78,15 @@ self.addEventListener('fetch', (event) => {
   if (isNavigationRequest || isAppShellRequest) {
     event.respondWith(
       fetch(event.request)
-        .then((resp) => {
-          if (!resp.ok) {
+        .then(async (resp) => {
+          if (resp.ok) {
+            const copy = resp.clone()
+            caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', copy))
             return resp
           }
-          const copy = resp.clone()
-          caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', copy))
-          return resp
+
+          const cached = await caches.match('/index.html')
+          return cached || resp
         })
         .catch(async () => {
           const cached = await caches.match('/index.html')
@@ -104,13 +106,22 @@ self.addEventListener('fetch', (event) => {
   if (['script', 'style', 'worker'].includes(event.request.destination)) {
     event.respondWith(
       fetch(event.request)
-        .then((resp) => {
-          if (!resp.ok) {
+        .then(async (resp) => {
+          if (resp.ok) {
+            const copy = resp.clone()
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
             return resp
           }
-          const copy = resp.clone()
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
-          return resp
+
+          const cached = await caches.match(event.request)
+          return (
+            cached ||
+            new Response('', {
+              status: resp.status,
+              statusText: resp.statusText,
+              headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+            })
+          )
         })
         .catch(async () => {
           const cached = await caches.match(event.request)
@@ -130,13 +141,14 @@ self.addEventListener('fetch', (event) => {
     caches.match(event.request).then((cached) =>
       cached ||
       fetch(event.request)
-        .then((resp) => {
-          if (!resp.ok) {
+        .then(async (resp) => {
+          if (resp.ok) {
+            const copy = resp.clone()
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
             return resp
           }
-          const copy = resp.clone()
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy))
-          return resp
+
+          return cached || resp
         })
         .catch(
           () =>
