@@ -4,10 +4,12 @@ import {
   createCategory,
   createProduct,
   createProductStockEntry,
+  deleteProductStockEntry,
   deleteCategory,
   toggleProductActive,
   updateProduct,
   updateProductPrice,
+  updateProductStockEntry,
 } from '../mutations'
 import { sortCategories } from '../queries'
 import type { Category, Product, ProductPrice, ProductStockEntry } from '../types'
@@ -137,6 +139,54 @@ export const useCreateProductStockEntryMutation = () => {
         entry,
         ...(current ?? []),
       ])
+    },
+  })
+}
+
+export const useUpdateProductStockEntryMutation = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: updateProductStockEntry,
+    onSuccess: (entry) => {
+      queryClient.setQueryData<Product[]>(catalogQueryKeys.products.list(), (current) =>
+        sortProducts(
+          (current ?? []).map((item) =>
+            item.id === entry.product ? { ...item, stock: entry.current_stock ?? item.stock } : item
+          )
+        )
+      )
+
+      queryClient.setQueryData<ProductStockEntry[]>(catalogQueryKeys.stockEntries.list(entry.product), (current) =>
+        [entry, ...(current ?? []).filter((item) => item.id !== entry.id)]
+          .sort((left, right) => {
+            if (left.arrival_date !== right.arrival_date) {
+              return left.arrival_date < right.arrival_date ? 1 : -1
+            }
+            return left.created_at < right.created_at ? 1 : -1
+          })
+      )
+    },
+  })
+}
+
+export const useDeleteProductStockEntryMutation = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ productId, entryId }: { productId: number; entryId: number }) => deleteProductStockEntry(productId, entryId),
+    onSuccess: (result) => {
+      queryClient.setQueryData<Product[]>(catalogQueryKeys.products.list(), (current) =>
+        sortProducts(
+          (current ?? []).map((item) =>
+            item.id === result.product ? { ...item, stock: result.current_stock ?? item.stock } : item
+          )
+        )
+      )
+
+      queryClient.setQueryData<ProductStockEntry[]>(catalogQueryKeys.stockEntries.list(result.product), (current) =>
+        (current ?? []).filter((item) => item.id !== result.id)
+      )
     },
   })
 }

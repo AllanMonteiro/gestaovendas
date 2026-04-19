@@ -4,8 +4,10 @@ import {
   useCreateCategoryMutation,
   useCreateProductMutation,
   useCreateProductStockEntryMutation,
+  useDeleteProductStockEntryMutation,
   useDeleteCategoryMutation,
   useToggleProductActiveMutation,
+  useUpdateProductStockEntryMutation,
   useUpdateProductMutation,
   useUpdateProductPriceMutation,
 } from '../features/catalog/hooks/useCatalogMutations'
@@ -76,6 +78,8 @@ const Produtos: React.FC = () => {
   const deleteCategoryMutation = useDeleteCategoryMutation()
   const createProductMutation = useCreateProductMutation()
   const createProductStockEntryMutation = useCreateProductStockEntryMutation()
+  const updateProductStockEntryMutation = useUpdateProductStockEntryMutation()
+  const deleteProductStockEntryMutation = useDeleteProductStockEntryMutation()
   const toggleProductActiveMutation = useToggleProductActiveMutation()
   const updateProductMutation = useUpdateProductMutation()
   const updateProductPriceMutation = useUpdateProductPriceMutation()
@@ -85,6 +89,7 @@ const Produtos: React.FC = () => {
   const [showCreateCategoryModal, setShowCreateCategoryModal] = useState(false)
   const [showDeleteCategoryModal, setShowDeleteCategoryModal] = useState(false)
   const [stockEntryProduct, setStockEntryProduct] = useState<Product | null>(null)
+  const [editingStockEntry, setEditingStockEntry] = useState<ProductStockEntry | null>(null)
   const [stockEntryArrivalDate, setStockEntryArrivalDate] = useState(todayIso())
   const [stockEntryQuantity, setStockEntryQuantity] = useState('0,000')
   const [createCategory, setCreateCategory] = useState('')
@@ -121,6 +126,8 @@ const Produtos: React.FC = () => {
   const deletingCategory = deleteCategoryMutation.isPending
   const creatingProduct = createProductMutation.isPending
   const creatingStockEntry = createProductStockEntryMutation.isPending
+  const updatingStockEntry = updateProductStockEntryMutation.isPending
+  const deletingStockEntry = deleteProductStockEntryMutation.isPending
   const savingEdit = updateProductMutation.isPending
   const productIds = useMemo(
     () => products.map((product) => product.id),
@@ -301,6 +308,7 @@ const Produtos: React.FC = () => {
 
   const openStockEntryModal = (product: Product) => {
     setStockEntryProduct(product)
+    setEditingStockEntry(null)
     setStockEntryArrivalDate(todayIso())
     setStockEntryQuantity('0,000')
     setFeedback('')
@@ -308,8 +316,16 @@ const Produtos: React.FC = () => {
 
   const closeStockEntryModal = () => {
     setStockEntryProduct(null)
+    setEditingStockEntry(null)
     setStockEntryArrivalDate(todayIso())
     setStockEntryQuantity('0,000')
+  }
+
+  const startEditingStockEntry = (entry: ProductStockEntry) => {
+    setEditingStockEntry(entry)
+    setStockEntryArrivalDate(entry.arrival_date)
+    setStockEntryQuantity(String(entry.quantity).replace('.', ','))
+    setFeedback('')
   }
 
   const handleCreateCategory = async () => {
@@ -537,15 +553,47 @@ const Produtos: React.FC = () => {
     }
 
     try {
-      await createProductStockEntryMutation.mutateAsync({
-        productId: stockEntryProduct.id,
-        arrival_date: stockEntryArrivalDate,
-        quantity,
-      })
-      setFeedback('Entrada de estoque registrada com sucesso.')
+      if (editingStockEntry) {
+        await updateProductStockEntryMutation.mutateAsync({
+          productId: stockEntryProduct.id,
+          entryId: editingStockEntry.id,
+          arrival_date: stockEntryArrivalDate,
+          quantity,
+        })
+        setFeedback('Entrada de estoque atualizada com sucesso.')
+      } else {
+        await createProductStockEntryMutation.mutateAsync({
+          productId: stockEntryProduct.id,
+          arrival_date: stockEntryArrivalDate,
+          quantity,
+        })
+        setFeedback('Entrada de estoque registrada com sucesso.')
+      }
       closeStockEntryModal()
     } catch (error: unknown) {
-      setFeedback(getApiErrorText(error, 'Falha ao registrar entrada de estoque.'))
+      setFeedback(getApiErrorText(error, editingStockEntry ? 'Falha ao atualizar entrada de estoque.' : 'Falha ao registrar entrada de estoque.'))
+    }
+  }
+
+  const handleDeleteStockEntry = async (entry: ProductStockEntry) => {
+    if (!stockEntryProduct) {
+      return
+    }
+    const confirmed = window.confirm(`Excluir a entrada de ${formatQty(entry.quantity)} registrada em ${new Date(`${entry.arrival_date}T00:00:00`).toLocaleDateString('pt-BR')}?`)
+    if (!confirmed) {
+      return
+    }
+
+    try {
+      await deleteProductStockEntryMutation.mutateAsync({ productId: stockEntryProduct.id, entryId: entry.id })
+      setFeedback('Entrada de estoque excluida com sucesso.')
+      if (editingStockEntry?.id === entry.id) {
+        setEditingStockEntry(null)
+        setStockEntryArrivalDate(todayIso())
+        setStockEntryQuantity('0,000')
+      }
+    } catch (error: unknown) {
+      setFeedback(getApiErrorText(error, 'Falha ao excluir entrada de estoque.'))
     }
   }
 
@@ -788,15 +836,28 @@ const Produtos: React.FC = () => {
 
       <Modal
         open={stockEntryProduct !== null}
-        onClose={creatingStockEntry ? undefined : closeStockEntryModal}
-        title="Cadastrar entrada de estoque"
+        onClose={creatingStockEntry || updatingStockEntry || deletingStockEntry ? undefined : closeStockEntryModal}
+        title={editingStockEntry ? 'Editar entrada de estoque' : 'Cadastrar entrada de estoque'}
         description={stockEntryProduct ? `Registre a chegada de estoque para ${stockEntryProduct.name}.` : undefined}
         size="lg"
         footer={
           <>
-            <Button variant="secondary" onClick={closeStockEntryModal} disabled={creatingStockEntry}>Cancelar</Button>
-            <Button variant="primary" onClick={() => void handleCreateStockEntry()} disabled={creatingStockEntry}>
-              {creatingStockEntry ? 'Salvando...' : 'Salvar entrada'}
+            {editingStockEntry ? (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setEditingStockEntry(null)
+                  setStockEntryArrivalDate(todayIso())
+                  setStockEntryQuantity('0,000')
+                }}
+                disabled={creatingStockEntry || updatingStockEntry || deletingStockEntry}
+              >
+                Nova entrada
+              </Button>
+            ) : null}
+            <Button variant="secondary" onClick={closeStockEntryModal} disabled={creatingStockEntry || updatingStockEntry || deletingStockEntry}>Cancelar</Button>
+            <Button variant="primary" onClick={() => void handleCreateStockEntry()} disabled={creatingStockEntry || updatingStockEntry || deletingStockEntry}>
+              {creatingStockEntry || updatingStockEntry ? 'Salvando...' : editingStockEntry ? 'Salvar alteracoes' : 'Salvar entrada'}
             </Button>
           </>
         }
@@ -849,16 +910,17 @@ const Produtos: React.FC = () => {
                       <TableHeaderCell>Data de chegada</TableHeaderCell>
                       <TableHeaderCell>Quantidade</TableHeaderCell>
                       <TableHeaderCell>Criado em</TableHeaderCell>
+                      <TableHeaderCell>Acoes</TableHeaderCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {stockEntriesQuery.isLoading ? (
                       <TableRow>
-                        <TableCell colSpan={3}>Carregando entradas...</TableCell>
+                        <TableCell colSpan={4}>Carregando entradas...</TableCell>
                       </TableRow>
                     ) : (stockEntriesQuery.data ?? []).length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={3}>Nenhuma entrada registrada para este produto.</TableCell>
+                        <TableCell colSpan={4}>Nenhuma entrada registrada para este produto.</TableCell>
                       </TableRow>
                     ) : (
                       (stockEntriesQuery.data ?? []).slice(0, 8).map((entry: ProductStockEntry) => (
@@ -866,6 +928,26 @@ const Produtos: React.FC = () => {
                           <TableCell>{new Date(`${entry.arrival_date}T00:00:00`).toLocaleDateString('pt-BR')}</TableCell>
                           <TableCell>{formatQty(entry.quantity)}</TableCell>
                           <TableCell>{new Date(entry.created_at).toLocaleString('pt-BR')}</TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => startEditingStockEntry(entry)}
+                                disabled={creatingStockEntry || updatingStockEntry || deletingStockEntry}
+                              >
+                                Editar
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="danger"
+                                onClick={() => void handleDeleteStockEntry(entry)}
+                                disabled={creatingStockEntry || updatingStockEntry || deletingStockEntry}
+                              >
+                                Excluir
+                              </Button>
+                            </div>
+                          </TableCell>
                         </TableRow>
                       ))
                     )}

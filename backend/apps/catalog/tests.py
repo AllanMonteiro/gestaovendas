@@ -6,6 +6,7 @@ from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
 from apps.accounts.models import User
+from apps.audit.models import AuditLog
 from apps.catalog.models import Category, Product, ProductPrice, ProductStockEntry
 
 
@@ -125,6 +126,8 @@ class ProductStockEntryTests(TestCase):
         self.assertEqual(self.product.stock, Decimal('10.500'))
         self.assertEqual(ProductStockEntry.objects.count(), 1)
         self.assertEqual(response.data['current_stock'], '10.500')
+        audit = AuditLog.objects.get(action='product_stock_entry.create', entity='product_stock_entry')
+        self.assertEqual(audit.after['stock_after'], '10.500')
 
     def test_list_stock_entries_returns_latest_entries_first(self):
         ProductStockEntry.objects.create(product=self.product, arrival_date='2026-04-01', quantity=Decimal('2.000'))
@@ -135,3 +138,42 @@ class ProductStockEntryTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 2)
         self.assertEqual(response.data[0]['arrival_date'], '2026-04-10')
+
+    def test_update_stock_entry_reconciles_stock_and_logs_audit(self):
+        entry = ProductStockEntry.objects.create(product=self.product, arrival_date='2026-04-01', quantity=Decimal('2.000'))
+        self.product.stock = Decimal('6.000')
+        self.product.save(update_fields=['stock'])
+
+        response = self.client.put(
+            f'/api/products/{self.product.id}/stock-entries/{entry.id}',
+            {
+                'arrival_date': '2026-04-20',
+                'quantity': '3.500',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.product.refresh_from_db()
+        entry.refresh_from_db()
+        self.assertEqual(self.product.stock, Decimal('7.500'))
+        self.assertEqual(entry.arrival_date.isoformat(), '2026-04-20')
+        self.assertEqual(entry.quantity, Decimal('3.500'))
+        audit = AuditLog.objects.get(action='product_stock_entry.update', entity='product_stock_entry', entity_id=str(entry.id))
+        self.assertEqual(audit.before['quantity'], '2.000')
+        self.assertEqual(audit.after['stock_after'], '7.500')
+
+    def test_delete_stock_entry_reconciles_stock_and_logs_audit(self):
+        entry = ProductStockEntry.objects.create(product=self.product, arrival_date='2026-04-01', quantity=Decimal('2.000'))
+        self.product.stock = Decimal('6.000')
+        self.product.save(update_fields=['stock'])
+
+        response = self.client.delete(f'/api/products/{self.product.id}/stock-entries/{entry.id}')
+
+        self.assertEqual(response.status_code, 200)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock, Decimal('4.000'))
+        self.assertFalse(ProductStockEntry.objects.filter(id=entry.id).exists())
+        audit = AuditLog.objects.get(action='product_stock_entry.delete', entity='product_stock_entry', entity_id=str(entry.id))
+        self.assertEqual(audit.before['quantity'], '2.000')
+        self.assertEqual(audit.after['deleted'], True)

@@ -13,6 +13,7 @@ from apps.catalog.serializers import (
     ProductStockEntrySerializer,
 )
 from apps.accounts.permissions import auth_is_required, user_has_permission
+from apps.audit.utils import log_audit
 
 
 def local_admin_permissions():
@@ -238,7 +239,7 @@ class ProductStockEntryListCreateView(generics.ListCreateAPIView):
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
-        product = Product.objects.filter(id=kwargs['id']).first()
+        product = Product.objects.select_for_update().filter(id=kwargs['id']).first()
         if product is None:
             return Response({'detail': 'Product not found'}, status=404)
 
@@ -248,7 +249,121 @@ class ProductStockEntryListCreateView(generics.ListCreateAPIView):
         if quantity <= 0:
             return Response({'detail': 'Quantidade deve ser maior que zero.'}, status=400)
 
+        previous_stock = product.stock
         entry = serializer.save(product=product)
         Product.objects.filter(id=product.id).update(stock=F('stock') + quantity)
+        product.refresh_from_db(fields=['stock'])
         entry.refresh_from_db()
+        log_audit(
+            user=request.user,
+            action='product_stock_entry.create',
+            entity='product_stock_entry',
+            entity_id=entry.id,
+            after={
+                'product_id': product.id,
+                'arrival_date': entry.arrival_date.isoformat(),
+                'quantity': str(entry.quantity),
+                'stock_before': str(previous_stock),
+                'stock_after': str(product.stock),
+            },
+        )
         return Response(self.get_serializer(entry).data, status=201)
+
+
+class ProductStockEntryDetailView(APIView):
+    @staticmethod
+    def _to_decimal(value):
+        return Decimal(str(value))
+
+    def get_permissions(self):
+        if auth_is_required() and not user_has_permission(self.request.user, 'catalog.manage'):
+            return [permissions.IsAdminUser()]
+        return [permissions.IsAuthenticated()] if auth_is_required() else [permissions.AllowAny()]
+
+    def _get_product_and_entry(self, product_id, entry_id):
+        product = Product.objects.select_for_update().filter(id=product_id).first()
+        entry = ProductStockEntry.objects.select_for_update().filter(id=entry_id, product_id=product_id).first()
+        return product, entry
+
+    @transaction.atomic
+    def put(self, request, id, entry_id):
+        product, entry = self._get_product_and_entry(id, entry_id)
+        if product is None:
+            return Response({'detail': 'Product not found'}, status=404)
+        if entry is None:
+            return Response({'detail': 'Stock entry not found'}, status=404)
+
+        serializer = ProductStockEntrySerializer(entry, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        next_quantity = self._to_decimal(serializer.validated_data.get('quantity', entry.quantity))
+        if next_quantity <= 0:
+            return Response({'detail': 'Quantidade deve ser maior que zero.'}, status=400)
+
+        previous_stock = product.stock
+        previous_data = {
+            'product_id': product.id,
+            'arrival_date': entry.arrival_date.isoformat(),
+            'quantity': str(entry.quantity),
+            'stock_before': str(previous_stock),
+        }
+        quantity_delta = next_quantity - entry.quantity
+
+        serializer.save(product=product)
+        if quantity_delta != 0:
+            Product.objects.filter(id=product.id).update(stock=F('stock') + quantity_delta)
+
+        product.refresh_from_db(fields=['stock'])
+        entry.refresh_from_db()
+        log_audit(
+            user=request.user,
+            action='product_stock_entry.update',
+            entity='product_stock_entry',
+            entity_id=entry.id,
+            before=previous_data,
+            after={
+                'product_id': product.id,
+                'arrival_date': entry.arrival_date.isoformat(),
+                'quantity': str(entry.quantity),
+                'stock_after': str(product.stock),
+            },
+        )
+        return Response(ProductStockEntrySerializer(entry).data)
+
+    @transaction.atomic
+    def delete(self, request, id, entry_id):
+        product, entry = self._get_product_and_entry(id, entry_id)
+        if product is None:
+            return Response({'detail': 'Product not found'}, status=404)
+        if entry is None:
+            return Response({'detail': 'Stock entry not found'}, status=404)
+
+        previous_stock = product.stock
+        previous_data = {
+            'product_id': product.id,
+            'arrival_date': entry.arrival_date.isoformat(),
+            'quantity': str(entry.quantity),
+            'stock_before': str(previous_stock),
+        }
+        Product.objects.filter(id=product.id).update(stock=F('stock') - entry.quantity)
+        deleted_entry_id = entry.id
+        deleted_quantity = entry.quantity
+        entry.delete()
+        product.refresh_from_db(fields=['stock'])
+        log_audit(
+            user=request.user,
+            action='product_stock_entry.delete',
+            entity='product_stock_entry',
+            entity_id=deleted_entry_id,
+            before=previous_data,
+            after={
+                'product_id': product.id,
+                'deleted': True,
+                'quantity': str(deleted_quantity),
+                'stock_after': str(product.stock),
+            },
+        )
+        return Response({
+            'id': deleted_entry_id,
+            'product': product.id,
+            'current_stock': str(product.stock),
+        })

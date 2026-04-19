@@ -59,6 +59,19 @@ export type CreateProductStockEntryInput = {
   quantity: string
 }
 
+export type UpdateProductStockEntryInput = {
+  productId: number
+  entryId: number
+  arrival_date: string
+  quantity: string
+}
+
+export type DeleteProductStockEntryResult = {
+  id: number
+  product: number
+  current_stock: string | number
+}
+
 export const createCategory = async (input: CreateCategoryInput) => {
   const response = await api.post<Category>('/api/categories', input)
   return response.data
@@ -144,5 +157,18 @@ export const createProductStockEntry = async (input: CreateProductStockEntryInpu
     arrival_date: input.arrival_date,
     quantity: input.quantity,
   })
+  return response.data
+}
+
+export const updateProductStockEntry = async (input: UpdateProductStockEntryInput) => {
+  const response = await api.put<ProductStockEntry>(`/api/products/${input.productId}/stock-entries/${input.entryId}`, {
+    arrival_date: input.arrival_date,
+    quantity: input.quantity,
+  })
+  return response.data
+}
+
+export const deleteProductStockEntry = async (productId: number, entryId: number) => {
+  const response = await api.delete<DeleteProductStockEntryResult>(`/api/products/${productId}/stock-entries/${entryId}`)
   return response.data
 }
