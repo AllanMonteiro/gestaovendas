@@ -1,4 +1,5 @@
 import { api } from '../../core/api'
+import { getCategories, getProducts, saveCategories, saveProducts } from '../../offline/catalog'
 import type { Category, Product, ProductPrice } from './types'
 
 const sortProducts = (items: Product[]) =>
@@ -15,13 +16,33 @@ export const sortCategories = (items: Category[]) =>
   })
 
 export const listProducts = async () => {
-  const response = await api.get<Product[]>('/api/products')
-  return sortProducts(response.data)
+  try {
+    const response = await api.get<Product[]>('/api/products')
+    const products = sortProducts(response.data)
+    await saveProducts(products)
+    return products
+  } catch (error) {
+    const cachedProducts = sortProducts((await getProducts()) as Product[])
+    if (cachedProducts.length > 0) {
+      return cachedProducts
+    }
+    throw error
+  }
 }
 
 export const listCategories = async () => {
-  const response = await api.get<Category[]>('/api/categories')
-  return sortCategories(response.data)
+  try {
+    const response = await api.get<Category[]>('/api/categories')
+    const categories = sortCategories(response.data)
+    await saveCategories(categories)
+    return categories
+  } catch (error) {
+    const cachedCategories = sortCategories((await getCategories()) as Category[])
+    if (cachedCategories.length > 0) {
+      return cachedCategories
+    }
+    throw error
+  }
 }
 
 export const listProductPrices = async (productIds: number[]) => {

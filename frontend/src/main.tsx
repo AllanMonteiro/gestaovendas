@@ -12,13 +12,24 @@ const preloadOfflineRoutes = () => {
   if (!window.navigator.onLine) {
     return
   }
+
+  const preloadRoute = async (loader: () => Promise<unknown>) => {
+    try {
+      await loader()
+    } catch {
+      // Route warm-up is opportunistic and should never surface as a user-facing error.
+    }
+  }
+
   const warmUp = () => {
     // Keep first navigation snappy for the core operational screens without eagerly loading heavy secondary pages.
-    void import('./pages/PDV')
-    void import('./pages/Caixa')
-    void import('./pages/Cozinha')
-    void import('./pages/Produtos')
-    void import('./pages/Configuracoes')
+    void Promise.allSettled([
+      preloadRoute(() => import('./pages/PDV')),
+      preloadRoute(() => import('./pages/Caixa')),
+      preloadRoute(() => import('./pages/Cozinha')),
+      preloadRoute(() => import('./pages/Produtos')),
+      preloadRoute(() => import('./pages/Configuracoes')),
+    ])
   }
 
   if ('requestIdleCallback' in window) {

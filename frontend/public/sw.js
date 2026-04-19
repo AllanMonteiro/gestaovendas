@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sorveteria-pos-v9'
+const CACHE_NAME = 'sorveteria-pos-v10'
 const ASSETS = ['/', '/index.html', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png']
 
 const extractAssetUrls = (html) => {
