@@ -18,8 +18,8 @@ export default {
         }
       },
       fontFamily: {
-        display: ['"Cabin Sketch"', 'cursive'],
-        body: ['"Rubik"', 'sans-serif']
+        display: ['"Trebuchet MS"', '"Arial Rounded MT Bold"', '"Segoe UI"', 'sans-serif'],
+        body: ['"Segoe UI"', 'Tahoma', 'Geneva', 'Verdana', 'sans-serif']
       }
     }
   },

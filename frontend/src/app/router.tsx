@@ -6,6 +6,7 @@ import { type AuthSession } from './auth'
 import { resolveAssetUrl } from './runtime'
 import { LoginGate } from '../components/LoginGate'
 import { useSocket } from '../hooks/useSocket'
+import PublicMenu from '../pages/PublicMenu'
 
 // Lazy loading das paginas para reduzir o bundle inicial
 const PDV = lazy(() => import('../pages/PDV'))
@@ -15,7 +16,6 @@ const Produtos = lazy(() => import('../pages/Produtos'))
 const Configuracoes = lazy(() => import('../pages/Configuracoes'))
 const Fidelidade = lazy(() => import('../pages/Fidelidade'))
 const Relatorios = lazy(() => import('../pages/Relatorios'))
-const PublicMenu = lazy(() => import('../pages/PublicMenu'))
 const PedidosDelivery = lazy(() => import('../pages/PedidosDelivery'))
 
 type StoreHeaderConfig = {
@@ -528,6 +528,6 @@ export const router = createBrowserRouter([
   {
     path: '/cardapio',
     errorElement: <RouteErrorBoundary />,
-    element: <Suspense fallback={<div className="p-10 text-center">Carregando cardapio...</div>}><PublicMenu /></Suspense>
+    element: <PublicMenu />
   }
 ])

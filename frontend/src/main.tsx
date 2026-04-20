@@ -8,6 +8,13 @@ import './styles.css'
 const root = document.getElementById('root')!
 const CHUNK_RELOAD_KEY = 'sorveteria.chunk-reload-at'
 
+const isPublicMenuRoute = () => window.location.pathname.startsWith('/cardapio')
+
+const isEmbeddedSocialBrowser = () => {
+  const userAgent = window.navigator.userAgent || ''
+  return /Instagram|FBAN|FBAV|FB_IAB|FB4A|TikTok|Line\/|MicroMessenger/i.test(userAgent)
+}
+
 const preloadOfflineRoutes = () => {
   if (!window.navigator.onLine) {
     return
@@ -87,6 +94,10 @@ ReactDOM.createRoot(root).render(
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
+    if (isPublicMenuRoute() || isEmbeddedSocialBrowser()) {
+      return
+    }
+
     let refreshing = false
 
     const requestImmediateActivation = (worker: ServiceWorker | null) => {

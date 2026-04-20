@@ -513,6 +513,36 @@ class StoreConfigAssetUrlTests(TestCase):
         self.assertEqual(response.data['logo_url'], 'http://pdv.exemplo.com/media/store-config/logo.png')
 
 
+class PublicMenuConfigViewTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+    def test_public_menu_config_is_accessible_without_auth_and_omits_sensitive_fields(self):
+        StoreConfig.objects.update_or_create(
+            id=1,
+            defaults={
+                'store_name': 'Sorveteria Publica',
+                'logo_url': '/media/store-config/logo-publico.png',
+                'whatsapp_number': '5591999999999',
+                'delivery_fee_default': Decimal('12.50'),
+                'delivery_fee_rules': [{'label': 'CENTRO', 'fee': '6.00'}],
+                'printer': {'agent_url': 'http://127.0.0.1:9876', 'printer_name': 'Termica'},
+                'delivery_integration': {'integration_token': 'segredo', 'merchant_id': 'abc123'},
+            },
+        )
+
+        response = self.client.get('/api/config/public-menu', HTTP_HOST='pdv.exemplo.com')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['store_name'], 'Sorveteria Publica')
+        self.assertEqual(response.data['logo_url'], 'http://pdv.exemplo.com/media/store-config/logo-publico.png')
+        self.assertEqual(response.data['whatsapp_number'], '5591999999999')
+        self.assertEqual(response.data['delivery_fee_default'], '12.50')
+        self.assertEqual(response.data['delivery_fee_rules'], [{'label': 'CENTRO', 'fee': '6.00'}])
+        self.assertNotIn('printer', response.data)
+        self.assertNotIn('delivery_integration', response.data)
+
+
 @override_settings(REQUIRE_AUTH=False)
 class OpenOrdersQueryEfficiencyTests(TestCase):
     def setUp(self):

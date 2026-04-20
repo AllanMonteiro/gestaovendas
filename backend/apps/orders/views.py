@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 
 from apps.accounts.permissions import auth_is_required, user_has_permission
 from apps.integrations.whatsapp.services_ai import create_delivery_order_from_parsed
+from apps.orders.order_notifications import enqueue_new_delivery_order_alert
 from apps.sales import services
 from apps.sales.consumers import broadcast_delivery_event
 from apps.sales.models import DeliveryOrderMeta, Order, Payment
@@ -27,7 +28,13 @@ PAYMENT_METHOD_ALIASES = {
     'dinheiro': Payment.METHOD_CASH,
     'pix': Payment.METHOD_PIX,
     'card': Payment.METHOD_CARD,
+    'card credit': Payment.METHOD_CARD,
+    'card debit': Payment.METHOD_CARD,
     'cartao': Payment.METHOD_CARD,
+    'cartao credito': Payment.METHOD_CARD,
+    'cartao debito': Payment.METHOD_CARD,
+    'cartao de credito': Payment.METHOD_CARD,
+    'cartao de debito': Payment.METHOD_CARD,
     'credito': Payment.METHOD_CARD,
     'debito': Payment.METHOD_CARD,
 }
@@ -68,7 +75,9 @@ DELIVERY_ITEM_ONLY_FIELDS = (
 
 def _normalize_payment_token(raw_method):
     text = unicodedata.normalize('NFKD', (raw_method or '').strip().lower())
-    return ''.join(ch for ch in text if not unicodedata.combining(ch))
+    text = ''.join(ch for ch in text if not unicodedata.combining(ch))
+    text = ''.join(ch if ch.isalnum() else ' ' for ch in text)
+    return ' '.join(text.split())
 
 
 def _normalize_payment_method(raw_method):
@@ -78,9 +87,9 @@ def _normalize_payment_method(raw_method):
 
 def _build_delivery_payment_meta(raw_method):
     normalized = _normalize_payment_token(raw_method)
-    if normalized == 'credito':
+    if normalized in {'credito', 'card credit', 'cartao credito', 'cartao de credito'}:
         return {'card_type': 'CREDIT'}
-    if normalized == 'debito':
+    if normalized in {'debito', 'card debit', 'cartao debito', 'cartao de debito'}:
         return {'card_type': 'DEBIT'}
     return None
 
@@ -198,6 +207,7 @@ class PublicDeliveryOrderCreateView(APIView):
             source=DeliveryOrderMeta.SOURCE_WEB,
             default_customer_name='Cliente Web',
         )
+        enqueue_new_delivery_order_alert(order.id)
         try:
             broadcast_delivery_event('order_created', {
                 'id': str(order.id),

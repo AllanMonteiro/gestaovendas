@@ -29,6 +29,7 @@ type DeliveryFeeRule = {
 
 type StoreConfig = {
   store_name?: string
+  logo_url?: string | null
   whatsapp_number?: string | null
   delivery_fee_default?: string
   delivery_fee_rules?: DeliveryFeeRule[]
@@ -49,7 +50,16 @@ type DeliveryFeeEstimate = {
   matchedRuleLabel: string | null
 }
 
+type DeliveryPaymentMethod = 'PIX' | 'CASH' | 'CARD_CREDIT' | 'CARD_DEBIT'
+
 const formatBRL = (val: string | number) => Number(val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+const paymentMethodLabel: Record<DeliveryPaymentMethod, string> = {
+  PIX: 'PIX',
+  CASH: 'Dinheiro',
+  CARD_CREDIT: 'Cartao credito',
+  CARD_DEBIT: 'Cartao debito',
+}
 
 const normalizeWhatsAppNumber = (value?: string | null) => {
   const digits = String(value || '').replace(/\D/g, '')
@@ -118,7 +128,7 @@ const PublicMenu: React.FC = () => {
   const [neighborhood, setNeighborhood] = useState('')
   const [cep, setCep] = useState('')
   const [notes, setNotes] = useState('')
-  const [paymentMethod, setPaymentMethod] = useState('PIX')
+  const [paymentMethod, setPaymentMethod] = useState<DeliveryPaymentMethod>('PIX')
   const [submitting, setSubmitting] = useState(false)
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
   const [lastOrderId, setLastOrderId] = useState('')
@@ -130,7 +140,7 @@ const PublicMenu: React.FC = () => {
         const [cats, prods, config] = await Promise.all([
           api.get<Category[]>('/api/categories'),
           api.get<Product[]>('/api/products'),
-          api.get<StoreConfig>('/api/config/ui')
+          api.get<StoreConfig>('/api/config/public-menu')
         ])
 
         const activeProducts = prods.data.filter((product) => product.active !== false)
@@ -229,7 +239,7 @@ const PublicMenu: React.FC = () => {
     setNeighborhood('')
     setCep('')
     setNotes('')
-    setPaymentMethod('PIX')
+      setPaymentMethod('PIX')
   }
 
   const handleSubmitOrder = async () => {
@@ -245,6 +255,7 @@ const PublicMenu: React.FC = () => {
     setSubmitting(true)
     setFeedback(null)
     try {
+      const paymentMethodText = paymentMethodLabel[paymentMethod] || paymentMethod
       const response = await api.post<CreatedOrderResponse>('/api/orders/public/', {
         customer_name: customerName.trim(),
         customer_phone: customerPhone.trim() || undefined,
@@ -252,7 +263,7 @@ const PublicMenu: React.FC = () => {
         neighborhood: neighborhood.trim(),
         cep: cep.trim() || undefined,
         notes: notes.trim() || undefined,
-        payment_method: paymentMethod,
+        payment_method: paymentMethodText,
         items: cart.map((item) => ({
           product_id: item.product.id,
           product_name: item.product.name,
@@ -263,7 +274,7 @@ const PublicMenu: React.FC = () => {
       const whatsappMessage = [
         `Ola! Acabei de fazer o pedido ${orderLabel} no cardapio online da ${storeName}.`,
         `Cliente: ${customerName.trim()}.`,
-        `Forma de pagamento escolhida: ${paymentMethod}.`,
+        `Forma de pagamento escolhida: ${paymentMethodText}.`,
         'Quero continuar por aqui para receber os dados de pagamento com mais seguranca.'
       ].join(' ')
       const whatsappUrl = storeWhatsAppNumber
@@ -490,12 +501,13 @@ const PublicMenu: React.FC = () => {
               ) : null}
               <select
                 value={paymentMethod}
-                onChange={(event) => setPaymentMethod(event.target.value)}
+                onChange={(event) => setPaymentMethod(event.target.value as DeliveryPaymentMethod)}
                 className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-brand-400"
               >
                 <option value="PIX">Pagar no PIX</option>
-                <option value="CARD">Cartao</option>
                 <option value="CASH">Dinheiro</option>
+                <option value="CARD_CREDIT">Cartao credito</option>
+                <option value="CARD_DEBIT">Cartao debito</option>
               </select>
               <textarea
                 value={notes}

@@ -1,5 +1,5 @@
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.db import connection
 from django.test import TestCase, override_settings
@@ -8,6 +8,7 @@ from rest_framework.test import APIClient
 
 from apps.accounts.models import Permission, Role, RolePermission, User, UserRole
 from apps.catalog.models import Category, Product, ProductPrice
+from apps.orders.order_notifications import send_new_delivery_order_alert
 from apps.reports import queries as report_queries
 from apps.sales import services
 from apps.sales.models import DeliveryOrderMeta, Order, Payment, StoreConfig
@@ -75,6 +76,93 @@ class PublicDeliveryOrderCreateTests(TestCase):
         self.assertEqual(order.items.count(), 1)
         self.assertEqual(order.delivery_meta.source, DeliveryOrderMeta.SOURCE_WEB)
         self.assertEqual(order.delivery_meta.customer_name, 'Cliente Web')
+
+    @patch('apps.orders.order_notifications.send_new_delivery_order_alert')
+    def test_public_menu_enqueues_company_alert_only_after_successful_commit(self, send_alert_mock):
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                '/api/orders/public/',
+                {
+                    'customer_name': 'Cliente Web',
+                    'customer_phone': '91999990000',
+                    'address': 'Rua das Flores, 10',
+                    'neighborhood': 'Centro',
+                    'payment_method': 'PIX',
+                    'items': [
+                        {
+                            'product_id': self.product.id,
+                            'product_name': 'Cascao',
+                            'quantity': 2,
+                        }
+                    ],
+                },
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, 201)
+        send_alert_mock.assert_called_once()
+        self.assertEqual(send_alert_mock.call_args.args[0].id, Order.objects.get(id=response.data['id']).id)
+
+    @patch('apps.orders.order_notifications.send_new_delivery_order_alert')
+    def test_public_menu_does_not_enqueue_company_alert_when_creation_fails(self, send_alert_mock):
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                '/api/orders/public/',
+                {
+                    'customer_name': 'Cliente Sem Itens',
+                    'customer_phone': '91999990000',
+                    'address': 'Rua das Flores, 10',
+                    'neighborhood': 'Centro',
+                    'payment_method': 'PIX',
+                    'items': [],
+                },
+                format='json',
+            )
+
+        self.assertEqual(response.status_code, 400)
+        send_alert_mock.assert_not_called()
+
+    def test_send_new_delivery_order_alert_formats_message_for_company_channel(self):
+        response = self.client.post(
+            '/api/orders/public/',
+            {
+                'customer_name': 'Cliente Web',
+                'customer_phone': '91999990000',
+                'address': 'Rua das Flores, 10',
+                'neighborhood': 'Centro',
+                'payment_method': 'PIX',
+                'items': [
+                    {
+                        'product_id': self.product.id,
+                        'product_name': 'Cascao',
+                        'quantity': 2,
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        order = Order.objects.select_related('delivery_meta').get(id=response.data['id'])
+        client_mock = Mock()
+        client_mock.is_configured.return_value = True
+
+        with override_settings(ORDER_ALERT_PANEL_BASE_URL='https://painel.example.com'), patch(
+            'apps.orders.order_notifications.get_order_alert_client',
+            return_value=client_mock,
+        ):
+            send_new_delivery_order_alert(order)
+
+        client_mock.send_message.assert_called_once()
+        message = client_mock.send_message.call_args.args[0]
+        self.assertIn('*Novo pedido do delivery*', message)
+        self.assertIn('Pedido: #001', message)
+        self.assertIn('Cliente: Cliente Web', message)
+        self.assertIn('Total: R$ 21,00', message)
+        self.assertIn('Pagamento: PIX', message)
+        self.assertIn('Tipo: Entrega', message)
+        self.assertIn('Abrir no painel: https://painel.example.com/delivery?order_id=', message)
 
     def test_delivery_list_returns_breakdown_for_operator_conference(self):
         create_response = self.client.post(
@@ -185,6 +273,42 @@ class PublicDeliveryOrderCreateTests(TestCase):
         self.assertEqual(payment.method, Payment.METHOD_CARD)
         self.assertEqual(payment.meta, {'card_type': 'CREDIT'})
         self.assertTrue(any(row['payment_method'] == 'CARD_CREDIT' and row['total'] == order.total for row in by_payment))
+
+    def test_delivered_delivery_with_debit_card_payment_maps_correctly(self):
+        create_response = self.client.post(
+            '/api/orders/public/',
+            {
+                'customer_name': 'Cliente Debito',
+                'customer_phone': '91999990000',
+                'address': 'Rua das Flores, 10',
+                'neighborhood': 'Centro',
+                'payment_method': 'Cartao debito',
+                'items': [
+                    {
+                        'product_id': self.product.id,
+                        'product_name': 'Cascao',
+                        'quantity': 1,
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        patch_response = self.staff_client.patch(
+            f"/api/orders/{create_response.data['id']}/",
+            {'status': DeliveryOrderMeta.STATUS_DELIVERED},
+            format='json',
+        )
+
+        self.assertEqual(patch_response.status_code, 200)
+
+        order = Order.objects.get(id=create_response.data['id'])
+        payment = Payment.objects.get(order=order)
+        by_payment = report_queries.by_payment()
+
+        self.assertEqual(payment.method, Payment.METHOD_CARD)
+        self.assertEqual(payment.meta, {'card_type': 'DEBIT'})
+        self.assertTrue(any(row['payment_method'] == 'CARD_DEBIT' and row['total'] == order.total for row in by_payment))
 
     def test_delivered_delivery_requires_open_cash_session(self):
         services.close_cash(

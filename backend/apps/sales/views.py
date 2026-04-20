@@ -19,6 +19,7 @@ from apps.sales.serializers import (
     CashMoveSerializer,
     StoreConfigSerializer,
     StoreConfigPdvSerializer,
+    StoreConfigPublicMenuSerializer,
     StoreConfigUiSerializer,
 )
 from apps.sales import services
@@ -725,6 +726,15 @@ class ConfigUiView(APIView):
     def get(self, request):
         config = services.get_store_config()
         return Response(StoreConfigUiSerializer(config, context={'request': request}).data)
+
+
+class ConfigPublicMenuView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request):
+        config = services.get_store_config()
+        return Response(StoreConfigPublicMenuSerializer(config, context={'request': request}).data)
 
 
 class ConfigPdvView(APIView):

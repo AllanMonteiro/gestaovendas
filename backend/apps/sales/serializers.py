@@ -189,6 +189,19 @@ class StoreConfigUiSerializer(StoreConfigAssetSerializer):
         ]
 
 
+class StoreConfigPublicMenuSerializer(StoreConfigAssetSerializer):
+    class Meta:
+        model = StoreConfig
+        fields = [
+            'store_name',
+            'logo_url',
+            'whatsapp_number',
+            'theme',
+            'delivery_fee_default',
+            'delivery_fee_rules',
+        ]
+
+
 class StoreConfigPdvSerializer(StoreConfigAssetSerializer):
     class Meta:
         model = StoreConfig
