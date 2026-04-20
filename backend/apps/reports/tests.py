@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 from apps.accounts.models import User
 from apps.catalog.models import Category, Product
 from apps.reports import queries
-from apps.sales.models import Order, OrderItem
+from apps.sales.models import Order, OrderItem, Payment, StoreConfig
 
 
 class CashSummaryFromHistoryTests(TestCase):
@@ -85,3 +85,54 @@ class ProductStockReportTests(TestCase):
         self.assertEqual(rows[0]['qty'], Decimal('3'))
         self.assertEqual(rows[0]['current_stock'], Decimal('7'))
         self.assertEqual(rows[0]['initial_stock'], Decimal('10'))
+
+
+class PaymentFeesReportTests(TestCase):
+    def test_by_payment_includes_card_fee_discount_and_net_total(self):
+        StoreConfig.objects.create(
+            id=1,
+            pix_fee_pct=Decimal('0.99'),
+            card_fee_credit_pct=Decimal('3.50'),
+            card_fee_debit_pct=Decimal('1.99'),
+        )
+        paid_order = Order.objects.create(
+            status=Order.STATUS_PAID,
+            type=Order.TYPE_COUNTER,
+            subtotal=Decimal('150.00'),
+            total=Decimal('150.00'),
+            closed_at=timezone.now(),
+        )
+        Payment.objects.create(
+            order=paid_order,
+            method=Payment.METHOD_PIX,
+            amount=Decimal('20.00'),
+        )
+        Payment.objects.create(
+            order=paid_order,
+            method=Payment.METHOD_CARD,
+            amount=Decimal('100.00'),
+            meta={'card_type': 'CREDIT'},
+        )
+        Payment.objects.create(
+            order=paid_order,
+            method=Payment.METHOD_CARD,
+            amount=Decimal('50.00'),
+            meta={'card_type': 'DEBIT'},
+        )
+
+        rows = {row['payment_method']: row for row in queries.by_payment()}
+
+        self.assertEqual(rows['PIX']['total'], Decimal('20'))
+        self.assertEqual(rows['PIX']['fee_pct'], Decimal('0.99'))
+        self.assertEqual(rows['PIX']['fee_amount'], Decimal('0.20'))
+        self.assertEqual(rows['PIX']['net_total'], Decimal('19.80'))
+
+        self.assertEqual(rows['CARD_CREDIT']['total'], Decimal('100'))
+        self.assertEqual(rows['CARD_CREDIT']['fee_pct'], Decimal('3.50'))
+        self.assertEqual(rows['CARD_CREDIT']['fee_amount'], Decimal('3.50'))
+        self.assertEqual(rows['CARD_CREDIT']['net_total'], Decimal('96.50'))
+
+        self.assertEqual(rows['CARD_DEBIT']['total'], Decimal('50'))
+        self.assertEqual(rows['CARD_DEBIT']['fee_pct'], Decimal('1.99'))
+        self.assertEqual(rows['CARD_DEBIT']['fee_amount'], Decimal('1.00'))
+        self.assertEqual(rows['CARD_DEBIT']['net_total'], Decimal('49.00'))

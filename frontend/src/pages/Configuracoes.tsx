@@ -30,6 +30,9 @@ type StoreConfig = {
   }
   category_images?: Record<string, string>
   pix_key?: string
+  pix_fee_pct?: string
+  card_fee_credit_pct?: string
+  card_fee_debit_pct?: string
   delivery_fee_default?: string
   delivery_fee_rules?: Array<{
     label?: string
@@ -146,6 +149,9 @@ const Configuracoes: React.FC = () => {
   const [address, setAddress] = useState('')
   const [whatsappNumber, setWhatsappNumber] = useState('')
   const [pixKey, setPixKey] = useState('')
+  const [pixFeePct, setPixFeePct] = useState('0.00')
+  const [cardFeeCreditPct, setCardFeeCreditPct] = useState('0.00')
+  const [cardFeeDebitPct, setCardFeeDebitPct] = useState('0.00')
   const [theme, setTheme] = useState('cream')
   const [deliveryFeeDefault, setDeliveryFeeDefault] = useState('10.00')
   const [deliveryFeeRules, setDeliveryFeeRules] = useState<DeliveryFeeRuleForm[]>([createDeliveryFeeRule()])
@@ -207,6 +213,9 @@ const Configuracoes: React.FC = () => {
       setAddress(cfg.address || '')
       setWhatsappNumber(cfg.whatsapp_number || '')
       setPixKey(cfg.pix_key || '')
+      setPixFeePct(String(cfg.pix_fee_pct ?? '0.00'))
+      setCardFeeCreditPct(String(cfg.card_fee_credit_pct ?? '0.00'))
+      setCardFeeDebitPct(String(cfg.card_fee_debit_pct ?? '0.00'))
       setTheme(normalizeTheme(cfg.theme))
       setDeliveryFeeDefault(String(cfg.delivery_fee_default ?? '10.00'))
       setDeliveryFeeRules(normalizeDeliveryFeeRules(cfg.delivery_fee_rules))
@@ -449,6 +458,9 @@ const Configuracoes: React.FC = () => {
         address,
         whatsapp_number: whatsappNumber.trim() || null,
         pix_key: pixKey,
+        pix_fee_pct: pixFeePct.replace(',', '.') || '0',
+        card_fee_credit_pct: cardFeeCreditPct.replace(',', '.') || '0',
+        card_fee_debit_pct: cardFeeDebitPct.replace(',', '.') || '0',
         delivery_fee_default: deliveryFeeDefault.replace(',', '.') || '0',
         delivery_fee_rules: buildDeliveryFeeRulesPayload(deliveryFeeRules),
         delivery_integration: {
@@ -813,6 +825,31 @@ const Configuracoes: React.FC = () => {
         <input value={pointsPerReal} onChange={(event) => setPointsPerReal(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Pontos por R$1" />
         <input value={pointValueReal} onChange={(event) => setPointValueReal(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Valor do ponto" />
         <input value={minRedeemPoints} onChange={(event) => setMinRedeemPoints(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Minimo resgate" />
+      </div>
+
+      <div className="panel space-y-3 p-4">
+        <h2 className="font-semibold">Taxas de cartao</h2>
+        <input
+          value={pixFeePct}
+          onChange={(event) => setPixFeePct(event.target.value)}
+          className="w-full rounded-lg border border-brand-100 px-3 py-2"
+          placeholder="Taxa de PIX (%)"
+        />
+        <input
+          value={cardFeeCreditPct}
+          onChange={(event) => setCardFeeCreditPct(event.target.value)}
+          className="w-full rounded-lg border border-brand-100 px-3 py-2"
+          placeholder="Taxa de credito (%)"
+        />
+        <input
+          value={cardFeeDebitPct}
+          onChange={(event) => setCardFeeDebitPct(event.target.value)}
+          className="w-full rounded-lg border border-brand-100 px-3 py-2"
+          placeholder="Taxa de debito (%)"
+        />
+        <p className="text-xs text-slate-500">
+          Essas taxas aparecem nos relatorios para mostrar o valor recebido e o valor liquido apos o desconto da maquina.
+        </p>
       </div>
 
       <div className="panel space-y-3 p-4">

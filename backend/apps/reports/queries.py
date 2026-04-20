@@ -4,6 +4,7 @@ from django.db.models import Sum, Count, Avg, Case, When, Value, CharField, F, M
 from django.db.models.functions import ExtractHour, TruncDate
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
+from apps.sales import services
 from apps.sales.models import Order, Payment, OrderItem, CashSession
 
 
@@ -56,6 +57,12 @@ def summary(from_date=None, to_date=None):
 
 
 def by_payment(from_date=None, to_date=None):
+    config = services.get_store_config()
+    fee_rates = {
+        'PIX': Decimal(str(config.pix_fee_pct or 0)),
+        'CARD_CREDIT': Decimal(str(config.card_fee_credit_pct or 0)),
+        'CARD_DEBIT': Decimal(str(config.card_fee_debit_pct or 0)),
+    }
     qs = Payment.objects.select_related('order').filter(order__status=Order.STATUS_PAID)
     qs = _apply_range_filter(qs, 'created_at', from_date, to_date)
     qs = qs.annotate(
@@ -66,7 +73,20 @@ def by_payment(from_date=None, to_date=None):
             output_field=CharField(),
         )
     )
-    return list(qs.values('payment_method').annotate(total=Sum('amount')))
+    rows = qs.values('payment_method').annotate(total=Sum('amount')).order_by('payment_method')
+    payload = []
+    for row in rows:
+        total = Decimal(str(row.get('total') or 0))
+        fee_pct = fee_rates.get(row['payment_method'], Decimal('0'))
+        fee_amount = (total * fee_pct / Decimal('100')).quantize(Decimal('0.01'))
+        payload.append({
+            'payment_method': row['payment_method'],
+            'total': total,
+            'fee_pct': fee_pct,
+            'fee_amount': fee_amount,
+            'net_total': total - fee_amount,
+        })
+    return payload
 
 
 def by_category(from_date=None, to_date=None):

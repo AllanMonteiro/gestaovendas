@@ -32,6 +32,9 @@ type CategoryRow = {
 type PaymentRow = {
   payment_method?: string
   total: string
+  fee_pct?: string
+  fee_amount?: string
+  net_total?: string
 }
 
 type CashBreakdown = {
@@ -124,9 +127,18 @@ const formatNumber = (value: number | null | undefined) => Number(value || 0).to
 const formatQty = (value: string | number | null | undefined) =>
   Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })
 const toISODate = (date: Date) => date.toISOString().slice(0, 10)
+const getPaymentRow = (rows: PaymentRow[], method: string) => rows.find((entry) => entry.payment_method === method)
 const getPaymentTotal = (rows: PaymentRow[], method: string) => {
-  const row = rows.find((entry) => entry.payment_method === method)
+  const row = getPaymentRow(rows, method)
   return Number(row?.total || 0)
+}
+const getPaymentMethodLabel = (method?: string) => {
+  if (method === 'CASH') return 'Dinheiro'
+  if (method === 'PIX') return 'PIX'
+  if (method === 'CARD_CREDIT') return 'Cartao credito'
+  if (method === 'CARD_DEBIT') return 'Cartao debito'
+  if (method === 'CARD') return 'Cartao sem classificacao'
+  return method || 'Nao informado'
 }
 const getPaymentMethodOption = (payment?: OrderPayment | null) => {
   if (!payment) return 'CASH'
@@ -380,6 +392,9 @@ const Relatorios: React.FC = () => {
       ? [{ label: 'Cartao sem classificacao', value: formatBRL(getPaymentTotal(payments, 'CARD')), description: 'Lancamentos antigos sem detalhe de tipo', tone: 'warning' as const }]
       : []),
   ]
+  const paymentSummaryRows = ['CASH', 'PIX', 'CARD_CREDIT', 'CARD_DEBIT', 'CARD']
+    .map((method) => getPaymentRow(payments, method))
+    .filter((row): row is PaymentRow => Boolean(row))
 
   const selectedPeriodLabel = fromDate === toDate
     ? new Date(`${fromDate}T00:00:00`).toLocaleDateString('pt-BR')
@@ -441,6 +456,37 @@ const Relatorios: React.FC = () => {
               tone={card.tone}
             />
           ))}
+        </div>
+        <div className="mt-5 overflow-x-auto rounded-xl border border-brand-100">
+          <table className="min-w-full text-sm">
+            <thead className="bg-brand-50 text-left text-slate-600">
+              <tr>
+                <th className="px-3 py-2 font-medium">Forma</th>
+                <th className="px-3 py-2 text-right font-medium">Recebido</th>
+                <th className="px-3 py-2 text-right font-medium">Taxa</th>
+                <th className="px-3 py-2 text-right font-medium">Desconto</th>
+                <th className="px-3 py-2 text-right font-medium">Liquido</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paymentSummaryRows.map((row) => (
+                <tr key={row.payment_method || 'unknown'} className="border-t border-brand-100">
+                  <td className="px-3 py-3 font-medium text-slate-800">{getPaymentMethodLabel(row.payment_method)}</td>
+                  <td className="px-3 py-3 text-right">{formatBRL(row.total)}</td>
+                  <td className="px-3 py-3 text-right">{Number(row.fee_pct || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</td>
+                  <td className="px-3 py-3 text-right text-rose-700">{formatBRL(row.fee_amount)}</td>
+                  <td className="px-3 py-3 text-right font-semibold text-emerald-700">{formatBRL(row.net_total ?? row.total)}</td>
+                </tr>
+              ))}
+              {paymentSummaryRows.length === 0 ? (
+                <tr className="border-t border-brand-100">
+                  <td colSpan={5} className="px-3 py-3 text-center text-slate-500">
+                    Sem recebimentos no periodo.
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
         </div>
       </section>
 
