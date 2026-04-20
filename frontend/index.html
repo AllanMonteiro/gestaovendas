@@ -6,6 +6,55 @@
     <link rel="manifest" href="/manifest.json" />
     <link rel="icon" type="image/png" href="/icons/icon-192.png" />
     <title>Sorveteria POS</title>
+    <script>
+      (function () {
+        var path = window.location.pathname || '';
+        var userAgent = window.navigator.userAgent || '';
+        var isPublicMenu = path.indexOf('/cardapio') === 0;
+        var isEmbeddedSocialBrowser = /Instagram|FBAN|FBAV|FB_IAB|FB4A|TikTok|Line\/|MicroMessenger/i.test(userAgent);
+        var shouldBypassServiceWorker = isPublicMenu || isEmbeddedSocialBrowser;
+
+        window.__SORVETERIA_BYPASS_SW__ = shouldBypassServiceWorker;
+        if (!shouldBypassServiceWorker || !('serviceWorker' in navigator)) {
+          return;
+        }
+
+        var resetKey = 'sorveteria.public-menu-sw-reset-at';
+        var lastResetAt = Number(window.sessionStorage.getItem(resetKey) || '0');
+        if (Date.now() - lastResetAt < 15000) {
+          return;
+        }
+
+        var clearCaches = function () {
+          if (!('caches' in window)) {
+            return Promise.resolve();
+          }
+          return caches.keys().then(function (keys) {
+            return Promise.all(keys.map(function (key) { return caches.delete(key); }));
+          });
+        };
+
+        navigator.serviceWorker.getRegistrations()
+          .then(function (registrations) {
+            return Promise.all(registrations.map(function (registration) {
+              return registration.unregister();
+            }));
+          })
+          .then(clearCaches)
+          .then(function () {
+            if (!navigator.serviceWorker.controller) {
+              return;
+            }
+            window.sessionStorage.setItem(resetKey, String(Date.now()));
+            var url = new URL(window.location.href);
+            url.searchParams.set('_sw_reset', String(Date.now()));
+            window.location.replace(url.toString());
+          })
+          .catch(function () {
+            // Ignore cleanup failures and let the app continue loading.
+          });
+      })();
+    </script>
   </head>
   <body class="bg-brand-50 text-slate-900 font-body">
     <div id="root"></div>

@@ -7,6 +7,9 @@ import './styles.css'
 
 const root = document.getElementById('root')!
 const CHUNK_RELOAD_KEY = 'sorveteria.chunk-reload-at'
+const bypassServiceWorker =
+  typeof window !== 'undefined' &&
+  Boolean((window as Window & { __SORVETERIA_BYPASS_SW__?: boolean }).__SORVETERIA_BYPASS_SW__)
 
 const isPublicMenuRoute = () => window.location.pathname.startsWith('/cardapio')
 
@@ -94,7 +97,7 @@ ReactDOM.createRoot(root).render(
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    if (isPublicMenuRoute() || isEmbeddedSocialBrowser()) {
+    if (bypassServiceWorker || isPublicMenuRoute() || isEmbeddedSocialBrowser()) {
       return
     }
 
