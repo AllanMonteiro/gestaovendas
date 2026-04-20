@@ -182,6 +182,11 @@ class ProductPriceView(APIView):
         raw = value if value is not None else default
         return Decimal(str(raw))
 
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()] if auth_is_required() else [permissions.AllowAny()]
+
     def get(self, request, id):
         price = ProductPrice.objects.filter(product_id=id).order_by('store_id').first()
         if not price:
@@ -209,6 +214,9 @@ class ProductPriceView(APIView):
 
 
 class ProductPriceListView(APIView):
+    def get_permissions(self):
+        return [permissions.AllowAny()]
+
     def get(self, request):
         qs = ProductPrice.objects.all().order_by('product_id', 'store_id')
         product_ids_raw = request.query_params.get('product_ids')

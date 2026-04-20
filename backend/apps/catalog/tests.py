@@ -99,6 +99,33 @@ class ProductCompactListTests(TestCase):
         )
 
 
+@override_settings(REQUIRE_AUTH=True)
+class ProductPricePublicAccessTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        category = Category.objects.create(name='Linha Publica', price=Decimal('12.00'))
+        self.product = Product.objects.create(category=category, name='Produto Publico', active=True)
+        ProductPrice.objects.create(
+            product=self.product,
+            store_id=1,
+            price=Decimal('12.50'),
+            cost=Decimal('0'),
+            freight=Decimal('0'),
+            other=Decimal('0'),
+            tax_pct=Decimal('0'),
+            overhead_pct=Decimal('0'),
+            margin_pct=Decimal('0'),
+        )
+
+    def test_price_list_is_accessible_without_auth(self):
+        response = self.client.get(f'/api/products/prices?product_ids={self.product.id}')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]['product'], self.product.id)
+        self.assertEqual(response.data[0]['price'], '12.50')
+
+
 @override_settings(REQUIRE_AUTH=False)
 class ProductStockEntryTests(TestCase):
     def setUp(self):
