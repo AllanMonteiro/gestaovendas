@@ -23,6 +23,10 @@ import {
 } from '../components/ui'
 import '../styles.css'
 
+type DeliveryConfig = {
+  public_menu_url?: string | null
+}
+
 const sourceLabel: Record<string, string> = {
   web: 'WEB',
   pdv: 'PDV',
@@ -46,6 +50,31 @@ const statusVariant = (status: string): 'info' | 'warning' | 'success' | 'neutra
 const formatBRL = (value: string | number) =>
   Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
+const buildFallbackPublicMenuUrl = () => `${window.location.origin}/cardapio`
+
+const resolvePublicMenuUrl = (configuredUrl?: string | null) => {
+  const fallback = buildFallbackPublicMenuUrl()
+  const raw = String(configuredUrl || '').trim()
+  if (!raw) {
+    return fallback
+  }
+
+  try {
+    if (raw.startsWith('/')) {
+      return new URL(raw, window.location.origin).toString()
+    }
+
+    const normalized = raw.includes('://') ? raw : `https://${raw}`
+    const url = new URL(normalized)
+    if (!url.pathname || url.pathname === '/') {
+      url.pathname = '/cardapio'
+    }
+    return url.toString()
+  } catch {
+    return fallback
+  }
+}
+
 const DELIVERY_POLL_INTERVAL_MS = 10000
 const DELIVERY_REFRESH_DEBOUNCE_MS = 150
 
@@ -56,6 +85,7 @@ const PedidosDelivery: React.FC = () => {
   const deleteOrderMutation = useDeleteDeliveryOrderMutation()
   const [busyOrderId, setBusyOrderId] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
+  const [publicMenuUrl, setPublicMenuUrl] = useState(buildFallbackPublicMenuUrl())
   const wsRefreshTimerRef = useRef<number | null>(null)
   const pollTimerRef = useRef<number | null>(null)
   const orders = ordersQuery.data ?? []
@@ -65,6 +95,19 @@ const PedidosDelivery: React.FC = () => {
   const refreshOrders = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ordersQueryKeys.delivery.all })
   }, [queryClient])
+
+  useEffect(() => {
+    const loadDeliveryConfig = async () => {
+      try {
+        const response = await api.get<DeliveryConfig>('/api/config/ui')
+        setPublicMenuUrl(resolvePublicMenuUrl(response.data.public_menu_url))
+      } catch {
+        setPublicMenuUrl(buildFallbackPublicMenuUrl())
+      }
+    }
+
+    void loadDeliveryConfig()
+  }, [])
 
   useEffect(() => {
     pollTimerRef.current = window.setInterval(() => {
@@ -157,8 +200,6 @@ const PedidosDelivery: React.FC = () => {
       setBusyOrderId((current) => (current === order.id ? null : current))
     }
   }
-
-  const publicMenuUrl = `${window.location.origin}/cardapio`
 
   const handleCopyCatalogLink = async () => {
     try {

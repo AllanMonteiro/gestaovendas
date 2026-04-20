@@ -10,6 +10,7 @@ type StoreConfig = {
   cnpj?: string | null
   address?: string | null
   whatsapp_number?: string | null
+  public_menu_url?: string | null
   theme?: string
   points_per_real?: number
   point_value_real?: string
@@ -148,6 +149,7 @@ const Configuracoes: React.FC = () => {
   const [cnpj, setCnpj] = useState('')
   const [address, setAddress] = useState('')
   const [whatsappNumber, setWhatsappNumber] = useState('')
+  const [publicMenuUrl, setPublicMenuUrl] = useState('')
   const [pixKey, setPixKey] = useState('')
   const [pixFeePct, setPixFeePct] = useState('0.00')
   const [cardFeeCreditPct, setCardFeeCreditPct] = useState('0.00')
@@ -212,6 +214,7 @@ const Configuracoes: React.FC = () => {
       setCnpj(cfg.cnpj || '')
       setAddress(cfg.address || '')
       setWhatsappNumber(cfg.whatsapp_number || '')
+      setPublicMenuUrl(cfg.public_menu_url || '')
       setPixKey(cfg.pix_key || '')
       setPixFeePct(String(cfg.pix_fee_pct ?? '0.00'))
       setCardFeeCreditPct(String(cfg.card_fee_credit_pct ?? '0.00'))
@@ -457,6 +460,7 @@ const Configuracoes: React.FC = () => {
         cnpj,
         address,
         whatsapp_number: whatsappNumber.trim() || null,
+        public_menu_url: publicMenuUrl.trim() || null,
         pix_key: pixKey,
         pix_fee_pct: pixFeePct.replace(',', '.') || '0',
         card_fee_credit_pct: cardFeeCreditPct.replace(',', '.') || '0',
@@ -721,6 +725,18 @@ const Configuracoes: React.FC = () => {
         <input value={companyName} onChange={(event) => setCompanyName(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Razao social" />
         <input value={address} onChange={(event) => setAddress(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Endereco" />
         <input value={whatsappNumber} onChange={(event) => setWhatsappNumber(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="WhatsApp da empresa (com DDD)" />
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-slate-700">Link publico do cardapio</label>
+          <input
+            value={publicMenuUrl}
+            onChange={(event) => setPublicMenuUrl(event.target.value)}
+            className="w-full rounded-lg border border-brand-100 px-3 py-2"
+            placeholder="https://seudominio.com/cardapio"
+          />
+          <p className="text-xs text-slate-500">
+            Use aqui o endereco que seus clientes abrem no navegador do Instagram, WhatsApp ou bio.
+          </p>
+        </div>
         <div className="space-y-2 rounded-xl border border-brand-100 p-3">
           <div>
             <h3 className="text-sm font-medium text-slate-700">Logo da empresa</h3>
@@ -829,24 +845,33 @@ const Configuracoes: React.FC = () => {
 
       <div className="panel space-y-3 p-4">
         <h2 className="font-semibold">Taxas de cartao</h2>
-        <input
-          value={pixFeePct}
-          onChange={(event) => setPixFeePct(event.target.value)}
-          className="w-full rounded-lg border border-brand-100 px-3 py-2"
-          placeholder="Taxa de PIX (%)"
-        />
-        <input
-          value={cardFeeCreditPct}
-          onChange={(event) => setCardFeeCreditPct(event.target.value)}
-          className="w-full rounded-lg border border-brand-100 px-3 py-2"
-          placeholder="Taxa de credito (%)"
-        />
-        <input
-          value={cardFeeDebitPct}
-          onChange={(event) => setCardFeeDebitPct(event.target.value)}
-          className="w-full rounded-lg border border-brand-100 px-3 py-2"
-          placeholder="Taxa de debito (%)"
-        />
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-slate-700">Taxa de PIX (%)</label>
+          <input
+            value={pixFeePct}
+            onChange={(event) => setPixFeePct(event.target.value)}
+            className="w-full rounded-lg border border-brand-100 px-3 py-2"
+            placeholder="0,00"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-slate-700">Taxa de credito (%)</label>
+          <input
+            value={cardFeeCreditPct}
+            onChange={(event) => setCardFeeCreditPct(event.target.value)}
+            className="w-full rounded-lg border border-brand-100 px-3 py-2"
+            placeholder="0,00"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-sm font-medium text-slate-700">Taxa de debito (%)</label>
+          <input
+            value={cardFeeDebitPct}
+            onChange={(event) => setCardFeeDebitPct(event.target.value)}
+            className="w-full rounded-lg border border-brand-100 px-3 py-2"
+            placeholder="0,00"
+          />
+        </div>
         <p className="text-xs text-slate-500">
           Essas taxas aparecem nos relatorios para mostrar o valor recebido e o valor liquido apos o desconto da maquina.
         </p>
