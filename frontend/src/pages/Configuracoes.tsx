@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { type AuthSession } from '../app/auth'
+import { normalizePublicMenuUrl } from '../app/publicMenuUrl'
 import { resolveAssetUrl } from '../app/runtime'
 
 type StoreConfig = {
@@ -214,7 +215,7 @@ const Configuracoes: React.FC = () => {
       setCnpj(cfg.cnpj || '')
       setAddress(cfg.address || '')
       setWhatsappNumber(cfg.whatsapp_number || '')
-      setPublicMenuUrl(cfg.public_menu_url || '')
+      setPublicMenuUrl(cfg.public_menu_url ? normalizePublicMenuUrl(cfg.public_menu_url) : '')
       setPixKey(cfg.pix_key || '')
       setPixFeePct(String(cfg.pix_fee_pct ?? '0.00'))
       setCardFeeCreditPct(String(cfg.card_fee_credit_pct ?? '0.00'))
@@ -460,7 +461,7 @@ const Configuracoes: React.FC = () => {
         cnpj,
         address,
         whatsapp_number: whatsappNumber.trim() || null,
-        public_menu_url: publicMenuUrl.trim() || null,
+        public_menu_url: publicMenuUrl.trim() ? normalizePublicMenuUrl(publicMenuUrl) : null,
         pix_key: pixKey,
         pix_fee_pct: pixFeePct.replace(',', '.') || '0',
         card_fee_credit_pct: cardFeeCreditPct.replace(',', '.') || '0',

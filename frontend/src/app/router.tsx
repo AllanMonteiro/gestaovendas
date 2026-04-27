@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState, Suspense, lazy } from 
 import { Navigate, createBrowserRouter, NavLink, Outlet, useLocation, useNavigate, useRouteError } from 'react-router-dom'
 import { useOutboxSync } from './useSync'
 import { api } from '../api/client'
-import { type AuthSession } from './auth'
+import { getAccessToken, getRefreshToken, type AuthSession } from './auth'
 import { resolveAssetUrl } from './runtime'
 import { LoginGate } from '../components/LoginGate'
 import { useSocket } from '../hooks/useSocket'
@@ -115,6 +115,28 @@ const tryRecoverChunk = () => {
   window.sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()))
   window.location.reload()
   return true
+}
+
+const isEmbeddedSocialBrowser = () => {
+  if (typeof window === 'undefined') {
+    return false
+  }
+  const userAgent = window.navigator.userAgent || ''
+  return /Instagram|FBAN|FBAV|FB_IAB|FB4A|TikTok|Line\/|MicroMessenger/i.test(userAgent)
+}
+
+const RootEntryRedirect: React.FC = () => {
+  const hasStoredSession = Boolean(getAccessToken() || getRefreshToken())
+
+  if (hasStoredSession) {
+    return <Navigate to="/caixa" replace />
+  }
+
+  if (isEmbeddedSocialBrowser()) {
+    return <Navigate to="/cardapio" replace />
+  }
+
+  return <Navigate to="/entrar" replace />
 }
 
 const NavLoading: React.FC = () => (
@@ -502,7 +524,7 @@ const Layout: React.FC = () => {
 export const router = createBrowserRouter([
   {
     path: '/',
-    element: <Navigate to="/entrar" replace />,
+    element: <RootEntryRedirect />,
   },
   {
     path: '/entrar',
