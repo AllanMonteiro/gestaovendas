@@ -99,6 +99,13 @@ const PedidosDelivery: React.FC = () => {
   const preparingCount = orders.filter((order) => order.status === 'preparo').length
   const dispatchedCount = orders.filter((order) => order.status === 'despachado').length
   const deliveredCount = orders.filter((order) => order.status === 'entregue').length
+  const deliverySoundStatusLabel = !deliverySoundRuntime.supported
+    ? 'Nao suportado neste navegador'
+    : !deliverySoundRuntime.enabled
+      ? 'Desligado'
+      : deliverySoundRuntime.unlocked
+        ? 'Ativo neste computador'
+        : 'Aguardando ativacao neste computador'
   const refreshOrders = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ordersQueryKeys.delivery.all })
   }, [queryClient])
@@ -277,19 +284,31 @@ const PedidosDelivery: React.FC = () => {
           <p className="text-sm font-medium">{feedback.text}</p>
         </Card>
       ) : null}
-      {deliverySoundRuntime.enabled && !deliverySoundRuntime.unlocked ? (
-        <Card className="p-4" tone="warning">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-semibold text-amber-950">Som do delivery ainda nao foi liberado neste computador</p>
-              <p className="text-sm text-amber-900/80">Clique no botao abaixo uma vez para o navegador da loja permitir o alarme automaticamente.</p>
+      <Card className="p-4" tone={deliverySoundRuntime.unlocked ? 'success' : 'warning'}>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-semibold text-slate-900">Som do delivery</p>
+              <Badge variant={deliverySoundRuntime.unlocked ? 'success' : deliverySoundRuntime.enabled ? 'warning' : 'neutral'}>
+                {deliverySoundStatusLabel}
+              </Badge>
             </div>
+            <p className="mt-1 text-sm text-slate-600">
+              {deliverySoundRuntime.unlocked
+                ? 'Este computador ja esta pronto para tocar o alarme de novos pedidos.'
+                : 'Se o alarme nao tocar aqui na loja, clique em ativar som e depois em testar para liberar o navegador.'}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
             <Button variant="warning" onClick={requestDeliverySoundActivation}>
-              Ativar som agora
+              Ativar som
+            </Button>
+            <Button variant="secondary" onClick={playNotificationSound}>
+              Testar som
             </Button>
           </div>
-        </Card>
-      ) : null}
+        </div>
+      </Card>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <StatCard label="Pedidos no painel" value={orders.length} description="Fila total carregada." tone="accent" />
