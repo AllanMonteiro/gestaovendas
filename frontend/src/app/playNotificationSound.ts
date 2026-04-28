@@ -1,8 +1,11 @@
 let audioContext: AudioContext | null = null
 let unlockListenersAttached = false
 let lastPlaybackAt = 0
+let repeatingAlarmTimer: number | null = null
+let repeatingAlarmActive = false
 
-const PLAYBACK_THROTTLE_MS = 900
+const PLAYBACK_THROTTLE_MS = 700
+const REPEATING_ALARM_INTERVAL_MS = 2400
 const DELIVERY_SOUND_SETTINGS_KEY = 'sorveteria.delivery-sound-settings'
 export const DELIVERY_SOUND_SETTINGS_EVENT = 'sorveteria:delivery-sound-settings'
 
@@ -58,6 +61,11 @@ export const saveDeliverySoundSettings = (settings: DeliverySoundSettings) => {
   try {
     window.localStorage.setItem(DELIVERY_SOUND_SETTINGS_KEY, JSON.stringify(normalized))
     window.dispatchEvent(new CustomEvent<DeliverySoundSettings>(DELIVERY_SOUND_SETTINGS_EVENT, { detail: normalized }))
+    if (!normalized.enabled || normalized.volume <= 0) {
+      stopRepeatingDeliveryAlarm()
+    } else if (repeatingAlarmActive) {
+      playNotificationSound()
+    }
   } catch {
     // Ignore local storage failures and keep runtime behavior.
   }
@@ -128,26 +136,27 @@ export const playNotificationSound = () => {
     const startAt = context.currentTime + 0.01
     const gainNode = context.createGain()
     gainNode.connect(context.destination)
-    const peakGain = 0.04 + (settings.volume / 100) * 0.14
+    const peakGain = 0.07 + (settings.volume / 100) * 0.2
     gainNode.gain.setValueAtTime(0.0001, startAt)
-    gainNode.gain.exponentialRampToValueAtTime(peakGain, startAt + 0.02)
-    gainNode.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.42)
+    gainNode.gain.exponentialRampToValueAtTime(peakGain, startAt + 0.015)
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, startAt + 1.18)
 
-    const highTone = context.createOscillator()
-    highTone.type = 'sine'
-    highTone.frequency.setValueAtTime(880, startAt)
-    highTone.frequency.exponentialRampToValueAtTime(1046, startAt + 0.16)
-    highTone.connect(gainNode)
-    highTone.start(startAt)
-    highTone.stop(startAt + 0.18)
+    const pulses = [
+      { offset: 0, duration: 0.18, from: 940, to: 1120, type: 'square' as OscillatorType },
+      { offset: 0.22, duration: 0.18, from: 820, to: 980, type: 'square' as OscillatorType },
+      { offset: 0.5, duration: 0.22, from: 960, to: 1180, type: 'sawtooth' as OscillatorType },
+      { offset: 0.78, duration: 0.24, from: 760, to: 920, type: 'triangle' as OscillatorType },
+    ]
 
-    const lowTone = context.createOscillator()
-    lowTone.type = 'triangle'
-    lowTone.frequency.setValueAtTime(660, startAt + 0.2)
-    lowTone.frequency.exponentialRampToValueAtTime(784, startAt + 0.38)
-    lowTone.connect(gainNode)
-    lowTone.start(startAt + 0.2)
-    lowTone.stop(startAt + 0.42)
+    pulses.forEach((pulse) => {
+      const oscillator = context.createOscillator()
+      oscillator.type = pulse.type
+      oscillator.frequency.setValueAtTime(pulse.from, startAt + pulse.offset)
+      oscillator.frequency.exponentialRampToValueAtTime(pulse.to, startAt + pulse.offset + pulse.duration)
+      oscillator.connect(gainNode)
+      oscillator.start(startAt + pulse.offset)
+      oscillator.stop(startAt + pulse.offset + pulse.duration)
+    })
   }
 
   if (context.state === 'running') {
@@ -156,4 +165,49 @@ export const playNotificationSound = () => {
   }
 
   void context.resume().then(startPlayback).catch(() => undefined)
+}
+
+export const stopRepeatingDeliveryAlarm = () => {
+  repeatingAlarmActive = false
+  if (typeof window !== 'undefined' && repeatingAlarmTimer !== null) {
+    window.clearInterval(repeatingAlarmTimer)
+  }
+  repeatingAlarmTimer = null
+}
+
+export const startRepeatingDeliveryAlarm = () => {
+  prepareNotificationSound()
+
+  const settings = getDeliverySoundSettings()
+  if (!settings.enabled || settings.volume <= 0) {
+    stopRepeatingDeliveryAlarm()
+    return
+  }
+
+  if (repeatingAlarmActive && repeatingAlarmTimer !== null) {
+    return
+  }
+
+  repeatingAlarmActive = true
+  playNotificationSound()
+
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  repeatingAlarmTimer = window.setInterval(() => {
+    if (!repeatingAlarmActive) {
+      stopRepeatingDeliveryAlarm()
+      return
+    }
+    playNotificationSound()
+  }, REPEATING_ALARM_INTERVAL_MS)
+}
+
+export const syncRepeatingDeliveryAlarm = (hasPendingNewDeliveryOrders: boolean) => {
+  if (hasPendingNewDeliveryOrders) {
+    startRepeatingDeliveryAlarm()
+    return
+  }
+  stopRepeatingDeliveryAlarm()
 }

@@ -3,7 +3,7 @@ import { Navigate, createBrowserRouter, NavLink, Outlet, useLocation, useNavigat
 import { useOutboxSync } from './useSync'
 import { api } from '../api/client'
 import { getAccessToken, getRefreshToken, type AuthSession } from './auth'
-import { playNotificationSound, prepareNotificationSound } from './playNotificationSound'
+import { playNotificationSound, prepareNotificationSound, stopRepeatingDeliveryAlarm, syncRepeatingDeliveryAlarm } from './playNotificationSound'
 import { resolveAssetUrl } from './runtime'
 import { LoginGate } from '../components/LoginGate'
 import { LoadingState } from '../components/ui'
@@ -39,6 +39,7 @@ type DeliveryAlert = {
 
 type DeliveryOrderPayload = DeliveryAlert & {
   created_at?: string
+  status?: string
 }
 
 type DeliveryOrdersResponse = DeliveryOrderPayload[] | { results?: DeliveryOrderPayload[] } | { data?: DeliveryOrderPayload[] }
@@ -301,6 +302,7 @@ const Layout: React.FC = () => {
   useEffect(() => {
     if (location.pathname === '/delivery') {
       setDeliveryAlerts([])
+      stopRepeatingDeliveryAlarm()
       return
     }
 
@@ -343,6 +345,7 @@ const Layout: React.FC = () => {
       try {
         const response = await api.get<DeliveryOrdersResponse>('/api/orders/?include_items=0&limit=20')
         const nextOrders = normalizeDeliveryOrders(response.data)
+        syncRepeatingDeliveryAlarm(nextOrders.some((order) => order.status === 'novo'))
         if (options?.notifyOnNew) {
           const newOrders = nextOrders.filter((order) => !knownDeliveryOrderIdsRef.current.has(order.id))
           if (newOrders.length) {
@@ -389,6 +392,7 @@ const Layout: React.FC = () => {
         window.clearTimeout(deliveryRefreshTimerRef.current)
       }
       Object.keys(deliveryAlertTimeoutsRef.current).forEach(clearAlertTimeout)
+      stopRepeatingDeliveryAlarm()
     }
   }, [location.pathname])
 

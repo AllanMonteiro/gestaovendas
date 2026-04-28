@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
-import { playNotificationSound, prepareNotificationSound } from '../app/playNotificationSound'
+import { playNotificationSound, prepareNotificationSound, stopRepeatingDeliveryAlarm, syncRepeatingDeliveryAlarm } from '../app/playNotificationSound'
 import {
   useDeleteDeliveryOrderMutation,
   useUpdateDeliveryOrderStatusMutation,
@@ -93,6 +93,13 @@ const PedidosDelivery: React.FC = () => {
   }, [])
 
   useEffect(() => {
+    syncRepeatingDeliveryAlarm(orders.some((order) => order.status === 'novo'))
+    return () => {
+      stopRepeatingDeliveryAlarm()
+    }
+  }, [orders])
+
+  useEffect(() => {
     pollTimerRef.current = window.setInterval(() => {
       if (document.visibilityState === 'visible' && navigator.onLine) {
         refreshOrders()
@@ -146,7 +153,7 @@ const PedidosDelivery: React.FC = () => {
     if (eventName === 'order_created' && source === 'delivery' && orderId) {
       const now = Date.now()
       const lastPlayedAt = recentSoundedOrderIdsRef.current.get(orderId) ?? 0
-      if (now - lastPlayedAt > 30000) {
+      if (now - lastPlayedAt > 12000) {
         recentSoundedOrderIdsRef.current.set(orderId, now)
         playNotificationSound()
       }
