@@ -65,9 +65,7 @@ const readBrandingCache = () => {
     const parsed = JSON.parse(raw) as StoreHeaderConfig
     return {
       store_name: parsed.store_name || 'Sorveteria POS',
-      // Avoid reviving stale media URLs from localStorage; the current logo
-      // should always come from the latest server config for this session.
-      logo_url: '',
+      logo_url: parsed.logo_url || '',
       theme: normalizeTheme(parsed.theme),
     }
   } catch {
@@ -84,7 +82,7 @@ const writeBrandingCache = (branding: StoreHeaderConfig) => {
       BRANDING_CACHE_KEY,
       JSON.stringify({
         store_name: branding.store_name || 'Sorveteria POS',
-        logo_url: '',
+        logo_url: branding.logo_url || '',
         theme: normalizeTheme(branding.theme),
       })
     )
