@@ -1,4 +1,4 @@
-import React, { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import { openThermalReceiptPdf, type ThermalReceiptPayload } from '../app/thermalReceipt'
 import { OpenOrdersPanel } from '../components/OpenOrdersPanel'
@@ -6,6 +6,7 @@ import { ProductGrid } from '../components/ProductGrid'
 import { OrderPanel } from '../components/OrderPanel'
 import { ScaleProductModal } from '../components/ScaleProductModal'
 import { PaymentModal, type PaymentEntry, type PaymentMethod } from '../components/PaymentModal'
+import { Badge, Button, Card, Input, PageHeader, SectionHeader, StatCard } from '../components/ui'
 import { getCategories, getProducts, getConfig, saveCategories, saveProducts, saveConfig } from '../offline/catalog'
 import type { OutboxItem } from '../offline/db'
 import { getLocalOrder, listLocalOrders, removeLocalOrder, saveLocalOrder, syncLocalOpenOrders } from '../offline/localOrders'
@@ -98,6 +99,7 @@ type CashStatusResponse = {
 }
 
 const PDV_REFRESH_DEBOUNCE_MS = 150
+const EMPTY_ORDER_ITEMS: OrderItem[] = []
 
 const formatBRL = (value: string | number) => {
   const numberValue = Number(value || 0)
@@ -325,8 +327,6 @@ const PDV: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([])
   const [categoryImages, setCategoryImages] = useState<Record<string, string>>({})
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null)
-  const [productSearchTerm, setProductSearchTerm] = useState('')
-
   const [showNewOrderModal, setShowNewOrderModal] = useState(false)
   const [newOrderStep, setNewOrderStep] = useState<'phone' | 'profile'>('phone')
   const [phone, setPhone] = useState('')
@@ -364,7 +364,6 @@ const PDV: React.FC = () => {
   const [outboxCount, setOutboxCount] = useState(0)
   const [outboxPreview, setOutboxPreview] = useState<OutboxItem[]>([])
   const [pendingSyncOrderKeys, setPendingSyncOrderKeys] = useState<Set<string>>(new Set())
-  const deferredProductSearchTerm = useDeferredValue(productSearchTerm)
   const wsRefreshTimerRef = useRef<number | null>(null)
   const lastCashValidationAtRef = useRef(0)
   const addingQtyItemRef = useRef(false)
@@ -382,16 +381,6 @@ const PDV: React.FC = () => {
     products.forEach((product) => map.set(product.id, product))
     return map
   }, [products])
-
-  const searchResultProducts = useMemo(() => {
-    const normalizedSearch = deferredProductSearchTerm.trim().toLowerCase()
-    if (!normalizedSearch) {
-      return []
-    }
-    const searchableProducts =
-      selectedCategoryId === null ? products : products.filter((product) => product.category === selectedCategoryId)
-    return searchableProducts.filter((product) => product.name.toLowerCase().includes(normalizedSearch)).slice(0, 12)
-  }, [deferredProductSearchTerm, products, selectedCategoryId])
 
   const visibleProducts = useMemo(() => {
     if (selectedCategoryId === null) {
@@ -427,6 +416,12 @@ const PDV: React.FC = () => {
     return round2(Math.max(total - pointsDiscount, 0))
   }, [selectedOrder?.total, pointsDiscount])
   const canOperateOrders = cashOpen || !isOnline
+  const selectedOrderItems = selectedOrder?.items ?? EMPTY_ORDER_ITEMS
+  const selectedOrderSubtotal = selectedOrder?.subtotal ?? '0'
+  const selectedOrderDiscount = selectedOrder?.discount ?? '0'
+  const selectedOrderTotal = selectedOrder?.total ?? '0'
+  const selectedOrderItemsCount = selectedOrder?.items.length ?? 0
+  const selectedOrderCustomerLabel = selectedOrder?.customer_name || selectedOrder?.customer_phone || 'Nao informado'
   const refreshOutboxState = useCallback(async () => {
     const items = await listOutbox()
     startTransition(() => {
@@ -449,6 +444,7 @@ const PDV: React.FC = () => {
     },
     [pendingSyncOrderKeys]
   )
+  const selectedOrderPendingSync = isOrderPendingSync(selectedOrder)
 
   useEffect(() => {
     selectedOrderIdRef.current = selectedOrderId
@@ -1116,6 +1112,25 @@ const PDV: React.FC = () => {
     void handleAddProduct(product)
   }, [handleAddProduct])
 
+  const handleCloseNewOrderModal = useCallback(() => {
+    setShowNewOrderModal(false)
+  }, [])
+
+  const handleCancelQtyModal = useCallback(() => {
+    setShowQtyModal(false)
+    setQtyProduct(null)
+    setQtyInput('1')
+  }, [])
+
+  const handleCancelScaleModal = useCallback(() => {
+    setShowScaleModal(false)
+    setScaleProduct(null)
+  }, [])
+
+  const handleClosePaymentModal = useCallback(() => {
+    setShowPaymentModal(false)
+  }, [])
+
   const handleConfirmScaleProduct = async (weightGrams: number) => {
     if (addingScaleItemRef.current) {
       return
@@ -1402,7 +1417,7 @@ const PDV: React.FC = () => {
     [companyName, postToAgent, productsById, storeAddress, storeLabel]
   )
 
-  const handleCloseSale = async (entries: PaymentEntry[]) => {
+  const handleCloseSale = useCallback(async (entries: PaymentEntry[]) => {
     if (closingSale) {
       return
     }
@@ -1490,7 +1505,58 @@ const PDV: React.FC = () => {
     } finally {
       setClosingSale(false)
     }
-  }
+  }, [
+    autoPrintReceipt,
+    buildReceiptPayload,
+    closingSale,
+    effectiveRedeemPoints,
+    ensureCashOpen,
+    fetchCashStatus,
+    getApiErrorText,
+    isOnline,
+    lastReceiptPayload,
+    minRedeemPoints,
+    openThermalReceiptPdf,
+    pointValueReal,
+    pointsDiscount,
+    postToAgent,
+    printReceipt,
+    refreshOpenOrdersInBackground,
+    selectedOrder,
+  ])
+
+  const handleConfirmPaymentEntries = useCallback((entries: PaymentEntry[]) => {
+    void handleCloseSale(entries)
+  }, [handleCloseSale])
+
+  const handleReprintLastReceipt = useCallback(() => {
+    void (async () => {
+      if (!lastReceiptPayload) {
+        setFeedback({ type: 'error', text: 'Nenhuma comanda impressa recentemente.' })
+        return
+      }
+      try {
+        const ok = await postToAgent('/print/receipt', lastReceiptPayload)
+        const pdfOpened = !ok ? openThermalReceiptPdf(lastReceiptPayload) : false
+        setFeedback({
+          type: ok || pdfOpened ? 'ok' : 'error',
+          text: ok
+            ? 'Ultima comanda reimpressa.'
+            : pdfOpened
+              ? 'Ultima comanda aberta para imprimir/salvar em PDF.'
+              : 'Falha ao reimprimir a ultima comanda.'
+        })
+      } catch {
+        const pdfOpened = openThermalReceiptPdf(lastReceiptPayload)
+        setFeedback({
+          type: pdfOpened ? 'ok' : 'error',
+          text: pdfOpened
+            ? 'Ultima comanda aberta para imprimir/salvar em PDF.'
+            : 'Falha ao reimprimir a ultima comanda.'
+        })
+      }
+    })()
+  }, [lastReceiptPayload, postToAgent])
 
   const handleCancelOrder = async () => {
     if (!selectedOrder) {
@@ -1569,6 +1635,29 @@ const PDV: React.FC = () => {
 
   return (
     <>
+      <div className="space-y-5">
+        <PageHeader
+          eyebrow="Operacao"
+          title="PDV"
+          description="Monte pedidos, acompanhe sincronizacao e finalize vendas com uma leitura mais rapida do estado atual da loja."
+          meta={
+            <div className="flex flex-wrap gap-2">
+              <Badge variant={cashOpen ? 'success' : 'warning'}>{cashOpen ? 'Caixa liberado' : 'Caixa fechado'}</Badge>
+              <Badge variant={isOnline ? 'info' : 'warning'}>{isOnline ? 'Online' : 'Offline'}</Badge>
+              <Badge variant={outboxCount > 0 ? 'warning' : 'neutral'}>
+                {outboxCount > 0 ? `${outboxCount} item(ns) pendente(s)` : 'Fila sincronizada'}
+              </Badge>
+            </div>
+          }
+        />
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <StatCard label="Pedidos abertos" value={openOrders.length} description="Fila atual carregada no painel." tone="accent" />
+          <StatCard label="Itens no pedido" value={selectedOrderItemsCount} description={selectedOrder ? `Pedido #${getOrderDisplayNumber(selectedOrder)}` : 'Nenhum pedido selecionado.'} />
+          <StatCard label="Produtos visiveis" value={visibleProducts.length} description={selectedCategoryId === null ? 'Catalogo completo.' : 'Categoria filtrada.'} />
+          <StatCard label="Pendencias offline" value={outboxCount} description={outboxCount > 0 ? 'Aguardando sincronizacao.' : 'Sem fila pendente.'} tone={outboxCount > 0 ? 'warning' : 'default'} />
+        </div>
+
       <div className="grid grid-cols-1 gap-4 md:gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_260px] xl:grid-cols-[280px_minmax(0,1fr)_minmax(0,1.2fr)]">
         <aside className="order-3 space-y-4 rounded-2xl lg:order-3 xl:order-1">
           <OpenOrdersPanel
@@ -1586,127 +1675,96 @@ const PDV: React.FC = () => {
         </aside>
 
         <section className="order-1 min-w-0 space-y-4 lg:order-1 xl:order-2">
-          <div className="panel p-4 md:p-5">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold">Pedido atual</h2>
-              <div className="flex flex-col items-end gap-1">
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                  {selectedOrder ? `Pedido #${getOrderDisplayNumber(selectedOrder)}` : 'Sem pedido selecionado'}
-                </span>
-                {isOrderPendingSync(selectedOrder) ? (
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
-                    Pendente de sincronizacao
-                  </span>
-                ) : null}
-                {selectedOrder ? (
-                  <span className="text-xs text-slate-500">
-                    Cliente: {selectedOrder.customer_name || selectedOrder.customer_phone || 'Nao informado'}
-                  </span>
-                ) : null}
-              </div>
-            </div>
+          <Card className="p-4 md:p-5">
+            <SectionHeader
+              title="Pedido atual"
+              description={selectedOrder ? `Cliente: ${selectedOrderCustomerLabel}` : 'Selecione um pedido para editar itens e concluir a venda.'}
+              meta={
+                <div className="flex flex-wrap gap-2">
+                  <Badge variant="neutral">
+                    {selectedOrder ? `Pedido #${getOrderDisplayNumber(selectedOrder)}` : 'Sem pedido selecionado'}
+                  </Badge>
+                  {selectedOrderPendingSync ? <Badge variant="warning">Pendente de sincronizacao</Badge> : null}
+                </div>
+              }
+            />
             <OrderPanel
-              items={selectedOrder?.items ?? []}
-              subtotal={selectedOrder?.subtotal ?? '0'}
-              discount={selectedOrder?.discount ?? '0'}
-              total={selectedOrder?.total ?? '0'}
+              items={selectedOrderItems}
+              subtotal={selectedOrderSubtotal}
+              discount={selectedOrderDiscount}
+              total={selectedOrderTotal}
               getProductName={getProductName}
               onEditItem={handleEditItem}
               onDeleteItem={handleDeleteItem}
             />
-          </div>
+          </Card>
 
-          <div className="panel p-4 md:p-5 space-y-3">
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Acoes rapidas</h3>
+          <Card className="space-y-4 p-4 md:p-5" tone="accent">
+            <SectionHeader
+              title="Acoes rapidas"
+              description="Atalhos principais para cozinha, fechamento, reimpressao e tratamento do pedido atual."
+            />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              <button
+              <Button
                 onClick={() => void handleSendKitchen()}
                 disabled={!canOperateOrders}
-                className="rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                variant="primary"
               >
                 Enviar cozinha
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={() => void handleOpenCloseSaleModal()}
                 disabled={!canOperateOrders}
-                className="rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                variant="success"
               >
                 Fechar venda
-              </button>
-              <button
-                onClick={() => {
-                  void (async () => {
-                    if (!lastReceiptPayload) {
-                      setFeedback({ type: 'error', text: 'Nenhuma comanda impressa recentemente.' })
-                      return
-                    }
-                    try {
-                      const ok = await postToAgent('/print/receipt', lastReceiptPayload)
-                      const pdfOpened = !ok ? openThermalReceiptPdf(lastReceiptPayload) : false
-                      setFeedback({
-                        type: ok || pdfOpened ? 'ok' : 'error',
-                        text: ok
-                          ? 'Ultima comanda reimpressa.'
-                          : pdfOpened
-                            ? 'Ultima comanda aberta para imprimir/salvar em PDF.'
-                            : 'Falha ao reimprimir a ultima comanda.'
-                      })
-                    } catch {
-                      const pdfOpened = openThermalReceiptPdf(lastReceiptPayload)
-                      setFeedback({
-                        type: pdfOpened ? 'ok' : 'error',
-                        text: pdfOpened
-                          ? 'Ultima comanda aberta para imprimir/salvar em PDF.'
-                          : 'Falha ao reimprimir a ultima comanda.'
-                      })
-                    }
-                  })()
-                }}
-                className="rounded-xl border border-sky-300 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-700"
-              >
+              </Button>
+              <Button onClick={handleReprintLastReceipt} variant="secondary">
                 Reimprimir
-              </button>
-              <button onClick={() => void handleCancelOrder()} className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-700">
+              </Button>
+              <Button onClick={() => void handleCancelOrder()} variant="warning">
                 Cancelar
-              </button>
-              <button onClick={() => void handleDeleteOrder()} className="rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+              </Button>
+              <Button onClick={() => void handleDeleteOrder()} variant="danger">
                 Excluir
-              </button>
+              </Button>
             </div>
             {feedback ? (
-              <p className={`text-sm ${feedback.type === 'ok' ? 'text-emerald-700' : 'text-rose-600'}`}>
+              <div className={`rounded-2xl border px-4 py-3 text-sm ${feedback.type === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-rose-200 bg-rose-50 text-rose-700'}`}>
                 {feedback.text}
-              </p>
+              </div>
             ) : null}
-          </div>
+          </Card>
 
         </section>
 
         <aside className="order-2 min-w-0 lg:order-2 xl:order-3">
-          <div className="panel p-4 md:p-5">
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <h2 className="text-base font-semibold">Categorias</h2>
-            <button
-              onClick={handleRefreshCatalog}
-              className="rounded-lg border border-brand-200 bg-white px-3 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50"
-            >
-              Atualizar
-            </button>
-          </div>
+          <Card className="p-4 md:p-5">
+          <SectionHeader
+            title="Catalogo"
+            description="Filtre por categoria e adicione itens ao pedido atual."
+            actions={
+              <Button
+                onClick={handleRefreshCatalog}
+                variant="secondary"
+                size="sm"
+              >
+                Atualizar
+              </Button>
+            }
+          />
           <ProductGrid
             categories={categories}
             selectedCategoryId={selectedCategoryId}
             products={visibleProducts}
             allProducts={products}
-            searchTerm={productSearchTerm}
-            searchResultProducts={searchResultProducts}
             categoryImages={categoryImages}
             onSelectCategory={setSelectedCategoryId}
-            onSearchTermChange={setProductSearchTerm}
             onAddProduct={handleAddProductClick}
           />
-          </div>
+          </Card>
         </aside>
+      </div>
       </div>
 
       {showNewOrderModal ? (
@@ -1718,66 +1776,66 @@ const PDV: React.FC = () => {
             </p>
 
             <div className="mt-4 space-y-3">
-              <input
+              <Input
                 value={phone}
                 onChange={(event) => setPhone(event.target.value)}
                 placeholder="Telefone"
-                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                label="Telefone"
               />
 
               {newOrderStep === 'profile' ? (
                 <>
-                  <input
+                  <Input
                     value={firstName}
                     onChange={(event) => setFirstName(event.target.value)}
                     placeholder="Nome"
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                    label="Nome"
                   />
-                  <input
+                  <Input
                     value={lastName}
                     onChange={(event) => setLastName(event.target.value)}
                     placeholder="Sobrenome"
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                    label="Sobrenome"
                   />
-                  <input
+                  <Input
                     value={neighborhood}
                     onChange={(event) => setNeighborhood(event.target.value)}
                     placeholder="Bairro"
-                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+                    label="Bairro"
                   />
                 </>
               ) : null}
             </div>
 
             <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button onClick={() => setShowNewOrderModal(false)} className="rounded-xl border border-slate-300 px-4 py-2 text-sm">
+              <Button onClick={handleCloseNewOrderModal} variant="secondary">
                 Cancelar
-              </button>
+              </Button>
               {newOrderStep === 'phone' ? (
                 <>
-                  <button
+                  <Button
                     onClick={() => void handleCreateOrderWithoutPhone()}
                     disabled={loadingCreateOrder}
-                    className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-60"
+                    variant="secondary"
                   >
                     {loadingCreateOrder ? 'Criando...' : 'Sem telefone'}
-                  </button>
-                  <button
+                  </Button>
+                  <Button
                     onClick={() => void handlePhoneStep()}
                     disabled={loadingCreateOrder}
-                    className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    variant="primary"
                   >
                     {loadingCreateOrder ? 'Validando...' : 'Continuar'}
-                  </button>
+                  </Button>
                 </>
               ) : (
-                <button
+                <Button
                   onClick={() => void handleCreateFirstOrder()}
                   disabled={loadingCreateOrder}
-                  className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                  variant="primary"
                 >
                   {loadingCreateOrder ? 'Criando...' : 'Criar pedido'}
-                </button>
+                </Button>
               )}
             </div>
           </div>
@@ -1786,7 +1844,7 @@ const PDV: React.FC = () => {
 
       <PaymentModal
         open={showPaymentModal}
-        total={selectedOrder?.total ?? '0'}
+        total={selectedOrderTotal}
         orderLabel={selectedOrder ? `#${getOrderDisplayNumber(selectedOrder)}` : undefined}
         customerLabel={selectedOrder?.customer_name ?? selectedOrder?.customer_phone ?? undefined}
         canUsePoints={Boolean(selectedOrder?.customer)}
@@ -1798,8 +1856,8 @@ const PDV: React.FC = () => {
         effectivePoints={effectiveRedeemPoints}
         discountByPoints={pointsDiscount}
         payableTotal={payableTotal}
-        onCancel={() => setShowPaymentModal(false)}
-        onConfirm={(entries) => void handleCloseSale(entries)}
+        onCancel={handleClosePaymentModal}
+        onConfirm={handleConfirmPaymentEntries}
         loading={closingSale}
       />
 
@@ -1809,34 +1867,26 @@ const PDV: React.FC = () => {
             <h3 className="text-lg font-semibold">Adicionar item</h3>
             <p className="mt-1 text-sm text-slate-500">{qtyProduct.name}</p>
             <div className="mt-4">
-              <label className="text-sm font-medium text-slate-700">Quantidade</label>
-              <input
+              <Input
                 value={qtyInput}
                 onChange={(event) => setQtyInput(event.target.value)}
                 autoFocus
                 inputMode="decimal"
-                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
                 placeholder="Ex.: 1"
+                label="Quantidade"
               />
             </div>
             <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <button
-                onClick={() => {
-                  setShowQtyModal(false)
-                  setQtyProduct(null)
-                  setQtyInput('1')
-                }}
-                className="rounded-xl border border-slate-300 px-4 py-2 text-sm"
-              >
+              <Button onClick={handleCancelQtyModal} variant="secondary">
                 Cancelar
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={() => void handleConfirmAddProduct()}
                 disabled={addingQtyItem}
-                className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                variant="primary"
               >
                 {addingQtyItem ? 'Adicionando...' : 'Confirmar'}
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -1846,10 +1896,7 @@ const PDV: React.FC = () => {
         <ScaleProductModal
           product={scaleProduct}
           agentUrl={agentUrl}
-          onCancel={() => {
-            setShowScaleModal(false)
-            setScaleProduct(null)
-          }}
+          onCancel={handleCancelScaleModal}
           onConfirm={(weightGrams) => void handleConfirmScaleProduct(weightGrams)}
           onError={(message) => setFeedback({ type: 'error', text: message })}
         />

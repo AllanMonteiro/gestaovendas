@@ -15,8 +15,10 @@ def _serialize_quantity(value):
 class OrderItemSerializer(serializers.Serializer):
     product_name = serializers.CharField()
     quantity = serializers.JSONField()
+    weight_grams = serializers.IntegerField(required=False, allow_null=True)
     unit_price = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
     total = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    unit_type = serializers.CharField(required=False, allow_null=True, allow_blank=True)
 
 
 class OrderSerializer(serializers.Serializer):
@@ -80,7 +82,7 @@ class OrderSerializer(serializers.Serializer):
 
     def get_delivery_fee(self, obj):
         meta = self._meta(obj)
-        return getattr(meta, 'delivery_fee', Decimal('0.00'))
+        return str(getattr(meta, 'delivery_fee', Decimal('0.00')))
 
     def get_pix_payload(self, obj):
         meta = self._meta(obj)
@@ -103,8 +105,10 @@ class OrderSerializer(serializers.Serializer):
             items.append({
                 'product_name': product_name or 'Item',
                 'quantity': _serialize_quantity(item.qty),
+                'weight_grams': item.weight_grams,
                 'unit_price': item.unit_price,
                 'total': item.total,
+                'unit_type': 'kg' if item.weight_grams else 'unit',
             })
         if items:
             return OrderItemSerializer(items, many=True).data
@@ -115,8 +119,10 @@ class OrderSerializer(serializers.Serializer):
             {
                 'product_name': item.get('product_name', 'Item'),
                 'quantity': item.get('quantity', 1),
+                'weight_grams': item.get('weight_grams'),
                 'unit_price': item.get('unit_price'),
                 'total': item.get('total'),
+                'unit_type': item.get('unit_type') or 'unit',
             }
             for item in raw_items
         ]

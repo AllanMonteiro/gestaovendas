@@ -5,8 +5,9 @@ import { api } from '../api/client'
 import { getAccessToken, getRefreshToken, type AuthSession } from './auth'
 import { resolveAssetUrl } from './runtime'
 import { LoginGate } from '../components/LoginGate'
+import { LoadingState } from '../components/ui'
 import { useSocket } from '../hooks/useSocket'
-import PublicMenu from '../pages/PublicMenu'
+const PublicMenu = lazy(() => import('../pages/PublicMenu'))
 
 // Lazy loading das paginas para reduzir o bundle inicial
 const PDV = lazy(() => import('../pages/PDV'))
@@ -140,8 +141,11 @@ const RootEntryRedirect: React.FC = () => {
 }
 
 const NavLoading: React.FC = () => (
-  <div className="flex h-32 w-full animate-pulse items-center justify-center rounded-2xl bg-slate-50 border border-slate-100">
-    <div className="text-sm font-medium text-slate-400">Carregando modulo...</div>
+  <div className="rounded-2xl border border-slate-100 bg-white/80 p-6">
+    <LoadingState
+      title="Carregando modulo"
+      description="Estamos buscando a proxima tela do sistema."
+    />
   </div>
 )
 
@@ -411,12 +415,13 @@ const Layout: React.FC = () => {
 
   return (
     <div className="app-shell">
-      <header className="sticky top-0 z-20 border-b border-brand-100 bg-white/80 backdrop-blur">
+      <header className="sticky top-0 z-20 border-b border-white/50 bg-white/68 backdrop-blur-xl">
         <div className="mx-auto max-w-[1500px] px-3 py-3 sm:px-4 md:px-6 md:py-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-start justify-between gap-3 sm:items-center">
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-18 w-18 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-brand-100 bg-white shadow-sm sm:h-20 sm:w-20">
+          <div className="rounded-[1.75rem] border border-white/70 bg-white/72 px-4 py-4 shadow-sm shadow-slate-200/60 backdrop-blur-xl sm:px-5">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex items-start justify-between gap-3 sm:items-center">
+                <div className="flex min-w-0 items-center gap-4">
+                  <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-[1.35rem] border border-brand-100/80 bg-white shadow-sm sm:h-[4.5rem] sm:w-[4.5rem]">
                   {logoUrl ? (
                     <img
                       src={resolveAssetUrl(logoUrl)}
@@ -425,20 +430,21 @@ const Layout: React.FC = () => {
                       onError={() => setLogoUrl('')}
                     />
                   ) : (
-                    <span className="text-lg font-bold uppercase tracking-wide text-brand-700">
+                    <span className="text-lg font-bold uppercase tracking-[0.18em] text-brand-700">
                       {(storeName || 'SP').slice(0, 2)}
                     </span>
                   )}
                 </div>
                 <div className="min-w-0">
-                  <h1 className="truncate text-xl font-display tracking-wide text-brand-700 sm:text-2xl lg:text-3xl">{storeName}</h1>
-                  <p className="text-xs text-slate-500 sm:text-sm">Operacao local com modo offline-first</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-brand-600/80">Sorveteria POS</p>
+                  <h1 className="truncate text-xl font-display tracking-[0.02em] text-slate-900 sm:text-2xl lg:text-[2rem]">{storeName}</h1>
+                  <p className="text-xs text-slate-500 sm:text-sm">Operacao local enxuta, offline-first e pronta para delivery.</p>
                 </div>
               </div>
               <span className="badge-live shrink-0">Online</span>
             </div>
-            <div className="flex flex-col gap-3">
-              <nav className="scrollbar-none -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+              <div className="flex flex-col gap-3">
+                <nav className="scrollbar-none -mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
                 {links.map((link) => (
                   <NavLink
                     key={link.to}
@@ -446,27 +452,30 @@ const Layout: React.FC = () => {
                     className={({ isActive }) =>
                       `shrink-0 whitespace-nowrap px-3 py-2 text-sm font-medium transition sm:px-4 sm:py-2.5 ${
                         isActive
-                          ? 'rounded-full bg-gradient-to-r from-brand-600 to-brand-500 text-white shadow'
-                          : 'rounded-full border border-brand-100 bg-white text-slate-700 hover:border-brand-300'
+                          ? 'rounded-full bg-slate-900 text-white shadow-sm shadow-slate-300'
+                          : 'rounded-full border border-slate-200/80 bg-white/70 text-slate-700 hover:border-brand-300 hover:text-brand-700'
                       }`
                     }
                   >
                     {link.label}
                   </NavLink>
                 ))}
-              </nav>
-              {currentUserName ? (
-                <div className="flex items-center justify-end gap-2 px-1">
-                  <span className="text-sm text-slate-500">Usuario: {currentUserName}</span>
-                  <button
-                    type="button"
-                    onClick={() => window.dispatchEvent(new Event('sorveteria:logout'))}
-                    className="rounded-full border border-brand-200 px-3 py-1.5 text-sm font-medium text-brand-700"
-                  >
-                    Sair
-                  </button>
-                </div>
-              ) : null}
+                </nav>
+                {currentUserName ? (
+                  <div className="flex items-center justify-end gap-2 px-1">
+                    <span className="rounded-full border border-slate-200 bg-white/70 px-3 py-1.5 text-sm text-slate-500">
+                      Usuario: {currentUserName}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => window.dispatchEvent(new Event('sorveteria:logout'))}
+                      className="rounded-full border border-brand-200 bg-white/80 px-3 py-1.5 text-sm font-medium text-brand-700"
+                    >
+                      Sair
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
         </div>
@@ -550,6 +559,10 @@ export const router = createBrowserRouter([
   {
     path: '/cardapio',
     errorElement: <RouteErrorBoundary />,
-    element: <PublicMenu />
+    element: (
+      <Suspense fallback={<NavLoading />}>
+        <PublicMenu />
+      </Suspense>
+    )
   }
 ])

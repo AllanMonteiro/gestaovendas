@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { type AuthSession } from '../app/auth'
 import { normalizePublicMenuUrl } from '../app/publicMenuUrl'
+import { Badge, Button, Card, Input, LoadingState, PageHeader, SectionHeader, Select, StatCard } from '../components/ui'
 import { resolveAssetUrl } from '../app/runtime'
 
 type StoreConfig = {
@@ -713,34 +714,88 @@ const Configuracoes: React.FC = () => {
     }
   }
 
+  const configuredDeliveryRules = buildDeliveryFeeRulesPayload(deliveryFeeRules).length
+
   if (loading) {
-    return <p className="text-sm text-slate-500">Carregando configuracoes...</p>
+    return (
+      <Card className="mx-auto max-w-4xl p-6">
+        <LoadingState
+          title="Carregando configuracoes"
+          description="Estamos preparando preferencias da loja, impressoras e integracoes."
+        />
+      </Card>
+    )
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <div className="panel space-y-3 p-4">
-        <h2 className="font-semibold">Dados da Loja</h2>
-        <input value={storeName} onChange={(event) => setStoreName(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Nome da loja" />
-        <input value={cnpj} onChange={(event) => setCnpj(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="CNPJ" />
-        <input value={companyName} onChange={(event) => setCompanyName(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Razao social" />
-        <input value={address} onChange={(event) => setAddress(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Endereco" />
-        <input value={whatsappNumber} onChange={(event) => setWhatsappNumber(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="WhatsApp da empresa (com DDD)" />
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Operacao"
+        title="Configuracoes"
+        description="Centralize identidade da loja, dispositivos, delivery, fidelidade e usuarios em uma tela mais organizada e leve."
+        meta={
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="brand">{categories.length} categoria{categories.length === 1 ? '' : 's'}</Badge>
+            <Badge variant={deliveryIntegrationEnabled ? 'success' : 'neutral'}>
+              Delivery {deliveryIntegrationEnabled ? 'automatico' : 'manual'}
+            </Badge>
+            <Badge variant={logoUrl ? 'info' : 'neutral'}>{logoUrl ? 'Logo carregada' : 'Sem logo'}</Badge>
+          </div>
+        }
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => void handleSave()} variant="success">
+              Salvar configuracoes
+            </Button>
+            <Button onClick={() => void loadConfig()} variant="secondary">
+              Recarregar
+            </Button>
+          </div>
+        }
+      />
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Categorias" value={categories.length} description="Catalogo ativo na tela." tone="accent" />
+        <StatCard label="Bairros com regra" value={configuredDeliveryRules} description="Taxas personalizadas cadastradas." />
+        <StatCard label="Usuarios" value={users.length} description={canManageUsers ? 'Gestao liberada para este perfil.' : 'Visualizacao sem permissao de gestao.'} />
+        <StatCard
+          label="Tema atual"
+          value={theme === 'green' ? 'Verde' : theme === 'blue' ? 'Azul' : 'Creme'}
+          description="Visual aplicado no sistema."
+        />
+      </div>
+
+      {feedback ? (
+        <Card tone="accent" className="p-4">
+          <p className="text-sm text-slate-700">{feedback}</p>
+        </Card>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+      <Card className="space-y-4 p-5">
+        <SectionHeader
+          title="Dados da loja"
+          description="Atualize identidade, endereco e o link publico usado em bio, Instagram e WhatsApp."
+        />
+        <Input value={storeName} onChange={(event) => setStoreName(event.target.value)} placeholder="Nome da loja" label="Nome da loja" />
+        <Input value={cnpj} onChange={(event) => setCnpj(event.target.value)} placeholder="CNPJ" label="CNPJ" />
+        <Input value={companyName} onChange={(event) => setCompanyName(event.target.value)} placeholder="Razao social" label="Razao social" />
+        <Input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="Endereco" label="Endereco" />
+        <Input value={whatsappNumber} onChange={(event) => setWhatsappNumber(event.target.value)} placeholder="WhatsApp da empresa (com DDD)" label="WhatsApp" />
         <div className="space-y-1">
           <label className="text-sm font-medium text-slate-700">Link publico do cardapio</label>
-          <input
+          <Input
             value={publicMenuUrl}
             onChange={(event) => setPublicMenuUrl(event.target.value)}
-            className="w-full rounded-lg border border-brand-100 px-3 py-2"
             placeholder="https://seudominio.com/cardapio"
           />
           <p className="text-xs text-slate-500">
             Use aqui o endereco que seus clientes abrem no navegador do Instagram, WhatsApp ou bio.
           </p>
         </div>
-        <div className="space-y-2 rounded-xl border border-brand-100 p-3">
+        <div className="space-y-3 rounded-3xl border border-white/70 bg-white/75 p-4 shadow-sm shadow-brand-100/40">
           <div>
-            <h3 className="text-sm font-medium text-slate-700">Logo da empresa</h3>
+            <h3 className="text-sm font-semibold text-slate-800">Logo da empresa</h3>
             <p className="text-xs text-slate-500">Envie uma imagem para representar a loja no sistema.</p>
           </div>
           <input
@@ -767,23 +822,31 @@ const Configuracoes: React.FC = () => {
             Remover logo
           </button>
         </div>
-      </div>
+      </Card>
 
-      <div className="panel space-y-3 p-4">
-        <h2 className="font-semibold">Tema do sistema</h2>
-        <label className="text-sm font-medium text-slate-700">Escolha a variacao de cor</label>
-        <select
+      <Card className="space-y-4 p-5">
+        <SectionHeader
+          title="Tema do sistema"
+          description="Escolha a variacao visual que melhor combina com a identidade da loja."
+          meta={<Badge variant="info">Aplicado em tempo real</Badge>}
+        />
+        <Select
           value={theme}
           onChange={(event) => setTheme(event.target.value)}
-          className="w-full rounded-lg border border-brand-100 bg-white px-3 py-2"
+          label="Variacao de cor"
         >
           <option value="green">Verde</option>
           <option value="blue">Azul</option>
           <option value="cream">Creme</option>
-        </select>
-      </div>
+        </Select>
+        <Card tone="muted" className="p-4">
+          <p className="text-sm text-slate-600">
+            O tema ajuda a deixar o painel mais leve visualmente sem alterar o fluxo operacional.
+          </p>
+        </Card>
+      </Card>
 
-      <div className="panel space-y-3 p-4">
+      <div className="panel space-y-4 p-5">
         <h2 className="font-semibold">Impressora e Balanca</h2>
         <div className="flex gap-2">
           <input value={agentUrl} onChange={(event) => setAgentUrl(event.target.value)} className="flex-1 rounded-lg border border-brand-100 px-3 py-2" placeholder="Agent URL (ex: http://localhost:9876)" />
@@ -837,14 +900,14 @@ const Configuracoes: React.FC = () => {
         </div>
       </div>
 
-      <div className="panel space-y-3 p-4">
+      <div className="panel space-y-4 p-5">
         <h2 className="font-semibold">Fidelidade</h2>
         <input value={pointsPerReal} onChange={(event) => setPointsPerReal(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Pontos por R$1" />
         <input value={pointValueReal} onChange={(event) => setPointValueReal(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Valor do ponto" />
         <input value={minRedeemPoints} onChange={(event) => setMinRedeemPoints(event.target.value)} className="w-full rounded-lg border border-brand-100 px-3 py-2" placeholder="Minimo resgate" />
       </div>
 
-      <div className="panel space-y-3 p-4">
+      <div className="panel space-y-4 p-5">
         <h2 className="font-semibold">Taxas de cartao</h2>
         <div className="space-y-1">
           <label className="text-sm font-medium text-slate-700">Taxa de PIX (%)</label>
@@ -878,7 +941,7 @@ const Configuracoes: React.FC = () => {
         </p>
       </div>
 
-      <div className="panel space-y-3 p-4">
+      <div className="panel space-y-4 p-5">
         <h2 className="font-semibold">Taxa de entrega</h2>
         <input
           value={deliveryFeeDefault}
@@ -923,7 +986,7 @@ const Configuracoes: React.FC = () => {
         </p>
       </div>
 
-      <div className="panel space-y-3 p-4">
+      <div className="panel space-y-4 p-5">
         <h2 className="font-semibold">Entregas Expressas</h2>
         <label className="inline-flex items-center gap-2 text-sm">
           <input
@@ -988,7 +1051,7 @@ const Configuracoes: React.FC = () => {
         </p>
       </div>
 
-      <div className="panel space-y-3 p-4 lg:col-span-2">
+      <div className="panel space-y-4 p-5 lg:col-span-2">
         <h2 className="font-semibold">Imagens das categorias (PDV)</h2>
         <p className="text-sm text-slate-500">Selecione a categoria e escolha uma imagem do computador.</p>
         <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-[240px_1fr_180px_auto]">
@@ -1058,7 +1121,7 @@ const Configuracoes: React.FC = () => {
         </div>
       </div>
 
-      <div className="panel space-y-3 p-4 lg:col-span-2">
+      <div className="panel space-y-4 p-5 lg:col-span-2">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="font-semibold">Precos por categoria</h2>
@@ -1129,7 +1192,7 @@ const Configuracoes: React.FC = () => {
       </div>
 
       {canManageUsers ? (
-        <div className="panel space-y-4 p-4 lg:col-span-2">
+        <div className="panel space-y-4 p-5 lg:col-span-2">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="font-semibold">Usuarios e permissoes</h2>
@@ -1284,7 +1347,7 @@ const Configuracoes: React.FC = () => {
         </div>
       ) : null}
 
-      <div className="panel space-y-3 p-4">
+      <div className="panel space-y-4 p-5">
         <h2 className="font-semibold text-rose-700">Area de Perigo</h2>
         <p className="text-xs text-slate-500">Cuidado: As acoes abaixo sao irreversiveis.</p>
         <button
@@ -1296,16 +1359,17 @@ const Configuracoes: React.FC = () => {
         </button>
       </div>
 
-      <div className="panel space-y-3 p-4">
-        <h2 className="font-semibold">Acoes do Sistema</h2>
-        <button onClick={() => void handleSave()} className="w-full rounded-lg bg-emerald-600 px-3 py-2 font-semibold text-white">
+      <div className="panel space-y-4 p-5">
+        <h2 className="font-semibold">Acoes do sistema</h2>
+        <p className="text-sm text-slate-500">Use estes atalhos para persistir alteracoes ou recarregar os dados vindos do servidor.</p>
+        <Button onClick={() => void handleSave()} variant="success" fullWidth>
           Salvar configuracoes
-        </button>
-        <button onClick={() => void loadConfig()} className="w-full rounded-lg border border-brand-200 px-3 py-2 font-semibold text-brand-700">
+        </Button>
+        <Button onClick={() => void loadConfig()} variant="secondary" fullWidth>
           Recarregar
-        </button>
-        {feedback ? <p className="text-sm text-brand-700">{feedback}</p> : null}
+        </Button>
       </div>
+    </div>
     </div>
   )
 }

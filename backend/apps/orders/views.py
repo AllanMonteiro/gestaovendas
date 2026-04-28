@@ -67,8 +67,10 @@ DELIVERY_ITEM_ONLY_FIELDS = (
     'order_id',
     'product_id',
     'qty',
+    'weight_grams',
     'unit_price',
     'total',
+    'product__sold_by_weight',
     'product__name',
 )
 

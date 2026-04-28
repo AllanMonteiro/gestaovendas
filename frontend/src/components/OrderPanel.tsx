@@ -1,5 +1,7 @@
 ﻿import React from 'react'
 
+import { Button, Card, EmptyState } from './ui'
+
 type OrderItem = {
   id: number
   product: number
@@ -25,7 +27,7 @@ const formatBRL = (value: string | number) => {
 
 const OrderPanelComponent: React.FC<OrderPanelProps> = ({ items, subtotal, discount, total, getProductName, onEditItem, onDeleteItem }) => {
   return (
-    <div className="rounded-xl border border-brand-100 bg-white p-4">
+    <Card className="space-y-3 p-4" tone="muted">
       <div className="grid grid-cols-[1fr_auto_auto_auto] gap-3 border-b border-brand-100 pb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
         <span>Produto</span>
         <span>Qtd</span>
@@ -34,9 +36,14 @@ const OrderPanelComponent: React.FC<OrderPanelProps> = ({ items, subtotal, disco
       </div>
 
       <div className="space-y-2 py-3 text-sm">
-        {items.length === 0 && <p className="text-slate-500">Nenhum item no pedido.</p>}
+        {items.length === 0 ? (
+          <EmptyState
+            title="Nenhum item no pedido"
+            description="Adicione produtos do catalogo para montar a venda atual."
+          />
+        ) : null}
         {items.map((item) => (
-          <div key={item.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-3">
+          <div key={item.id} className="grid grid-cols-[1fr_auto_auto_auto] gap-3 rounded-2xl border border-brand-100 bg-white/78 px-3 py-3">
             <div>
               <p className="font-medium">{getProductName(item.product)}</p>
               {item.notes ? <p className="text-xs text-slate-500">Obs: {item.notes}</p> : null}
@@ -44,20 +51,22 @@ const OrderPanelComponent: React.FC<OrderPanelProps> = ({ items, subtotal, disco
             <span>{Number(item.qty)}</span>
             <span>{formatBRL(item.total)}</span>
             <div className="flex gap-2">
-              <button
+              <Button
                 type="button"
                 onClick={() => onEditItem?.(item)}
-                className="rounded border border-indigo-300 px-2 py-0.5 text-xs font-semibold text-indigo-700"
+                variant="secondary"
+                size="sm"
               >
                 Editar
-              </button>
-              <button
+              </Button>
+              <Button
                 type="button"
                 onClick={() => onDeleteItem?.(item)}
-                className="rounded border border-rose-300 px-2 py-0.5 text-xs font-semibold text-rose-700"
+                variant="danger"
+                size="sm"
               >
                 Excluir
-              </button>
+              </Button>
             </div>
           </div>
         ))}
@@ -77,7 +86,7 @@ const OrderPanelComponent: React.FC<OrderPanelProps> = ({ items, subtotal, disco
           <p className="font-semibold text-brand-700">{formatBRL(total)}</p>
         </div>
       </div>
-    </div>
+    </Card>
   )
 }
 

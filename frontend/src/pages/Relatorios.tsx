@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { ReportsAnalyticsTabs } from '../components/ReportsAnalyticsTabs'
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { ReportFilters } from '../components/ReportFilters'
-import { Badge, Button, Card, PageHeader, StatCard } from '../components/ui'
+import { Badge, Button, Card, PageHeader, SectionHeader, StatCard } from '../components/ui'
 import { api } from '../api/client'
+
+const ReportsAnalyticsTabs = lazy(() => import('../components/ReportsAnalyticsTabs').then((module) => ({ default: module.ReportsAnalyticsTabs })))
 
 type SummaryResponse = {
   total_sales: string | null
@@ -399,6 +400,8 @@ const Relatorios: React.FC = () => {
   const selectedPeriodLabel = fromDate === toDate
     ? new Date(`${fromDate}T00:00:00`).toLocaleDateString('pt-BR')
     : `${new Date(`${fromDate}T00:00:00`).toLocaleDateString('pt-BR')} ate ${new Date(`${toDate}T00:00:00`).toLocaleDateString('pt-BR')}`
+  const topCategory = categories[0]?.product__category__name || 'Sem categoria'
+  const topProduct = products[0]?.product__name || 'Sem destaque'
 
   return (
     <div className="space-y-5">
@@ -410,6 +413,9 @@ const Relatorios: React.FC = () => {
           <div className="flex flex-wrap gap-2">
             <Badge variant="brand">{selectedPeriodLabel}</Badge>
             <Badge variant="neutral">{formatNumber(summary?.total_orders)} pedidos no periodo</Badge>
+            <Badge variant={isReportsLoading ? 'warning' : 'success'}>
+              {isReportsLoading ? 'Atualizando dados' : 'Dados prontos'}
+            </Badge>
           </div>
         }
       />
@@ -441,11 +447,18 @@ const Relatorios: React.FC = () => {
         ))}
       </div>
 
-      <section className="panel p-5">
-        <div className="mb-4">
-          <h3 className="text-lg font-semibold">Resumo por pagamento</h3>
-          <p className="text-sm text-slate-500">Separacao financeira do periodo entre dinheiro, PIX, credito e debito.</p>
-        </div>
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <StatCard label="Categoria lider" value={topCategory} description="Primeiro destaque do ranking por categoria." tone="accent" />
+        <StatCard label="Produto lider" value={topProduct} description="Primeiro item da leitura analitica atual." />
+        <StatCard label="Lucro estimado" value={formatBRL(summary?.gross_profit_estimated)} description="Consolidado informado pelo dashboard." tone="success" />
+      </div>
+
+      <Card className="p-5">
+        <SectionHeader
+          title="Resumo por pagamento"
+          description="Separacao financeira do periodo entre dinheiro, PIX, credito e debito."
+          meta={<Badge variant="neutral">{paymentSummaryRows.length} forma(s) com movimento</Badge>}
+        />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
           {paymentCards.map((card) => (
             <StatCard
@@ -488,23 +501,33 @@ const Relatorios: React.FC = () => {
             </tbody>
           </table>
         </div>
-      </section>
+      </Card>
 
-      <ReportsAnalyticsTabs
-        fromDate={fromDate}
-        toDate={toDate}
-        payments={payments}
-        paymentsError={!isReportsLoading ? reportsLoadError : ''}
-        selectedPeriodLabel={selectedPeriodLabel}
-      />
+      <Suspense
+        fallback={
+          <Card className="p-5" tone="accent">
+            <SectionHeader
+              title="Analytics gerencial"
+              description="Carregando graficos e comparativos sob demanda para manter a tela inicial mais leve."
+            />
+          </Card>
+        }
+      >
+        <ReportsAnalyticsTabs
+          fromDate={fromDate}
+          toDate={toDate}
+          payments={payments}
+          paymentsError={!isReportsLoading ? reportsLoadError : ''}
+          selectedPeriodLabel={selectedPeriodLabel}
+        />
+      </Suspense>
 
-      <section className="panel p-5">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold">Entradas por categoria</h3>
-            <p className="text-sm text-slate-500">Valores finalizados por categoria no periodo filtrado.</p>
-          </div>
-        </div>
+      <Card className="p-5">
+        <SectionHeader
+          title="Entradas por categoria"
+          description="Valores finalizados por categoria no periodo filtrado."
+          meta={<Badge variant="neutral">{categories.length} categoria(s)</Badge>}
+        />
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -530,10 +553,14 @@ const Relatorios: React.FC = () => {
             </tbody>
           </table>
         </div>
-      </section>
+      </Card>
 
-      <section className="panel p-5">
-        <h3 className="mb-3 text-lg font-semibold">Tabela analitica</h3>
+      <Card className="p-5">
+        <SectionHeader
+          title="Tabela analitica"
+          description="Quantidade vendida, estoque e receita por produto."
+          meta={<Badge variant="neutral">{products.length} produto(s)</Badge>}
+        />
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -565,7 +592,7 @@ const Relatorios: React.FC = () => {
             </tbody>
           </table>
         </div>
-      </section>
+      </Card>
 
       <section className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <article className="panel p-5">

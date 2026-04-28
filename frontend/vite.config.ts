@@ -29,7 +29,23 @@ export default defineConfig({
     chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {
-        // Let Vite optimize chunks automatically to avoid initialization errors
+        manualChunks(id) {
+          if (id.includes('node_modules/recharts')) {
+            return 'charts'
+          }
+          if (id.includes('node_modules/@tanstack/react-query')) {
+            return 'query'
+          }
+          if (id.includes('node_modules/react-router') || id.includes('node_modules/@remix-run')) {
+            return 'router'
+          }
+          if (id.includes('node_modules/react') || id.includes('node_modules/scheduler')) {
+            return 'react-vendor'
+          }
+          if (id.includes('/src/components/ui/') || id.includes('\\src\\components\\ui\\')) {
+            return 'ui-kit'
+          }
+        }
       }
     }
   }

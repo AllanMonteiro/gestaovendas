@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Input,
+  PageHeader,
+  SectionHeader,
+  StatCard,
+} from '../components/ui'
 
 type CustomerResponse = {
   customer: {
@@ -24,6 +34,17 @@ type LoyaltyMove = {
 }
 
 const normalizePhone = (value: string) => value.replace(/\D/g, '')
+
+const formatMoveDate = (value: string) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  return new Intl.DateTimeFormat('pt-BR', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(date)
+}
 
 const getApiErrorText = (error: unknown, fallback: string) => {
   if (
@@ -122,78 +143,165 @@ const Fidelidade: React.FC = () => {
   }
 
   return (
-    <div className="space-y-4">
-      <div className="panel p-4">
-        <h2 className="font-semibold">Buscar Cliente</h2>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <input
-            value={phone}
-            onChange={(event) => setPhone(event.target.value)}
-            className="flex-1 border border-brand-100 rounded-lg px-3 py-2"
-            placeholder="Telefone"
+    <div className="space-y-5">
+      <PageHeader
+        eyebrow="Relacionamento"
+        title="Fidelidade"
+        description="Acompanhe saldo, movimente pontos e consulte o historico do cliente em uma tela mais clara para operacao."
+        meta={
+          <div className="flex flex-wrap gap-2">
+            <Badge variant={customerData ? 'success' : 'neutral'}>
+              {customerData ? 'Cliente carregado' : 'Aguardando busca'}
+            </Badge>
+            <Badge variant={moves.length > 0 ? 'brand' : 'neutral'}>
+              {moves.length} movimentacao{moves.length === 1 ? '' : 'oes'}
+            </Badge>
+          </div>
+        }
+      />
+
+      <div className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
+        <Card className="space-y-4 p-5">
+          <SectionHeader
+            title="Buscar cliente"
+            description="Informe o telefone para carregar saldo e extrato automaticamente."
+            actions={
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => void loadCustomer()} disabled={loadingCustomer} variant="primary">
+                  {loadingCustomer ? 'Buscando...' : 'Buscar'}
+                </Button>
+                <Button
+                  onClick={() => void loadCustomer(phone, { silent: true })}
+                  disabled={loadingCustomer || !phone.trim()}
+                  variant="secondary"
+                >
+                  Atualizar saldo
+                </Button>
+              </div>
+            }
           />
-          <button
-            onClick={() => void loadCustomer()}
-            disabled={loadingCustomer}
-            className="px-3 py-2 rounded-lg bg-brand-600 text-white disabled:opacity-60"
-          >
-            {loadingCustomer ? 'Buscando...' : 'Buscar'}
-          </button>
-          <button
-            onClick={() => void loadCustomer(phone, { silent: true })}
-            disabled={loadingCustomer || !phone.trim()}
-            className="px-3 py-2 rounded-lg border border-brand-200 text-brand-700 disabled:opacity-60"
-          >
-            Atualizar saldo
-          </button>
-        </div>
+          <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+            <Input
+              value={phone}
+              onChange={(event) => setPhone(event.target.value)}
+              placeholder="Telefone com DDD"
+              label="Telefone"
+            />
+            <div className="hidden md:block" />
+          </div>
+
+          {feedback ? (
+            <Card tone="accent" className="p-4">
+              <p className="text-sm text-slate-700">{feedback}</p>
+            </Card>
+          ) : null}
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+            <StatCard
+              label="Saldo atual"
+              value={`${customerData?.account.points_balance ?? 0} pontos`}
+              description={customerData ? 'Atualizado em tempo real enquanto a tela estiver aberta.' : 'Nenhum cliente carregado.'}
+              tone="accent"
+            />
+            <StatCard
+              label="Cliente"
+              value={customerData ? customerData.customer.name || 'Cliente' : 'Aguardando busca'}
+              description={
+                customerData
+                  ? `${customerData.customer.last_name || ''} ${customerData.customer.phone}`.trim()
+                  : 'Busque por telefone para liberar a movimentacao.'
+              }
+            />
+          </div>
+        </Card>
+
+        <Card className="space-y-4 p-5">
+          <SectionHeader
+            title="Movimentar pontos"
+            description="Ajuste saldo manualmente para campanhas, cortesias ou resgates."
+          />
+          <div className="grid gap-3 md:grid-cols-2">
+            <Input
+              value={points}
+              onChange={(event) => setPoints(event.target.value)}
+              placeholder="Pontos"
+              label="Quantidade"
+              inputMode="numeric"
+            />
+            <Input
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="Motivo"
+              label="Motivo"
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => void handleMove('earn')} disabled={loadingMove} variant="success">
+              {loadingMove ? 'Processando...' : 'Adicionar pontos'}
+            </Button>
+            <Button onClick={() => void handleMove('redeem')} disabled={loadingMove} variant="warning">
+              {loadingMove ? 'Processando...' : 'Resgatar pontos'}
+            </Button>
+          </div>
+          <Card tone="muted" className="p-4">
+            <p className="text-sm leading-6 text-slate-600">
+              O saldo e o extrato sao atualizados novamente em segundo plano a cada 30 segundos enquanto esta aba estiver visivel.
+            </p>
+          </Card>
+        </Card>
       </div>
 
-      <div className="panel p-4">
-        <h2 className="font-semibold">Saldo</h2>
-        <div className="mt-2 text-xl">{customerData ? `${customerData.account.points_balance} pontos` : '0 pontos'}</div>
-        <p className="mt-1 text-sm text-slate-500">
-          {customerData
-            ? `${customerData.customer.name || 'Cliente'} ${customerData.customer.last_name || ''} - ${customerData.customer.phone}`
-            : 'Nenhum cliente carregado.'}
-        </p>
-      </div>
-
-      <div className="panel p-4 space-y-3">
-        <h2 className="font-semibold">Movimentar pontos</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <input value={points} onChange={(event) => setPoints(event.target.value)} className="border border-brand-100 rounded-lg px-3 py-2" placeholder="Pontos" />
-          <input value={reason} onChange={(event) => setReason(event.target.value)} className="border border-brand-100 rounded-lg px-3 py-2" placeholder="Motivo" />
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button onClick={() => void handleMove('earn')} disabled={loadingMove} className="px-3 py-2 rounded-lg bg-emerald-600 text-white disabled:opacity-60">
-            Adicionar pontos
-          </button>
-          <button onClick={() => void handleMove('redeem')} disabled={loadingMove} className="px-3 py-2 rounded-lg bg-amber-500 text-white disabled:opacity-60">
-            Resgatar pontos
-          </button>
-        </div>
-      </div>
-
-      <div className="panel p-4">
-        <h2 className="font-semibold">Extrato</h2>
-        <div className="mt-2 space-y-2 text-sm">
-          {moves.map((move) => (
-            <div key={move.id} className="rounded-lg border border-brand-100 px-3 py-2 flex items-center justify-between">
-              <span>
-                {move.type} - {move.reason}
-              </span>
-              <span className={move.points >= 0 ? 'text-emerald-700 font-semibold' : 'text-rose-700 font-semibold'}>
-                {move.points > 0 ? '+' : ''}
-                {move.points}
-              </span>
-            </div>
-          ))}
-          {moves.length === 0 ? <p className="text-slate-500">Sem movimentacoes para este cliente.</p> : null}
-        </div>
-      </div>
-
-      {feedback ? <p className="text-sm text-brand-700">{feedback}</p> : null}
+      <Card className="space-y-4 p-5">
+        <SectionHeader
+          title="Extrato"
+          description="Historico recente de creditos e resgates do cliente selecionado."
+          meta={
+            customerData ? (
+              <Badge variant="info">
+                {customerData.customer.name || 'Cliente'} {customerData.customer.last_name || ''}
+              </Badge>
+            ) : null
+          }
+        />
+        {moves.length === 0 ? (
+          <EmptyState
+            title="Sem movimentacoes ainda"
+            description={
+              customerData
+                ? 'Este cliente ainda nao possui historico de pontos.'
+                : 'Busque um cliente para visualizar o extrato de fidelidade.'
+            }
+          />
+        ) : (
+          <div className="grid gap-3">
+            {moves.map((move) => {
+              const isPositive = move.points >= 0
+              return (
+                <div
+                  key={move.id}
+                  className="flex flex-col gap-3 rounded-2xl border border-white/70 bg-white/80 px-4 py-4 shadow-sm shadow-brand-100/40 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant={isPositive ? 'success' : 'warning'}>
+                        {move.type === 'earn' ? 'Credito' : move.type === 'redeem' ? 'Resgate' : move.type}
+                      </Badge>
+                      <span className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                        {formatMoveDate(move.created_at)}
+                      </span>
+                    </div>
+                    <p className="text-sm font-medium text-slate-800">{move.reason}</p>
+                  </div>
+                  <p className={`text-lg font-semibold ${isPositive ? 'text-emerald-700' : 'text-amber-700'}`}>
+                    {move.points > 0 ? '+' : ''}
+                    {move.points}
+                  </p>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </Card>
     </div>
   )
 }

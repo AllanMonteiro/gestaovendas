@@ -70,12 +70,47 @@ class PublicDeliveryOrderCreateTests(TestCase):
         self.assertEqual(response.data['delivery_fee'], '5.00')
         self.assertEqual(response.data['items'][0]['unit_price'], '8.00')
         self.assertEqual(response.data['items'][0]['total'], '16.00')
+        self.assertIsNone(response.data['items'][0]['weight_grams'])
+        self.assertEqual(response.data['items'][0]['unit_type'], 'unit')
         order = Order.objects.get(id=response.data['id'])
         self.assertEqual(order.type, Order.TYPE_DELIVERY)
         self.assertEqual(order.total, Decimal('21.00'))
         self.assertEqual(order.items.count(), 1)
         self.assertEqual(order.delivery_meta.source, DeliveryOrderMeta.SOURCE_WEB)
         self.assertEqual(order.delivery_meta.customer_name, 'Cliente Web')
+
+    def test_public_menu_marks_weight_products_with_kg_unit_type(self):
+        self.product.sold_by_weight = True
+        self.product.save(update_fields=['sold_by_weight'])
+
+        response = self.client.post(
+            '/api/orders/public/',
+            {
+                'customer_name': 'Cliente Web',
+                'customer_phone': '91999990000',
+                'address': 'Rua das Flores, 10',
+                'neighborhood': 'Centro',
+                'payment_method': 'PIX',
+                'items': [
+                    {
+                        'product_id': self.product.id,
+                        'product_name': 'Cascao',
+                        'quantity': 0.5,
+                        'weight_grams': 500,
+                    }
+                ],
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data['subtotal'], '4.00')
+        self.assertEqual(response.data['delivery_fee'], '5.00')
+        self.assertEqual(response.data['total'], '9.00')
+        self.assertEqual(response.data['items'][0]['weight_grams'], 500)
+        self.assertEqual(response.data['items'][0]['unit_type'], 'kg')
+        self.assertEqual(Order.objects.get(id=response.data['id']).delivery_meta.raw_items[0]['unit_type'], 'kg')
+        self.assertEqual(Order.objects.get(id=response.data['id']).items.get().weight_grams, 500)
 
     @patch('apps.orders.order_notifications.send_new_delivery_order_alert')
     def test_public_menu_enqueues_company_alert_only_after_successful_commit(self, send_alert_mock):

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { api } from '../api/client'
 import { type AuthSession, clearTokens } from '../app/auth'
+import { Badge, Button, Card, Input, LoadingState } from './ui'
 import { useAuth } from '../hooks/useAuth'
 
 type LoginGateProps = {
@@ -64,92 +65,124 @@ const SystemAccessScreen: React.FC<SystemAccessScreenProps> = ({
   onBootstrap,
   onRetry,
 }) => (
-  <div className="mx-auto flex min-h-[70vh] max-w-5xl items-center justify-center px-3 py-6 sm:px-4">
-    <div className="grid w-full gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-      <section className="panel p-6 sm:p-8">
-        <p className="text-sm font-semibold uppercase tracking-[0.2em] text-brand-600">Acesso ao sistema</p>
-        <h1 className="mt-3 text-3xl font-semibold text-slate-900">Entrar no Sorveteria POS</h1>
-        <p className="mt-2 max-w-xl text-sm text-slate-500">
-          Use o login do usuario para acessar o PDV, caixa, relatorios e configuracoes conforme as permissoes recebidas.
-        </p>
+  <div className="mx-auto flex min-h-[76vh] max-w-6xl items-center justify-center px-3 py-6 sm:px-4 lg:px-6">
+    <div className="grid w-full gap-5 lg:grid-cols-[1.15fr_0.85fr]">
+      <Card className="overflow-hidden p-0">
+        <div className="grid gap-8 p-6 sm:p-8">
+          <div className="space-y-4">
+            <Badge variant="brand">Acesso ao sistema</Badge>
+            <div className="space-y-3">
+              <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
+                Entrar no Sorveteria POS
+              </h1>
+              <p className="max-w-2xl text-sm leading-6 text-slate-600">
+                Acesse PDV, caixa, relatorios e configuracoes com um fluxo mais leve, rapido e pronto para o dia a dia da operacao.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-white/70 bg-white/75 px-4 py-3 shadow-sm shadow-brand-100/40 backdrop-blur">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-500">Operacao</p>
+                <p className="mt-2 text-sm text-slate-600">Vendas, cozinha e delivery no mesmo ambiente.</p>
+              </div>
+              <div className="rounded-2xl border border-white/70 bg-white/75 px-4 py-3 shadow-sm shadow-brand-100/40 backdrop-blur">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-500">Seguranca</p>
+                <p className="mt-2 text-sm text-slate-600">Acesso por usuario com permissoes por perfil.</p>
+              </div>
+              <div className="rounded-2xl border border-white/70 bg-white/75 px-4 py-3 shadow-sm shadow-brand-100/40 backdrop-blur">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-500">Suporte</p>
+                <p className="mt-2 text-sm text-slate-600">Validacao de sessao e bootstrap do admin inicial.</p>
+              </div>
+            </div>
+          </div>
 
-        <div className="mt-6 grid gap-3">
-          <input
-            value={email}
-            onChange={(event) => onEmailChange(event.target.value)}
-            placeholder="Login (e-mail)"
-            className="w-full rounded-xl border border-brand-100 px-4 py-3 text-sm"
-          />
-          <input
-            value={password}
-            onChange={(event) => onPasswordChange(event.target.value)}
-            placeholder="Senha"
-            type="password"
-            className="w-full rounded-xl border border-brand-100 px-4 py-3 text-sm"
-          />
-          <button
-            type="button"
-            onClick={onLogin}
-            disabled={busy}
-            className="rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 px-4 py-3 text-sm font-semibold text-white disabled:opacity-60"
-          >
-            {busy ? 'Entrando...' : 'Entrar'}
-          </button>
+          <div className="grid gap-3">
+            <Input
+              value={email}
+              onChange={(event) => onEmailChange(event.target.value)}
+              placeholder="Login (e-mail)"
+              label="Usuario"
+              autoComplete="username"
+            />
+            <Input
+              value={password}
+              onChange={(event) => onPasswordChange(event.target.value)}
+              placeholder="Senha"
+              type="password"
+              label="Senha"
+              autoComplete="current-password"
+            />
+            <div className="flex flex-wrap gap-3 pt-1">
+              <Button onClick={onLogin} disabled={busy} variant="primary" size="lg">
+                {busy ? 'Entrando...' : 'Entrar'}
+              </Button>
+              {onRetry ? (
+                <Button onClick={onRetry} disabled={busy} variant="secondary" size="lg">
+                  Tentar validar sessao
+                </Button>
+              ) : null}
+            </div>
+            {feedback ? (
+              <div className="rounded-2xl border border-rose-200/80 bg-rose-50/85 px-4 py-3 text-sm text-rose-700">
+                {feedback}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </Card>
+
+      <Card tone="accent" className="p-6 sm:p-8">
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <h2 className="text-xl font-semibold text-slate-950">Administrador inicial</h2>
+            <Badge variant={bootstrapRequired === true ? 'warning' : 'success'}>
+              {bootstrapRequired === null
+                ? 'Verificando'
+                : bootstrapRequired
+                  ? 'Disponivel'
+                  : 'Ja configurado'}
+            </Badge>
+          </div>
+          <p className="text-sm leading-6 text-slate-600">
+            Se este for o primeiro acesso, crie aqui o usuario administrador que vai liberar os demais logins e permissoes.
+          </p>
         </div>
 
-        {feedback ? <p className="mt-4 text-sm text-rose-600">{feedback}</p> : null}
-        <div className="mt-6 flex flex-wrap gap-3">
-          {onRetry ? (
-            <button
-              type="button"
-              onClick={onRetry}
-              className="rounded-xl border border-brand-200 px-4 py-3 text-sm font-semibold text-brand-700"
-            >
-              Tentar validar sessao
-            </button>
-          ) : null}
-        </div>
-      </section>
-
-      <section className="panel p-6 sm:p-8">
-        <h2 className="text-xl font-semibold text-slate-900">Administrador inicial</h2>
-        <p className="mt-2 text-sm text-slate-500">
-          Se este for o primeiro acesso, cadastre abaixo o usuario administrador que vai liberar os demais usuarios e permissoes.
-        </p>
         <div className="mt-6 grid gap-3">
-          <input
+          <Input
             value={bootstrap.name}
             onChange={(event) => onBootstrapChange('name', event.target.value)}
             placeholder="Nome"
-            className="w-full rounded-xl border border-brand-100 px-4 py-3 text-sm"
+            label="Nome do administrador"
           />
-          <input
+          <Input
             value={bootstrap.email}
             onChange={(event) => onBootstrapChange('email', event.target.value)}
             placeholder="Login (e-mail)"
-            className="w-full rounded-xl border border-brand-100 px-4 py-3 text-sm"
+            label="Login"
+            autoComplete="username"
           />
-          <input
+          <Input
             value={bootstrap.password}
             onChange={(event) => onBootstrapChange('password', event.target.value)}
             placeholder="Senha inicial"
             type="password"
-            className="w-full rounded-xl border border-brand-100 px-4 py-3 text-sm"
+            label="Senha inicial"
+            autoComplete="new-password"
           />
-          <button
-            type="button"
+          <Button
             onClick={onBootstrap}
             disabled={busy || bootstrapRequired !== true}
-            className="rounded-xl border border-brand-200 px-4 py-3 text-sm font-semibold text-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+            variant="secondary"
+            size="lg"
           >
             {bootstrapRequired === null
               ? 'Verificando disponibilidade...'
               : bootstrapRequired
                 ? 'Criar administrador'
                 : 'Administrador ja configurado'}
-          </button>
+          </Button>
         </div>
-      </section>
+      </Card>
     </div>
   </div>
 )
@@ -272,7 +305,16 @@ export const LoginGate: React.FC<LoginGateProps> = ({ children, mode = 'protect'
   }, [logout])
 
   if (loading) {
-    return <div className="panel p-6 text-sm text-slate-500">Carregando sessao...</div>
+    return (
+      <div className="mx-auto max-w-3xl px-3 py-6 sm:px-4">
+        <Card className="p-6">
+          <LoadingState
+            title="Carregando sessao"
+            description="Estamos validando seu acesso e preparando o ambiente."
+          />
+        </Card>
+      </div>
+    )
   }
 
   if (mode === 'entry') {

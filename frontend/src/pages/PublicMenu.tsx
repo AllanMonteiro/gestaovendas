@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { startTransition, useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import { resolveAssetUrl } from '../app/runtime'
 
@@ -9,6 +9,7 @@ type Product = {
   image_url?: string | null
   category: number
   active?: boolean
+  sold_by_weight?: boolean
 }
 
 type Category = {
@@ -36,8 +37,10 @@ type StoreConfig = {
 }
 
 type CartItem = {
+  id: string
   product: Product
   qty: number
+  weightGrams?: number | null
 }
 
 type CreatedOrderResponse = {
@@ -53,6 +56,14 @@ type DeliveryFeeEstimate = {
 type DeliveryPaymentMethod = 'PIX' | 'CASH' | 'CARD_CREDIT' | 'CARD_DEBIT'
 
 const formatBRL = (val: string | number) => Number(val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const priceUnitLabel = (product: Product) => (product.sold_by_weight ? '/ kg' : '/ un')
+const cartUnitLabel = (product: Product) => (product.sold_by_weight ? 'por kg' : 'por unidade')
+const round3 = (value: number) => Math.round((value + Number.EPSILON) * 1000) / 1000
+const formatWeight = (weightGrams?: number | null) => `${((weightGrams ?? 0) / 1000).toFixed(3)} kg`
+const createCartItemId = () =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`
 
 const paymentMethodLabel: Record<DeliveryPaymentMethod, string> = {
   PIX: 'PIX',
@@ -122,6 +133,7 @@ const PublicMenu: React.FC = () => {
   const [storeWhatsAppNumber, setStoreWhatsAppNumber] = useState('')
   const [deliveryFeeDefault, setDeliveryFeeDefault] = useState('10.00')
   const [deliveryFeeRules, setDeliveryFeeRules] = useState<DeliveryFeeRule[]>([])
+  const [storeLogoUrl, setStoreLogoUrl] = useState('')
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
   const [address, setAddress] = useState('')
@@ -133,6 +145,9 @@ const PublicMenu: React.FC = () => {
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
   const [lastOrderId, setLastOrderId] = useState('')
   const [lastWhatsAppUrl, setLastWhatsAppUrl] = useState('')
+  const [weightModalProduct, setWeightModalProduct] = useState<Product | null>(null)
+  const [editingWeightCartItemId, setEditingWeightCartItemId] = useState<string | null>(null)
+  const [weightInput, setWeightInput] = useState('')
 
   useEffect(() => {
     const load = async () => {
@@ -158,11 +173,14 @@ const PublicMenu: React.FC = () => {
         setProducts(activeProducts)
         setStoreName(config.data.store_name || 'Nossa Sorveteria')
         setStoreWhatsAppNumber(normalizeWhatsAppNumber(config.data.whatsapp_number))
+        setStoreLogoUrl(config.data.logo_url || '')
         setDeliveryFeeDefault(String(config.data.delivery_fee_default ?? '10.00'))
         setDeliveryFeeRules(Array.isArray(config.data.delivery_fee_rules) ? config.data.delivery_fee_rules : [])
         setPricesByProductId(nextPrices)
         if (cats.data.length > 0) {
-          setSelectedCategoryId(cats.data[0].id)
+          startTransition(() => {
+            setSelectedCategoryId(cats.data[0].id)
+          })
         }
       } catch {
         setFeedback({ type: 'error', text: 'Nao foi possivel carregar o cardapio agora.' })
@@ -209,12 +227,20 @@ const PublicMenu: React.FC = () => {
   const total = subtotal + deliveryFeeEstimate.fee
 
   const addToCart = (product: Product) => {
+    if (product.sold_by_weight) {
+      setWeightModalProduct(product)
+      setEditingWeightCartItemId(null)
+      setWeightInput('')
+      setFeedback(null)
+      return
+    }
+
     setCart((prev) => {
-      const existing = prev.find((item) => item.product.id === product.id)
+      const existing = prev.find((item) => item.product.id === product.id && !item.weightGrams)
       if (existing) {
         return prev.map((item) => (item.product.id === product.id ? { ...item, qty: item.qty + 1 } : item))
       }
-      return [...prev, { product, qty: 1 }]
+      return [...prev, { id: createCartItemId(), product, qty: 1, weightGrams: null }]
     })
     setFeedback(null)
   }
@@ -228,7 +254,64 @@ const PublicMenu: React.FC = () => {
   }
 
   const removeFromCart = (productId: number) => {
-    setCart((prev) => prev.filter((item) => item.product.id !== productId))
+    setCart((prev) => prev.filter((item) => item.id !== String(productId)))
+  }
+
+  const removeCartItem = (cartItemId: string) => {
+    setCart((prev) => prev.filter((item) => item.id !== cartItemId))
+  }
+
+  const openEditWeightModal = (item: CartItem) => {
+    setWeightModalProduct(item.product)
+    setEditingWeightCartItemId(item.id)
+    setWeightInput(item.weightGrams ? String(item.weightGrams) : '')
+    setFeedback(null)
+  }
+
+  const closeWeightModal = () => {
+    setWeightModalProduct(null)
+    setEditingWeightCartItemId(null)
+    setWeightInput('')
+  }
+
+  const parsedWeightGrams = useMemo(() => {
+    const normalized = weightInput.trim().replace(',', '.')
+    if (!normalized) {
+      return null
+    }
+    const parsed = Number(normalized)
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return null
+    }
+    return Math.round(parsed)
+  }, [weightInput])
+
+  const confirmWeightSelection = () => {
+    if (!weightModalProduct || parsedWeightGrams === null) {
+      return
+    }
+
+    const qty = round3(parsedWeightGrams / 1000)
+    setCart((prev) => {
+      if (editingWeightCartItemId) {
+        return prev.map((item) =>
+          item.id === editingWeightCartItemId
+            ? { ...item, qty, weightGrams: parsedWeightGrams }
+            : item
+        )
+      }
+
+      return [
+        ...prev,
+        {
+          id: createCartItemId(),
+          product: weightModalProduct,
+          qty,
+          weightGrams: parsedWeightGrams,
+        },
+      ]
+    })
+    closeWeightModal()
   }
 
   const resetForm = () => {
@@ -268,6 +351,7 @@ const PublicMenu: React.FC = () => {
           product_id: item.product.id,
           product_name: item.product.name,
           quantity: item.qty,
+          weight_grams: item.weightGrams ?? undefined,
         })),
       })
       const orderLabel = response.data.id.slice(0, 8)
@@ -304,10 +388,28 @@ const PublicMenu: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-40">
-      <header className="sticky top-0 z-30 bg-white/90 p-4 shadow-sm backdrop-blur-md">
-        <h1 className="text-center font-display text-2xl font-bold text-brand-700">{storeName}</h1>
-        <p className="mt-1 text-center text-xs uppercase tracking-widest text-slate-500">Faca seu pedido online</p>
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(245,158,11,0.12),_transparent_28%),linear-gradient(180deg,#fffaf5_0%,#fffdfb_38%,#ffffff_100%)] pb-40">
+      <header className="sticky top-0 z-30 border-b border-white/60 bg-white/72 backdrop-blur-xl">
+        <div className="mx-auto max-w-6xl px-4 py-4">
+          <div className="rounded-[1.75rem] border border-white/70 bg-white/70 px-4 py-4 shadow-sm shadow-slate-200/60 backdrop-blur-xl">
+            <div className="flex items-center gap-4">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[1.2rem] border border-brand-100 bg-white">
+                {storeLogoUrl ? (
+                  <img src={resolveAssetUrl(storeLogoUrl)} alt={`Logo de ${storeName}`} className="h-full w-full object-cover" />
+                ) : (
+                  <span className="text-sm font-bold uppercase tracking-[0.18em] text-brand-700">
+                    {(storeName || 'SP').slice(0, 2)}
+                  </span>
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-brand-600/80">Delivery online</p>
+                <h1 className="truncate font-display text-2xl font-bold tracking-[0.01em] text-slate-900">{storeName}</h1>
+                <p className="mt-1 text-sm text-slate-500">Monte seu pedido, escolha a taxa estimada e finalize em poucos passos.</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </header>
 
       {feedback ? (
@@ -336,43 +438,57 @@ const PublicMenu: React.FC = () => {
         </div>
       ) : null}
 
-      <nav className="scrollbar-none sticky top-[68px] z-20 flex gap-3 overflow-x-auto border-b border-brand-50 bg-white p-3">
-        {categories.map((cat) => (
-          <button
-            key={cat.id}
-            onClick={() => setSelectedCategoryId(cat.id)}
-            className={`shrink-0 rounded-full px-5 py-2 text-sm font-semibold transition ${
-              selectedCategoryId === cat.id ? 'bg-brand-600 text-white shadow-md' : 'bg-brand-50 text-brand-700'
-            }`}
-          >
-            {cat.name}
-          </button>
-        ))}
-      </nav>
+      <div className="sticky top-[112px] z-20">
+        <nav className="scrollbar-none mx-auto flex max-w-6xl gap-3 overflow-x-auto px-4 py-3">
+          {categories.map((cat) => (
+            <button
+              key={cat.id}
+              onClick={() => setSelectedCategoryId(cat.id)}
+              className={`shrink-0 rounded-full px-5 py-2 text-sm font-semibold transition ${
+                selectedCategoryId === cat.id
+                  ? 'bg-slate-900 text-white shadow-sm shadow-slate-300'
+                  : 'border border-slate-200/80 bg-white/78 text-slate-700 backdrop-blur hover:border-brand-300 hover:text-brand-700'
+              }`}
+            >
+              {cat.name}
+            </button>
+          ))}
+        </nav>
+      </div>
 
       <main className="mx-auto grid max-w-6xl grid-cols-1 gap-6 p-4 lg:grid-cols-[minmax(0,1.2fr)_360px]">
         <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {filteredProducts.map((product) => (
-            <div key={product.id} className="flex gap-3 rounded-2xl border border-brand-50 bg-white p-3 shadow-sm">
-              <div className="h-20 w-20 shrink-0 rounded-xl bg-slate-100">
+            <div key={product.id} className="group flex gap-4 rounded-[1.6rem] border border-white/70 bg-white/82 p-4 shadow-sm shadow-slate-200/60 backdrop-blur-xl transition hover:-translate-y-0.5 hover:shadow-md hover:shadow-slate-200">
+              <div className="h-24 w-24 shrink-0 rounded-[1.15rem] bg-slate-100">
                 {product.image_url ? (
-                  <img src={resolveAssetUrl(product.image_url)} alt={product.name} className="h-full w-full rounded-xl object-cover" />
+                  <img src={resolveAssetUrl(product.image_url)} alt={product.name} className="h-full w-full rounded-[1.15rem] object-cover" />
                 ) : (
-                  <div className="flex h-full w-full items-center justify-center text-2xl">SG</div>
+                  <div className="flex h-full w-full items-center justify-center rounded-[1.15rem] bg-[linear-gradient(135deg,rgba(217,90,43,0.14),rgba(239,155,82,0.22))] text-xl font-bold text-brand-700">
+                    {product.name.slice(0, 2).toUpperCase()}
+                  </div>
                 )}
               </div>
               <div className="flex flex-1 flex-col justify-between">
                 <div>
-                  <h3 className="font-bold text-slate-800">{product.name}</h3>
-                  <p className="line-clamp-2 text-xs text-slate-400">{product.description || 'Sabor irresistivel'}</p>
+                  <div className="flex items-start justify-between gap-3">
+                    <h3 className="font-semibold text-slate-900">{product.name}</h3>
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      {product.sold_by_weight ? 'Peso' : 'Unidade'}
+                    </span>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-sm text-slate-500">{product.description || 'Sabor irresistivel preparado para pedido rapido.'}</p>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-brand-600">{formatBRL(getProductPrice(product.id))}</span>
+                <div className="mt-4 flex items-center justify-between">
+                  <div>
+                    <span className="font-semibold text-slate-900">{formatBRL(getProductPrice(product.id))}</span>
+                    <span className="ml-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-600">{priceUnitLabel(product)}</span>
+                  </div>
                   <button
                     onClick={() => addToCart(product)}
-                    className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-700"
+                    className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700"
                   >
-                    Adicionar
+                    {product.sold_by_weight ? 'Informar peso' : 'Adicionar'}
                   </button>
                 </div>
               </div>
@@ -381,11 +497,11 @@ const PublicMenu: React.FC = () => {
         </section>
 
         <aside className="space-y-4">
-          <div className="rounded-3xl border border-brand-100 bg-white p-5 shadow-sm">
+          <div className="rounded-[1.8rem] border border-white/70 bg-white/84 p-5 shadow-sm shadow-slate-200/60 backdrop-blur-xl">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Total estimado</p>
-                <p className="text-2xl font-bold text-slate-900">{formatBRL(total)}</p>
+                <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-slate-400">Resumo do pedido</p>
+                <p className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">{formatBRL(total)}</p>
               </div>
               {lastOrderId ? (
                 <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
@@ -401,26 +517,38 @@ const PublicMenu: React.FC = () => {
                 </div>
               ) : (
                 cart.map((item) => (
-                  <div key={item.product.id} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
+                  <div key={item.id} className="rounded-[1.35rem] border border-slate-100 bg-slate-50/90 p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="truncate font-semibold text-slate-800">{item.product.name}</p>
-                        <p className="text-sm text-slate-500">{formatBRL(getProductPrice(item.product.id))} por unidade</p>
+                        <p className="text-sm text-slate-500">{formatBRL(getProductPrice(item.product.id))} {cartUnitLabel(item.product)}</p>
+                        {item.weightGrams ? (
+                          <p className="text-xs text-slate-500">Peso informado: {formatWeight(item.weightGrams)}</p>
+                        ) : null}
                       </div>
-                      <button onClick={() => removeFromCart(item.product.id)} className="text-sm font-semibold text-rose-500">
+                      <button onClick={() => removeCartItem(item.id)} className="text-sm font-semibold text-rose-500">
                         Remover
                       </button>
                     </div>
                     <div className="mt-3 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => changeQty(item.product.id, -1)} className="h-8 w-8 rounded-full border border-slate-200">
-                          -
+                      {item.product.sold_by_weight ? (
+                        <button
+                          onClick={() => openEditWeightModal(item)}
+                          className="rounded-full border border-slate-200 px-3 py-1 text-sm font-medium text-slate-600"
+                        >
+                          Editar peso
                         </button>
-                        <span className="min-w-8 text-center font-semibold">{item.qty}</span>
-                        <button onClick={() => changeQty(item.product.id, 1)} className="h-8 w-8 rounded-full border border-slate-200">
-                          +
-                        </button>
-                      </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => changeQty(item.product.id, -1)} className="h-8 w-8 rounded-full border border-slate-200">
+                            -
+                          </button>
+                          <span className="min-w-8 text-center font-semibold">{item.qty}</span>
+                          <button onClick={() => changeQty(item.product.id, 1)} className="h-8 w-8 rounded-full border border-slate-200">
+                            +
+                          </button>
+                        </div>
+                      )}
                       <span className="font-bold text-slate-800">{formatBRL(getProductPrice(item.product.id) * item.qty)}</span>
                     </div>
                   </div>
@@ -451,8 +579,8 @@ const PublicMenu: React.FC = () => {
             </div>
           </div>
 
-          <div className="rounded-3xl border border-brand-100 bg-white p-5 shadow-sm">
-            <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Entrega</p>
+          <div className="rounded-[1.8rem] border border-white/70 bg-white/84 p-5 shadow-sm shadow-slate-200/60 backdrop-blur-xl">
+            <p className="text-[11px] font-bold uppercase tracking-[0.24em] text-slate-400">Entrega</p>
             <div className="mt-4 space-y-3">
               <input
                 value={customerName}
@@ -519,7 +647,7 @@ const PublicMenu: React.FC = () => {
               <button
                 onClick={() => void handleSubmitOrder()}
                 disabled={submitting || cart.length === 0}
-                className="w-full rounded-2xl bg-gradient-to-r from-emerald-600 to-emerald-500 px-5 py-3 text-sm font-bold text-white shadow-lg transition disabled:cursor-not-allowed disabled:opacity-60"
+                className="w-full rounded-2xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white shadow-sm shadow-slate-300 transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {submitting ? 'Enviando pedido...' : 'Enviar pedido para a loja'}
               </button>
@@ -527,6 +655,48 @@ const PublicMenu: React.FC = () => {
           </div>
         </aside>
       </main>
+
+      {weightModalProduct ? (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/50 px-4 pb-4 sm:items-center sm:pb-0">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl">
+            <h3 className="text-lg font-semibold">Produto por peso</h3>
+            <p className="mt-1 text-sm text-slate-500">{weightModalProduct.name}</p>
+
+            <div className="mt-6 rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50 py-6 text-center">
+              <span className="text-4xl font-bold text-brand-700">{parsedWeightGrams ?? 0}g</span>
+              <p className="mt-1 text-sm font-medium text-slate-500">{formatWeight(parsedWeightGrams)}</p>
+            </div>
+
+            <div className="mt-4">
+              <label className="text-xs font-semibold uppercase text-slate-500">Digite o peso em gramas</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={weightInput}
+                onChange={(event) => setWeightInput(event.target.value)}
+                placeholder="Ex: 500"
+                className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none transition-all focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+              {weightInput.trim() && parsedWeightGrams === null ? (
+                <p className="mt-1 text-xs font-medium text-rose-600">Digite um peso valido em gramas.</p>
+              ) : null}
+            </div>
+
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button onClick={closeWeightModal} className="rounded-xl border border-slate-300 px-4 py-2 text-sm">
+                Cancelar
+              </button>
+              <button
+                onClick={confirmWeightSelection}
+                disabled={parsedWeightGrams === null}
+                className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                Confirmar peso
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

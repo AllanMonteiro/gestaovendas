@@ -1,4 +1,4 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import logging
 import re
 
@@ -42,11 +42,37 @@ def _coerce_quantity(value) -> Decimal:
     return qty if qty > 0 else Decimal('1')
 
 
+def _coerce_weight_grams(value) -> int | None:
+    try:
+        grams = int(Decimal(str(value)))
+    except Exception:
+        return None
+    return grams if grams > 0 else None
+
+
 def _serialize_quantity(qty: Decimal):
     integral_qty = qty.to_integral_value()
     if qty == integral_qty:
         return int(integral_qty)
     return float(qty)
+
+
+def _resolve_unit_type(product: Product | None) -> str:
+    return 'kg' if product is not None and product.sold_by_weight else 'unit'
+
+
+def _resolve_quantity_and_weight(item: dict, product: Product | None) -> tuple[Decimal, int | None]:
+    qty = _coerce_quantity(item.get('quantity'))
+    weight_grams = _coerce_weight_grams(item.get('weight_grams'))
+
+    if product is None or not product.sold_by_weight:
+        return qty, None
+
+    if weight_grams is not None:
+        return (Decimal(weight_grams) / Decimal('1000')).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP), weight_grams
+
+    derived_weight = int((qty * Decimal('1000')).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+    return qty, derived_weight if derived_weight > 0 else None
 
 
 def _resolve_customer(phone: str | None, parsed: dict) -> Customer | None:
@@ -101,7 +127,6 @@ def create_delivery_order_from_parsed(
 
     for item in parsed.get('items', []) or []:
         name = (item.get('product_name') or item.get('name') or 'Item').strip()
-        qty = _coerce_quantity(item.get('quantity'))
         product_id = item.get('product_id')
         product = None
         if product_id not in (None, ''):
@@ -111,6 +136,7 @@ def create_delivery_order_from_parsed(
                 product = None
         if product is None:
             product = find_product_by_name(name)
+        qty, weight_grams = _resolve_quantity_and_weight(item, product)
         unit_price = q2(resolve_product_price(product))
         line_total = q2(unit_price * qty)
 
@@ -118,14 +144,17 @@ def create_delivery_order_from_parsed(
         raw_items.append({
             'product_name': product.name if product else name,
             'quantity': _serialize_quantity(qty),
+            'weight_grams': weight_grams,
             'unit_price': str(unit_price),
             'total': str(line_total),
+            'unit_type': _resolve_unit_type(product),
         })
 
         if product is not None:
             order_items.append({
                 'product': product,
                 'qty': qty,
+                'weight_grams': weight_grams,
                 'unit_price': unit_price,
                 'total': line_total,
             })
@@ -166,6 +195,7 @@ def create_delivery_order_from_parsed(
             order=order,
             product=item_data['product'],
             qty=item_data['qty'],
+            weight_grams=item_data['weight_grams'],
             unit_price=item_data['unit_price'],
             total=item_data['total'],
         )

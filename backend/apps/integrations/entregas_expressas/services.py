@@ -58,8 +58,10 @@ def build_order_payload(order: Order, *, cfg: dict[str, Any]) -> dict[str, Any]:
             'product_id': item.product_id,
             'product_name': item.product.name if getattr(item, 'product', None) is not None else 'Item',
             'quantity': _serialize_quantity(item.qty),
+            'weight_grams': item.weight_grams,
             'unit_price': str(item.unit_price),
             'total': str(item.total),
+            'unit_type': 'kg' if item.weight_grams else 'unit',
             'notes': item.notes or '',
         }
         for item in order.items.all()

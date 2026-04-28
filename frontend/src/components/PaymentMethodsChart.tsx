@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react'
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts'
-import { ChartCard, ChartEmptyState, ChartLoadingState, ChartPill } from './ChartCard'
+import { ChartCard, ChartEmptyState, ChartPill } from './ChartCard'
 import { Badge, Card } from './ui'
 
 type PaymentRow = {
@@ -40,31 +39,6 @@ const getPaymentBucket = (method?: string): PaymentBucket['label'] => {
   if (normalized === 'CARD_DEBIT') return 'Cartao debito'
   if (normalized === 'CARD') return 'Cartao'
   return 'Prazo'
-}
-
-const ChartTooltip = ({
-  active,
-  payload,
-}: {
-  active?: boolean
-  payload?: Array<{ value?: number; name?: string; payload?: PaymentBucket }>
-}) => {
-  if (!active || !payload || payload.length === 0) {
-    return null
-  }
-
-  const current = payload[0]?.payload
-  if (!current) {
-    return null
-  }
-
-  return (
-    <div className="ui-chart-tooltip">
-      <p className="ui-chart-tooltip-label">{current.label}</p>
-      <p className="ui-chart-tooltip-value">{formatBRL(current.total)}</p>
-      <p className="ui-chart-tooltip-detail">{current.percent}% das vendas no periodo</p>
-    </div>
-  )
 }
 
 export const PaymentMethodsChart: React.FC<PaymentMethodsChartProps> = ({ payments, error }) => {
@@ -140,26 +114,20 @@ export const PaymentMethodsChart: React.FC<PaymentMethodsChartProps> = ({ paymen
     >
       <div className="grid grid-cols-1 items-center gap-6 xl:grid-cols-[minmax(320px,1fr)_minmax(280px,0.95fr)]">
         <div className="mx-auto flex w-full max-w-[26rem] justify-center">
-          <div className="relative h-80 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Tooltip content={<ChartTooltip />} />
-                <Pie
-                  data={paymentData.chartItems}
-                  dataKey="total"
-                  nameKey="label"
-                  innerRadius={84}
-                  outerRadius={118}
-                  paddingAngle={3}
-                  stroke="rgba(255,255,255,0.92)"
-                  strokeWidth={2}
-                >
-                  {paymentData.chartItems.map((item) => (
-                    <Cell key={item.label} fill={item.color} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
+          <div className="relative flex h-80 w-full items-center justify-center">
+            <div
+              className="relative h-56 w-56 rounded-full shadow-sm"
+              style={{
+                background: `conic-gradient(${paymentData.chartItems
+                  .map((item, index, items) => {
+                    const start = items.slice(0, index).reduce((sum, entry) => sum + entry.percent, 0)
+                    const end = start + item.percent
+                    return `${item.color} ${start}% ${end}%`
+                  })
+                  .join(', ')})`,
+              }}
+            />
+            <div className="absolute h-32 w-32 rounded-full bg-white shadow-inner" />
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
               <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Total</span>
               <span className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">{formatBRL(paymentData.total)}</span>
@@ -184,6 +152,12 @@ export const PaymentMethodsChart: React.FC<PaymentMethodsChartProps> = ({ paymen
                   <Badge variant={item.total > 0 ? 'neutral' : 'warning'}>{item.total > 0 ? 'Ativo' : 'Sem vendas'}</Badge>
                 </div>
               </div>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full"
+                  style={{ width: `${item.percent}%`, backgroundColor: item.color }}
+                />
+              </div>
             </Card>
           ))}
         </div>
@@ -191,16 +165,3 @@ export const PaymentMethodsChart: React.FC<PaymentMethodsChartProps> = ({ paymen
     </ChartCard>
   )
 }
-
-export const PaymentMethodsChartSkeleton: React.FC = () => (
-  <ChartCard
-    title="Formas de pagamento"
-    description="Distribuicao das vendas no periodo"
-    meta={<ChartPill>Financeiro</ChartPill>}
-  >
-    <ChartLoadingState
-      title="Carregando financeiro"
-      description="Preparando a distribuicao das vendas por forma de pagamento."
-    />
-  </ChartCard>
-)

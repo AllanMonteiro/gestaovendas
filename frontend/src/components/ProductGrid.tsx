@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { resolveAssetUrl } from '../app/runtime'
+import { Badge, Button, Card, EmptyState, Input } from './ui'
 
 type Category = {
   id: number
@@ -20,11 +21,8 @@ type ProductGridProps = {
   selectedCategoryId: number | null
   products: Product[]
   allProducts: Product[]
-  searchTerm: string
-  searchResultProducts: Product[]
   categoryImages?: Record<string, string>
   onSelectCategory: (id: number | null) => void
-  onSearchTermChange: (value: string) => void
   onAddProduct: (product: Product) => void
 }
 
@@ -33,15 +31,14 @@ const ProductGridComponent: React.FC<ProductGridProps> = ({
   selectedCategoryId,
   products,
   allProducts,
-  searchTerm,
-  searchResultProducts,
   categoryImages = {},
   onSelectCategory,
-  onSearchTermChange,
   onAddProduct
 }) => {
   const productsSectionRef = useRef<HTMLDivElement | null>(null)
   const [failedCategoryImages, setFailedCategoryImages] = useState<Record<string, boolean>>({})
+  const [searchTerm, setSearchTerm] = useState('')
+  const deferredSearchTerm = useDeferredValue(searchTerm)
 
   useEffect(() => {
     setFailedCategoryImages({})
@@ -77,6 +74,15 @@ const ProductGridComponent: React.FC<ProductGridProps> = ({
   }, [categories, selectedCategoryId])
 
   const totalVisibleProducts = products.filter((product) => product.active !== false).length
+  const searchResultProducts = useMemo(() => {
+    const normalizedSearch = deferredSearchTerm.trim().toLowerCase()
+    if (!normalizedSearch) {
+      return []
+    }
+    return products
+      .filter((product) => product.active !== false && product.name.toLowerCase().includes(normalizedSearch))
+      .slice(0, 12)
+  }, [deferredSearchTerm, products])
 
   const getCategoryInitials = (value: string) =>
     value
@@ -88,7 +94,7 @@ const ProductGridComponent: React.FC<ProductGridProps> = ({
 
   const handleCategoryClick = (categoryId: number | null) => {
     onSelectCategory(categoryId)
-    onSearchTermChange('')
+    setSearchTerm('')
     window.requestAnimationFrame(() => {
       productsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     })
@@ -103,7 +109,7 @@ const ProductGridComponent: React.FC<ProductGridProps> = ({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border border-brand-100 bg-white p-3 shadow-sm">
+      <Card className="p-3">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Filtro</p>
@@ -111,17 +117,18 @@ const ProductGridComponent: React.FC<ProductGridProps> = ({
             <p className="mt-1 text-xs text-slate-500">Clique em uma categoria para ir direto aos produtos dela.</p>
           </div>
           {selectedCategoryId !== null ? (
-            <button
+            <Button
               type="button"
               onClick={() => handleCategoryClick(null)}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-brand-300 hover:text-brand-700"
+              variant="secondary"
+              size="sm"
             >
               Ver todas
-            </button>
+            </Button>
           ) : (
-            <span className="rounded-full bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-700">
+            <Badge variant="brand">
               {allProducts.length} itens
-            </span>
+            </Badge>
           )}
         </div>
 
@@ -171,9 +178,10 @@ const ProductGridComponent: React.FC<ProductGridProps> = ({
             </button>
           ))}
         </div>
-      </div>
+      </Card>
 
-      <div ref={productsSectionRef} className="rounded-2xl border border-brand-100 bg-white p-3 shadow-sm">
+      <Card className="p-3">
+        <div ref={productsSectionRef}>
         <div className="sticky top-2 z-20 -mx-1 mb-4 rounded-2xl bg-white/95 px-1 pb-3 backdrop-blur">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
@@ -182,28 +190,28 @@ const ProductGridComponent: React.FC<ProductGridProps> = ({
                 {selectedCategoryId === null ? 'Escolha um item para adicionar' : `Itens de ${selectedCategoryName}`}
               </p>
             </div>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+            <Badge variant="neutral">
               {totalVisibleProducts} visiveis
-            </span>
+            </Badge>
           </div>
 
           <div className="relative rounded-2xl border border-brand-100 bg-white p-3 shadow-sm">
             <div className="flex items-center gap-2">
-              <input
+              <Input
                 type="text"
                 value={searchTerm}
-                onChange={(event) => onSearchTermChange(event.target.value)}
+                onChange={(event) => setSearchTerm(event.target.value)}
                 placeholder="Pesquisar produto..."
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-brand-400"
               />
               {searchTerm ? (
-                <button
+                <Button
                   type="button"
-                  onClick={() => onSearchTermChange('')}
-                  className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-brand-300 hover:text-brand-700"
+                  onClick={() => setSearchTerm('')}
+                  variant="secondary"
+                  size="sm"
                 >
                   Limpar
-                </button>
+                </Button>
               ) : null}
             </div>
 
@@ -214,7 +222,7 @@ const ProductGridComponent: React.FC<ProductGridProps> = ({
                     key={product.id}
                     onClick={() => {
                       onAddProduct(product)
-                      onSearchTermChange('')
+                      setSearchTerm('')
                     }}
                     className="w-full border-b border-slate-100 px-4 py-3 text-left hover:bg-brand-50 last:border-0"
                   >
@@ -237,9 +245,10 @@ const ProductGridComponent: React.FC<ProductGridProps> = ({
         </div>
 
         {totalVisibleProducts === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
-            Nenhum produto encontrado nesta categoria.
-          </div>
+          <EmptyState
+            title="Nenhum produto encontrado"
+            description="Nao existem itens ativos nesta categoria no momento."
+          />
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {products
@@ -266,7 +275,8 @@ const ProductGridComponent: React.FC<ProductGridProps> = ({
               ))}
           </div>
         )}
-      </div>
+        </div>
+      </Card>
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import React from 'react'
+import { Badge, Button, Card, EmptyState, SectionHeader } from './ui'
 
 type OrderSummary = {
   id: string
@@ -62,24 +63,35 @@ const OpenOrdersPanelComponent: React.FC<OpenOrdersPanelProps> = ({
   onOpenNewOrder,
 }) => {
   return (
-    <div className="panel p-4">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Comandas abertas</h2>
-        <button onClick={onRefresh} className="text-xs font-semibold text-brand-700">
-          {isOnline ? 'Atualizar' : 'Offline'}
-        </button>
-      </div>
+    <Card className="space-y-4 p-4">
+      <SectionHeader
+        title="Comandas abertas"
+        description="Fila de pedidos ativos pronta para selecao e acompanhamento."
+        meta={
+          <div className="flex flex-wrap gap-2">
+            <Badge variant={isOnline ? 'info' : 'warning'}>{isOnline ? 'Online' : 'Offline'}</Badge>
+            <Badge variant={openOrders.length > 0 ? 'brand' : 'neutral'}>
+              {openOrders.length} aberta(s)
+            </Badge>
+          </div>
+        }
+        actions={
+          <Button onClick={onRefresh} variant="secondary" size="sm">
+            {isOnline ? 'Atualizar' : 'Offline'}
+          </Button>
+        }
+      />
       {outboxCount > 0 ? (
-        <div className="mt-2 rounded-lg bg-orange-50 p-2 text-[10px] text-orange-700">
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 text-[11px] text-amber-800">
           {outboxCount} operacao(oes) pendente(s) de sincronizacao.
         </div>
       ) : null}
       {outboxPreview.length > 0 ? (
-        <details className="mt-2 rounded-lg border border-orange-100 bg-white/70 p-2 text-[10px] text-slate-600">
+        <details className="rounded-2xl border border-amber-100 bg-white/78 p-3 text-[11px] text-slate-600">
           <summary className="cursor-pointer font-semibold text-orange-700">Ver pendencias</summary>
           <div className="mt-2 space-y-2">
             {outboxPreview.map((item) => (
-              <div key={`${item.id ?? item.url}-${item.method}`} className="rounded-lg bg-slate-50 p-2">
+              <div key={`${item.id ?? item.url}-${item.method}`} className="rounded-xl bg-slate-50 p-2.5">
                 <div className="font-semibold text-slate-700">
                   {item.method} {formatOutboxUrl(item.url)}
                 </div>
@@ -91,16 +103,18 @@ const OpenOrdersPanelComponent: React.FC<OpenOrdersPanelProps> = ({
         </details>
       ) : null}
       {!isOnline ? (
-        <div className="mt-2 rounded-lg bg-red-50 p-2 text-[10px] text-red-700">
+        <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-3 text-[11px] text-rose-700">
           Modo Offline Ativado.
         </div>
       ) : null}
-      <div className="mt-4 max-h-[48vh] space-y-2 overflow-y-auto pr-1">
+      <div className="max-h-[48vh] space-y-2 overflow-y-auto pr-1">
         {openOrders.map((order) => (
           <div
             key={order.id}
             className={`w-full rounded-xl border px-3 py-2 text-left text-sm ${
-              selectedOrderId === order.id ? 'border-brand-500 bg-brand-50' : 'border-brand-100 bg-brand-50/60'
+              selectedOrderId === order.id
+                ? 'border-brand-500 bg-brand-50 shadow-sm'
+                : 'border-brand-100 bg-white/72'
             }`}
           >
             <button className="w-full text-left" onClick={() => onSelectOrder(order.id)}>
@@ -118,17 +132,24 @@ const OpenOrdersPanelComponent: React.FC<OpenOrdersPanelProps> = ({
             </button>
           </div>
         ))}
-        {openOrders.length === 0 ? <p className="text-sm text-slate-500">Sem comandas abertas.</p> : null}
+        {openOrders.length === 0 ? (
+          <EmptyState
+            title="Sem comandas abertas"
+            description="Abra um novo pedido para iniciar o atendimento no PDV."
+          />
+        ) : null}
       </div>
-      <button
+      <Button
         onClick={onOpenNewOrder}
         disabled={!canOperateOrders}
         title={!canOperateOrders ? 'Abra o caixa para criar pedido.' : undefined}
-        className="w-full rounded-xl bg-gradient-to-r from-brand-600 to-brand-500 px-4 py-2.5 text-sm font-semibold text-white"
+        variant="primary"
+        size="lg"
+        fullWidth
       >
         Novo pedido
-      </button>
-    </div>
+      </Button>
+    </Card>
   )
 }
 
