@@ -1,6 +1,7 @@
-import React, { startTransition, useEffect, useMemo, useState } from 'react'
+import React, { startTransition, useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { api } from '../api/client'
 import { resolveAssetUrl } from '../app/runtime'
+import { Input } from '../components/ui'
 
 type Product = {
   id: number
@@ -60,6 +61,7 @@ const priceUnitLabel = (product: Product) => (product.sold_by_weight ? '/ kg' : 
 const cartUnitLabel = (product: Product) => (product.sold_by_weight ? 'por kg' : 'por unidade')
 const round3 = (value: number) => Math.round((value + Number.EPSILON) * 1000) / 1000
 const formatWeight = (weightGrams?: number | null) => `${((weightGrams ?? 0) / 1000).toFixed(3)} kg`
+const formatCartItemQuantity = (item: CartItem) => (item.weightGrams ? formatWeight(item.weightGrams) : `${item.qty} un`)
 const createCartItemId = () =>
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
@@ -128,6 +130,7 @@ const PublicMenu: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([])
   const [pricesByProductId, setPricesByProductId] = useState<Record<number, string>>({})
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null)
+  const [productSearchTerm, setProductSearchTerm] = useState('')
   const [cart, setCart] = useState<CartItem[]>([])
   const [storeName, setStoreName] = useState('Nossa Sorveteria')
   const [storeWhatsAppNumber, setStoreWhatsAppNumber] = useState('')
@@ -148,6 +151,7 @@ const PublicMenu: React.FC = () => {
   const [weightModalProduct, setWeightModalProduct] = useState<Product | null>(null)
   const [editingWeightCartItemId, setEditingWeightCartItemId] = useState<string | null>(null)
   const [weightInput, setWeightInput] = useState('')
+  const deferredProductSearchTerm = useDeferredValue(productSearchTerm)
 
   useEffect(() => {
     const load = async () => {
@@ -192,10 +196,26 @@ const PublicMenu: React.FC = () => {
 
   const getProductPrice = (productId: number) => Number(pricesByProductId[productId] || 0)
 
-  const filteredProducts = useMemo(
-    () => (selectedCategoryId ? products.filter((product) => product.category === selectedCategoryId) : products),
-    [products, selectedCategoryId]
-  )
+  const filteredProducts = useMemo(() => {
+    const normalizedSearch = deferredProductSearchTerm.trim().toLocaleLowerCase('pt-BR')
+
+    return products.filter((product) => {
+      const matchesCategory = selectedCategoryId ? product.category === selectedCategoryId : true
+      if (!matchesCategory) {
+        return false
+      }
+
+      if (!normalizedSearch) {
+        return true
+      }
+
+      const searchableContent = [product.name, product.description || '']
+        .join(' ')
+        .toLocaleLowerCase('pt-BR')
+
+      return searchableContent.includes(normalizedSearch)
+    })
+  }, [deferredProductSearchTerm, products, selectedCategoryId])
 
   const subtotal = useMemo(
     () => cart.reduce((sum, item) => sum + getProductPrice(item.product.id) * item.qty, 0),
@@ -355,12 +375,31 @@ const PublicMenu: React.FC = () => {
         })),
       })
       const orderLabel = response.data.id.slice(0, 8)
+      const orderItemsSummary = cart
+        .map((item) => `- ${item.product.name}: ${formatCartItemQuantity(item)} (${formatBRL(getProductPrice(item.product.id) * item.qty)})`)
+        .join('\n')
       const whatsappMessage = [
         `Ola! Acabei de fazer o pedido ${orderLabel} no cardapio online da ${storeName}.`,
-        `Cliente: ${customerName.trim()}.`,
-        `Forma de pagamento escolhida: ${paymentMethodText}.`,
+        '',
+        'Resumo do pedido:',
+        orderItemsSummary,
+        '',
+        `Subtotal: ${formatBRL(subtotal)}`,
+        `Entrega: ${formatBRL(deliveryFeeEstimate.fee)}`,
+        `Total: ${formatBRL(total)}`,
+        '',
+        `Cliente: ${customerName.trim()}`,
+        customerPhone.trim() ? `Telefone: ${customerPhone.trim()}` : '',
+        `Endereco: ${address.trim()}`,
+        `Bairro: ${neighborhood.trim()}`,
+        cep.trim() ? `CEP: ${cep.trim()}` : '',
+        `Pagamento: ${paymentMethodText}`,
+        notes.trim() ? `Observacoes: ${notes.trim()}` : '',
+        '',
         'Quero continuar por aqui para receber os dados de pagamento com mais seguranca.'
-      ].join(' ')
+      ]
+        .filter(Boolean)
+        .join('\n')
       const whatsappUrl = storeWhatsAppNumber
         ? `https://wa.me/${storeWhatsAppNumber}?text=${encodeURIComponent(whatsappMessage)}`
         : ''
@@ -373,12 +412,10 @@ const PublicMenu: React.FC = () => {
           ? `Pedido ${orderLabel} enviado com sucesso. Agora vamos continuar no WhatsApp da loja para combinar o pagamento.`
           : `Pedido ${orderLabel} enviado com sucesso.`
       })
-      if (whatsappUrl) {
-        window.setTimeout(() => {
-          window.location.assign(whatsappUrl)
-        }, 250)
-      }
       resetForm()
+      if (whatsappUrl) {
+        window.location.href = whatsappUrl
+      }
     } catch (error: any) {
       const message = error?.response?.data?.detail || 'Nao foi possivel enviar seu pedido agora.'
       setFeedback({ type: 'error', text: message })
@@ -395,7 +432,12 @@ const PublicMenu: React.FC = () => {
             <div className="flex items-center gap-4">
               <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-[1.2rem] border border-brand-100 bg-white">
                 {storeLogoUrl ? (
-                  <img src={resolveAssetUrl(storeLogoUrl)} alt={`Logo de ${storeName}`} className="h-full w-full object-cover" />
+                  <img
+                    src={resolveAssetUrl(storeLogoUrl)}
+                    alt={`Logo de ${storeName}`}
+                    className="h-full w-full object-cover"
+                    onError={() => setStoreLogoUrl('')}
+                  />
                 ) : (
                   <span className="text-sm font-bold uppercase tracking-[0.18em] text-brand-700">
                     {(storeName || 'SP').slice(0, 2)}
@@ -439,61 +481,81 @@ const PublicMenu: React.FC = () => {
       ) : null}
 
       <div className="sticky top-[112px] z-20">
-        <nav className="scrollbar-none mx-auto flex max-w-6xl gap-3 overflow-x-auto px-4 py-3">
-          {categories.map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => setSelectedCategoryId(cat.id)}
-              className={`shrink-0 rounded-full px-5 py-2 text-sm font-semibold transition ${
-                selectedCategoryId === cat.id
-                  ? 'bg-slate-900 text-white shadow-sm shadow-slate-300'
-                  : 'border border-slate-200/80 bg-white/78 text-slate-700 backdrop-blur hover:border-brand-300 hover:text-brand-700'
-              }`}
-            >
-              {cat.name}
-            </button>
-          ))}
-        </nav>
+        <div className="mx-auto max-w-6xl px-4 py-3">
+          <div className="rounded-[1.6rem] border border-white/70 bg-white/84 p-3 shadow-sm shadow-slate-200/60 backdrop-blur-xl">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,320px)_1fr] md:items-end">
+              <Input
+                label="Buscar produto"
+                placeholder="Digite sabor, nome ou descricao"
+                value={productSearchTerm}
+                onChange={(event) => setProductSearchTerm(event.target.value)}
+              />
+              <nav className="scrollbar-none flex gap-3 overflow-x-auto pb-1">
+                {categories.map((cat) => (
+                  <button
+                    key={cat.id}
+                    onClick={() => setSelectedCategoryId(cat.id)}
+                    className={`shrink-0 rounded-full px-5 py-2 text-sm font-semibold transition ${
+                      selectedCategoryId === cat.id
+                        ? 'bg-slate-900 text-white shadow-sm shadow-slate-300'
+                        : 'border border-slate-200/80 bg-white/78 text-slate-700 backdrop-blur hover:border-brand-300 hover:text-brand-700'
+                    }`}
+                  >
+                    {cat.name}
+                  </button>
+                ))}
+              </nav>
+            </div>
+          </div>
+        </div>
       </div>
 
       <main className="mx-auto grid max-w-6xl grid-cols-1 gap-6 p-4 lg:grid-cols-[minmax(0,1.2fr)_360px]">
         <section className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {filteredProducts.map((product) => (
-            <div key={product.id} className="group flex gap-4 rounded-[1.6rem] border border-white/70 bg-white/82 p-4 shadow-sm shadow-slate-200/60 backdrop-blur-xl transition hover:-translate-y-0.5 hover:shadow-md hover:shadow-slate-200">
-              <div className="h-24 w-24 shrink-0 rounded-[1.15rem] bg-slate-100">
-                {product.image_url ? (
-                  <img src={resolveAssetUrl(product.image_url)} alt={product.name} className="h-full w-full rounded-[1.15rem] object-cover" />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center rounded-[1.15rem] bg-[linear-gradient(135deg,rgba(217,90,43,0.14),rgba(239,155,82,0.22))] text-xl font-bold text-brand-700">
-                    {product.name.slice(0, 2).toUpperCase()}
-                  </div>
-                )}
-              </div>
-              <div className="flex flex-1 flex-col justify-between">
-                <div>
-                  <div className="flex items-start justify-between gap-3">
-                    <h3 className="font-semibold text-slate-900">{product.name}</h3>
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                      {product.sold_by_weight ? 'Peso' : 'Unidade'}
-                    </span>
-                  </div>
-                  <p className="mt-1 line-clamp-2 text-sm text-slate-500">{product.description || 'Sabor irresistivel preparado para pedido rapido.'}</p>
-                </div>
-                <div className="mt-4 flex items-center justify-between">
-                  <div>
-                    <span className="font-semibold text-slate-900">{formatBRL(getProductPrice(product.id))}</span>
-                    <span className="ml-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-600">{priceUnitLabel(product)}</span>
-                  </div>
-                  <button
-                    onClick={() => addToCart(product)}
-                    className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700"
-                  >
-                    {product.sold_by_weight ? 'Informar peso' : 'Adicionar'}
-                  </button>
-                </div>
+          {filteredProducts.length === 0 ? (
+            <div className="sm:col-span-2">
+              <div className="rounded-[1.6rem] border border-dashed border-slate-200 bg-white/78 p-8 text-center text-sm text-slate-500 backdrop-blur">
+                Nenhum produto encontrado para essa busca nesta categoria.
               </div>
             </div>
-          ))}
+          ) : (
+            filteredProducts.map((product) => (
+              <div key={product.id} className="group flex gap-4 rounded-[1.6rem] border border-white/70 bg-white/82 p-4 shadow-sm shadow-slate-200/60 backdrop-blur-xl transition hover:-translate-y-0.5 hover:shadow-md hover:shadow-slate-200">
+                <div className="h-24 w-24 shrink-0 rounded-[1.15rem] bg-slate-100">
+                  {product.image_url ? (
+                    <img src={resolveAssetUrl(product.image_url)} alt={product.name} className="h-full w-full rounded-[1.15rem] object-cover" />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center rounded-[1.15rem] bg-[linear-gradient(135deg,rgba(217,90,43,0.14),rgba(239,155,82,0.22))] text-xl font-bold text-brand-700">
+                      {product.name.slice(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-1 flex-col justify-between">
+                  <div>
+                    <div className="flex items-start justify-between gap-3">
+                      <h3 className="font-semibold text-slate-900">{product.name}</h3>
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        {product.sold_by_weight ? 'Peso' : 'Unidade'}
+                      </span>
+                    </div>
+                    <p className="mt-1 line-clamp-2 text-sm text-slate-500">{product.description || 'Sabor irresistivel preparado para pedido rapido.'}</p>
+                  </div>
+                  <div className="mt-4 flex items-center justify-between">
+                    <div>
+                      <span className="font-semibold text-slate-900">{formatBRL(getProductPrice(product.id))}</span>
+                      <span className="ml-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-600">{priceUnitLabel(product)}</span>
+                    </div>
+                    <button
+                      onClick={() => addToCart(product)}
+                      className="rounded-full bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-700"
+                    >
+                      {product.sold_by_weight ? 'Informar peso' : 'Adicionar'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
         </section>
 
         <aside className="space-y-4">

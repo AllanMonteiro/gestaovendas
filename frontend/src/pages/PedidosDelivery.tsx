@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useDeferredValue, useEffect, useState, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { playNotificationSound, prepareNotificationSound, stopRepeatingDeliveryAlarm, syncRepeatingDeliveryAlarm } from '../app/playNotificationSound'
@@ -14,13 +14,11 @@ import {
   Badge,
   Button,
   Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
   EmptyState,
-  SectionHeader,
-  LoadingState,
+  Input,
   PageHeader,
+  LoadingState,
+  SectionHeader,
   StatCard,
 } from '../components/ui'
 import { buildFallbackPublicMenuUrl, normalizePublicMenuUrl } from '../app/publicMenuUrl'
@@ -64,10 +62,30 @@ const PedidosDelivery: React.FC = () => {
   const [busyOrderId, setBusyOrderId] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
   const [publicMenuUrl, setPublicMenuUrl] = useState(buildFallbackPublicMenuUrl())
+  const [searchTerm, setSearchTerm] = useState('')
   const wsRefreshTimerRef = useRef<number | null>(null)
   const pollTimerRef = useRef<number | null>(null)
   const recentSoundedOrderIdsRef = useRef<Map<string, number>>(new Map())
+  const deferredSearchTerm = useDeferredValue(searchTerm)
   const orders = ordersQuery.data ?? []
+  const normalizedSearchTerm = deferredSearchTerm.trim().toLocaleLowerCase('pt-BR')
+  const filteredOrders = normalizedSearchTerm
+    ? orders.filter((order) => {
+        const searchable = [
+          order.id,
+          order.customer_name,
+          order.customer_phone,
+          order.address,
+          order.status,
+          ...(order.items?.map((item) => item.product_name) ?? []),
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLocaleLowerCase('pt-BR')
+
+        return searchable.includes(normalizedSearchTerm)
+      })
+    : orders
   const preparingCount = orders.filter((order) => order.status === 'preparo').length
   const dispatchedCount = orders.filter((order) => order.status === 'despachado').length
   const deliveredCount = orders.filter((order) => order.status === 'entregue').length
@@ -257,19 +275,36 @@ const PedidosDelivery: React.FC = () => {
             <SectionHeader
               title="Fila de atendimento"
               description="Os cards mantem o mesmo comportamento operacional, com mais contraste e melhor separacao entre dados e acoes."
-              meta={<Badge variant={orders.length > 0 ? 'warning' : 'neutral'}>{orders.length > 0 ? 'Pedidos ativos' : 'Sem pedidos'}</Badge>}
+              meta={<Badge variant={filteredOrders.length > 0 ? 'warning' : 'neutral'}>{filteredOrders.length > 0 ? 'Pedidos ativos' : 'Sem pedidos'}</Badge>}
             />
+            <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+              <Input
+                label="Pesquisar pedidos"
+                placeholder="Cliente, telefone, endereco, numero ou item"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+              />
+              {searchTerm ? (
+                <Button variant="ghost" onClick={() => setSearchTerm('')}>
+                  Limpar busca
+                </Button>
+              ) : null}
+            </div>
           </Card>
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {orders.length === 0 ? (
+            {filteredOrders.length === 0 ? (
               <div className="col-span-full">
                 <EmptyState
-                  title="Nenhum pedido de delivery para exibir"
-                  description="Quando um novo pedido chegar, ele sera listado aqui sem alterar o fluxo atual."
+                  title={orders.length === 0 ? 'Nenhum pedido de delivery para exibir' : 'Nenhum pedido encontrado'}
+                  description={
+                    orders.length === 0
+                      ? 'Quando um novo pedido chegar, ele sera listado aqui sem alterar o fluxo atual.'
+                      : 'Tente outro nome, telefone, endereco ou item para localizar o pedido.'
+                  }
                 />
               </div>
             ) : (
-              orders.map((order) => (
+              filteredOrders.map((order) => (
                 <Card
                   key={order.id}
                   className="flex flex-col justify-between p-6 transition hover:-translate-y-0.5"
