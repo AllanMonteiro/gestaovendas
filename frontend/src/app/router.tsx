@@ -3,7 +3,16 @@ import { Navigate, createBrowserRouter, NavLink, Outlet, useLocation, useNavigat
 import { useOutboxSync } from './useSync'
 import { api } from '../api/client'
 import { getAccessToken, getRefreshToken, type AuthSession } from './auth'
-import { playNotificationSound, prepareNotificationSound, stopRepeatingDeliveryAlarm, syncRepeatingDeliveryAlarm } from './playNotificationSound'
+import {
+  DELIVERY_SOUND_RUNTIME_EVENT,
+  getDeliverySoundRuntimeStatus,
+  playNotificationSound,
+  prepareNotificationSound,
+  requestDeliverySoundActivation,
+  stopRepeatingDeliveryAlarm,
+  syncRepeatingDeliveryAlarm,
+  type DeliverySoundRuntimeStatus,
+} from './playNotificationSound'
 import { resolveAssetUrl } from './runtime'
 import { LoginGate } from '../components/LoginGate'
 import { LoadingState } from '../components/ui'
@@ -218,6 +227,7 @@ const Layout: React.FC = () => {
   const [theme, setTheme] = useState<string>(cachedBranding?.theme || 'cream')
   const [currentUserName, setCurrentUserName] = useState('')
   const [deliveryAlerts, setDeliveryAlerts] = useState<DeliveryAlert[]>([])
+  const [deliverySoundRuntime, setDeliverySoundRuntime] = useState<DeliverySoundRuntimeStatus>(() => getDeliverySoundRuntimeStatus())
   const knownDeliveryOrderIdsRef = useRef<Set<string>>(new Set())
   const deliveryPollTimerRef = useRef<number | null>(null)
   const deliveryRefreshTimerRef = useRef<number | null>(null)
@@ -265,6 +275,16 @@ const Layout: React.FC = () => {
 
   useEffect(() => {
     prepareNotificationSound()
+  }, [])
+
+  useEffect(() => {
+    const syncRuntime = () => {
+      setDeliverySoundRuntime(getDeliverySoundRuntimeStatus())
+    }
+
+    syncRuntime()
+    window.addEventListener(DELIVERY_SOUND_RUNTIME_EVENT, syncRuntime as EventListener)
+    return () => window.removeEventListener(DELIVERY_SOUND_RUNTIME_EVENT, syncRuntime as EventListener)
   }, [])
 
   useEffect(() => {
@@ -532,6 +552,23 @@ const Layout: React.FC = () => {
               </button>
             </div>
           ))}
+        </div>
+      ) : null}
+      {deliveryAlerts.length > 0 && deliverySoundRuntime.enabled && !deliverySoundRuntime.unlocked ? (
+        <div className="fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
+          <div className="pointer-events-auto flex max-w-xl items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-lg shadow-amber-200/60">
+            <div className="min-w-0">
+              <p className="font-semibold">Som do delivery bloqueado neste computador</p>
+              <p className="text-amber-800/90">Clique em ativar som uma vez neste navegador da loja para liberar o alarme.</p>
+            </div>
+            <button
+              type="button"
+              onClick={requestDeliverySoundActivation}
+              className="shrink-0 rounded-xl bg-amber-500 px-4 py-2 font-semibold text-white transition hover:bg-amber-600"
+            >
+              Ativar som
+            </button>
+          </div>
         </div>
       ) : null}
       <main className="mx-auto max-w-[1500px] px-3 py-4 sm:px-4 md:px-6 md:py-6 lg:py-8">

@@ -1,7 +1,16 @@
 import React, { useCallback, useDeferredValue, useEffect, useState, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
-import { playNotificationSound, prepareNotificationSound, stopRepeatingDeliveryAlarm, syncRepeatingDeliveryAlarm } from '../app/playNotificationSound'
+import {
+  DELIVERY_SOUND_RUNTIME_EVENT,
+  getDeliverySoundRuntimeStatus,
+  playNotificationSound,
+  prepareNotificationSound,
+  requestDeliverySoundActivation,
+  stopRepeatingDeliveryAlarm,
+  syncRepeatingDeliveryAlarm,
+  type DeliverySoundRuntimeStatus,
+} from '../app/playNotificationSound'
 import {
   useDeleteDeliveryOrderMutation,
   useUpdateDeliveryOrderStatusMutation,
@@ -63,6 +72,7 @@ const PedidosDelivery: React.FC = () => {
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'error'; text: string } | null>(null)
   const [publicMenuUrl, setPublicMenuUrl] = useState(buildFallbackPublicMenuUrl())
   const [searchTerm, setSearchTerm] = useState('')
+  const [deliverySoundRuntime, setDeliverySoundRuntime] = useState<DeliverySoundRuntimeStatus>(() => getDeliverySoundRuntimeStatus())
   const wsRefreshTimerRef = useRef<number | null>(null)
   const pollTimerRef = useRef<number | null>(null)
   const recentSoundedOrderIdsRef = useRef<Map<string, number>>(new Map())
@@ -95,6 +105,16 @@ const PedidosDelivery: React.FC = () => {
 
   useEffect(() => {
     prepareNotificationSound()
+  }, [])
+
+  useEffect(() => {
+    const syncRuntime = () => {
+      setDeliverySoundRuntime(getDeliverySoundRuntimeStatus())
+    }
+
+    syncRuntime()
+    window.addEventListener(DELIVERY_SOUND_RUNTIME_EVENT, syncRuntime as EventListener)
+    return () => window.removeEventListener(DELIVERY_SOUND_RUNTIME_EVENT, syncRuntime as EventListener)
   }, [])
 
   useEffect(() => {
@@ -255,6 +275,19 @@ const PedidosDelivery: React.FC = () => {
       {feedback ? (
         <Card className="p-4" tone={feedback.type === 'ok' ? 'success' : 'danger'}>
           <p className="text-sm font-medium">{feedback.text}</p>
+        </Card>
+      ) : null}
+      {deliverySoundRuntime.enabled && !deliverySoundRuntime.unlocked ? (
+        <Card className="p-4" tone="warning">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-amber-950">Som do delivery ainda nao foi liberado neste computador</p>
+              <p className="text-sm text-amber-900/80">Clique no botao abaixo uma vez para o navegador da loja permitir o alarme automaticamente.</p>
+            </div>
+            <Button variant="warning" onClick={requestDeliverySoundActivation}>
+              Ativar som agora
+            </Button>
+          </div>
         </Card>
       ) : null}
 

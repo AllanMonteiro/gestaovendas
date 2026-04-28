@@ -8,15 +8,37 @@ const PLAYBACK_THROTTLE_MS = 700
 const REPEATING_ALARM_INTERVAL_MS = 2400
 const DELIVERY_SOUND_SETTINGS_KEY = 'sorveteria.delivery-sound-settings'
 export const DELIVERY_SOUND_SETTINGS_EVENT = 'sorveteria:delivery-sound-settings'
+export const DELIVERY_SOUND_RUNTIME_EVENT = 'sorveteria:delivery-sound-runtime'
 
 export type DeliverySoundSettings = {
   enabled: boolean
   volume: number
 }
 
+export type DeliverySoundRuntimeStatus = {
+  supported: boolean
+  enabled: boolean
+  volume: number
+  unlocked: boolean
+}
+
 const DEFAULT_DELIVERY_SOUND_SETTINGS: DeliverySoundSettings = {
   enabled: true,
   volume: 72,
+}
+
+const emitDeliverySoundRuntimeStatus = () => {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.dispatchEvent(new CustomEvent<DeliverySoundRuntimeStatus>(DELIVERY_SOUND_RUNTIME_EVENT, {
+      detail: getDeliverySoundRuntimeStatus(),
+    }))
+  } catch {
+    // Ignore dispatch failures.
+  }
 }
 
 const normalizeVolume = (value: unknown) => {
@@ -48,6 +70,18 @@ export const getDeliverySoundSettings = (): DeliverySoundSettings => {
   }
 }
 
+export const getDeliverySoundRuntimeStatus = (): DeliverySoundRuntimeStatus => {
+  const settings = getDeliverySoundSettings()
+  const context = getAudioContext()
+
+  return {
+    supported: context !== null,
+    enabled: settings.enabled,
+    volume: settings.volume,
+    unlocked: context?.state === 'running',
+  }
+}
+
 export const saveDeliverySoundSettings = (settings: DeliverySoundSettings) => {
   if (typeof window === 'undefined') {
     return
@@ -66,6 +100,7 @@ export const saveDeliverySoundSettings = (settings: DeliverySoundSettings) => {
     } else if (repeatingAlarmActive) {
       playNotificationSound()
     }
+    emitDeliverySoundRuntimeStatus()
   } catch {
     // Ignore local storage failures and keep runtime behavior.
   }
@@ -83,6 +118,9 @@ const getAudioContext = () => {
 
   if (!audioContext || audioContext.state === 'closed') {
     audioContext = new AudioContextCtor()
+    audioContext.onstatechange = () => {
+      emitDeliverySoundRuntimeStatus()
+    }
   }
 
   return audioContext
@@ -91,9 +129,12 @@ const getAudioContext = () => {
 const unlockAudioContext = () => {
   const context = getAudioContext()
   if (!context || context.state !== 'suspended') {
+    emitDeliverySoundRuntimeStatus()
     return
   }
-  void context.resume().catch(() => undefined)
+  void context.resume().then(() => {
+    emitDeliverySoundRuntimeStatus()
+  }).catch(() => undefined)
 }
 
 const attachUnlockListeners = () => {
@@ -111,6 +152,13 @@ const attachUnlockListeners = () => {
 export const prepareNotificationSound = () => {
   attachUnlockListeners()
   unlockAudioContext()
+  emitDeliverySoundRuntimeStatus()
+}
+
+export const requestDeliverySoundActivation = () => {
+  prepareNotificationSound()
+  playNotificationSound()
+  emitDeliverySoundRuntimeStatus()
 }
 
 export const playNotificationSound = () => {
@@ -173,6 +221,7 @@ export const stopRepeatingDeliveryAlarm = () => {
     window.clearInterval(repeatingAlarmTimer)
   }
   repeatingAlarmTimer = null
+  emitDeliverySoundRuntimeStatus()
 }
 
 export const startRepeatingDeliveryAlarm = () => {
