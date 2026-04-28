@@ -1,6 +1,11 @@
 import React, { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { type AuthSession } from '../app/auth'
+import {
+  getDeliverySoundSettings,
+  playNotificationSound,
+  saveDeliverySoundSettings,
+} from '../app/playNotificationSound'
 import { normalizePublicMenuUrl } from '../app/publicMenuUrl'
 import { Badge, Button, Card, Input, LoadingState, PageHeader, SectionHeader, Select, StatCard } from '../components/ui'
 import { resolveAssetUrl } from '../app/runtime'
@@ -167,6 +172,8 @@ const Configuracoes: React.FC = () => {
   const [deliveryIntegrationServiceType, setDeliveryIntegrationServiceType] = useState('automatico')
   const [deliveryIntegrationDynamicReturn, setDeliveryIntegrationDynamicReturn] = useState(true)
   const [deliveryIntegrationDispatchAfterSeconds, setDeliveryIntegrationDispatchAfterSeconds] = useState('120')
+  const [deliverySoundEnabled, setDeliverySoundEnabled] = useState(true)
+  const [deliverySoundVolume, setDeliverySoundVolume] = useState('72')
 
   const [agentUrl, setAgentUrl] = useState('http://127.0.0.1:9876')
   const [autoPrintReceipt, setAutoPrintReceipt] = useState(true)
@@ -202,6 +209,7 @@ const Configuracoes: React.FC = () => {
 
   const loadConfig = async () => {
     try {
+      const deliverySoundSettings = getDeliverySoundSettings()
       const [configResponse, categoriesResponse, sessionResponse, rolesResponse, usersResponse] = await Promise.all([
         api.get<StoreConfig>('/api/config'),
         api.get<Category[]>('/api/categories'),
@@ -232,6 +240,8 @@ const Configuracoes: React.FC = () => {
       setDeliveryIntegrationServiceType(cfg.delivery_integration?.service_type || 'automatico')
       setDeliveryIntegrationDynamicReturn(Boolean(cfg.delivery_integration?.enable_dynamic_return ?? true))
       setDeliveryIntegrationDispatchAfterSeconds(String(cfg.delivery_integration?.dispatch_after_seconds ?? 120))
+      setDeliverySoundEnabled(deliverySoundSettings.enabled)
+      setDeliverySoundVolume(String(deliverySoundSettings.volume))
       setPointsPerReal(String(cfg.points_per_real ?? 1))
       setPointValueReal(String(cfg.point_value_real ?? '0.10'))
       setMinRedeemPoints(String(cfg.min_redeem_points ?? 10))
@@ -500,6 +510,10 @@ const Configuracoes: React.FC = () => {
         },
         category_images: normalizedCategoryImages
       })
+      saveDeliverySoundSettings({
+        enabled: deliverySoundEnabled,
+        volume: Number(deliverySoundVolume) || 0,
+      })
       window.dispatchEvent(new CustomEvent('sorveteria:theme', { detail: normalizeTheme(theme) }))
       dispatchBrandingUpdate(storeName, logoUrl.trim() || null)
       setFeedback('Configuracoes salvas com sucesso.')
@@ -511,6 +525,12 @@ const Configuracoes: React.FC = () => {
   const persistCategoryImages = async (nextCategoryImages: Record<string, string>) => {
     await api.put('/api/config', {
       category_images: nextCategoryImages,
+    })
+  }
+
+  const persistLogoUrl = async (nextLogoUrl: string) => {
+    await api.put('/api/config', {
+      logo_url: nextLogoUrl.trim() || null,
     })
   }
 
@@ -543,8 +563,10 @@ const Configuracoes: React.FC = () => {
         handleCategoryImageChange(Number(categoryId), response.data.relative_url)
         setFeedback('Imagem da categoria enviada e salva com sucesso.')
       } else {
+        await persistLogoUrl(response.data.relative_url)
         setLogoUrl(response.data.relative_url)
-        setFeedback('Logo enviada com sucesso. Clique em salvar para concluir.')
+        dispatchBrandingUpdate(storeName || 'Sorveteria POS', response.data.relative_url)
+        setFeedback('Logo enviada e salva com sucesso.')
       }
     } catch {
       setFeedback(categoryId ? 'Falha ao enviar imagem da categoria.' : 'Falha ao enviar logo da empresa.')
@@ -559,6 +581,15 @@ const Configuracoes: React.FC = () => {
 
   const [printers, setPrinters] = useState<{ name: string, id: string }[]>([])
   const [selectedPrinter, setSelectedPrinter] = useState('auto')
+
+  const handleTestDeliverySound = () => {
+    saveDeliverySoundSettings({
+      enabled: deliverySoundEnabled,
+      volume: Number(deliverySoundVolume) || 0,
+    })
+    playNotificationSound()
+    setFeedback('Sinal sonoro de delivery testado neste navegador.')
+  }
 
   const handleFetchPrinters = async () => {
     if (!agentUrl.trim()) {
@@ -844,6 +875,58 @@ const Configuracoes: React.FC = () => {
             O tema ajuda a deixar o painel mais leve visualmente sem alterar o fluxo operacional.
           </p>
         </Card>
+      </Card>
+
+      <Card className="space-y-4 p-5">
+        <SectionHeader
+          title="Alertas sonoros do delivery"
+          description="Controle o aviso de novos pedidos neste navegador ou computador."
+          meta={<Badge variant={deliverySoundEnabled ? 'success' : 'neutral'}>{deliverySoundEnabled ? 'Ativo' : 'Desligado'}</Badge>}
+        />
+        <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+          <input
+            type="checkbox"
+            checked={deliverySoundEnabled}
+            onChange={(event) => setDeliverySoundEnabled(event.target.checked)}
+          />
+          Tocar sinal quando chegar novo pedido de delivery
+        </label>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <label htmlFor="delivery-sound-volume" className="text-sm font-medium text-slate-700">
+              Volume do alerta
+            </label>
+            <span className="text-sm font-semibold text-slate-500">{deliverySoundVolume}%</span>
+          </div>
+          <input
+            id="delivery-sound-volume"
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={deliverySoundVolume}
+            onChange={(event) => setDeliverySoundVolume(event.target.value)}
+            disabled={!deliverySoundEnabled}
+            className="w-full accent-brand-600"
+          />
+          <p className="text-xs text-slate-500">
+            Essa preferencia fica salva localmente neste navegador. Se usar outro computador, ajuste la tambem.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={handleTestDeliverySound} variant="secondary" disabled={!deliverySoundEnabled || Number(deliverySoundVolume) <= 0}>
+            Testar som
+          </Button>
+          <Button
+            onClick={() => {
+              setDeliverySoundEnabled(true)
+              setDeliverySoundVolume('72')
+            }}
+            variant="ghost"
+          >
+            Restaurar padrao
+          </Button>
+        </div>
       </Card>
 
       <div className="panel space-y-4 p-5">

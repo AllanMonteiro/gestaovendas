@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { api } from '../api/client'
+import { playNotificationSound, prepareNotificationSound } from '../app/playNotificationSound'
 import {
   useDeleteDeliveryOrderMutation,
   useUpdateDeliveryOrderStatusMutation,
@@ -64,6 +66,7 @@ const PedidosDelivery: React.FC = () => {
   const [publicMenuUrl, setPublicMenuUrl] = useState(buildFallbackPublicMenuUrl())
   const wsRefreshTimerRef = useRef<number | null>(null)
   const pollTimerRef = useRef<number | null>(null)
+  const recentSoundedOrderIdsRef = useRef<Map<string, number>>(new Map())
   const orders = ordersQuery.data ?? []
   const preparingCount = orders.filter((order) => order.status === 'preparo').length
   const dispatchedCount = orders.filter((order) => order.status === 'despachado').length
@@ -71,6 +74,10 @@ const PedidosDelivery: React.FC = () => {
   const refreshOrders = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: ordersQueryKeys.delivery.all })
   }, [queryClient])
+
+  useEffect(() => {
+    prepareNotificationSound()
+  }, [])
 
   useEffect(() => {
     const loadDeliveryConfig = async () => {
@@ -125,6 +132,7 @@ const PedidosDelivery: React.FC = () => {
 
     const eventName = String((data as { event?: unknown }).event ?? '')
     const source = String((data as { source?: unknown }).source ?? '')
+    const orderId = String((data as { id?: unknown }).id ?? '')
     const isRelevantDeliveryEvent =
       (eventName === 'order_created' && source === 'delivery') ||
       eventName === 'order_status_changed' ||
@@ -133,6 +141,15 @@ const PedidosDelivery: React.FC = () => {
 
     if (!isRelevantDeliveryEvent) {
       return
+    }
+
+    if (eventName === 'order_created' && source === 'delivery' && orderId) {
+      const now = Date.now()
+      const lastPlayedAt = recentSoundedOrderIdsRef.current.get(orderId) ?? 0
+      if (now - lastPlayedAt > 30000) {
+        recentSoundedOrderIdsRef.current.set(orderId, now)
+        playNotificationSound()
+      }
     }
 
     if (wsRefreshTimerRef.current !== null) {

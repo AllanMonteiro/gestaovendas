@@ -3,6 +3,7 @@ import { Navigate, createBrowserRouter, NavLink, Outlet, useLocation, useNavigat
 import { useOutboxSync } from './useSync'
 import { api } from '../api/client'
 import { getAccessToken, getRefreshToken, type AuthSession } from './auth'
+import { playNotificationSound, prepareNotificationSound } from './playNotificationSound'
 import { resolveAssetUrl } from './runtime'
 import { LoginGate } from '../components/LoginGate'
 import { LoadingState } from '../components/ui'
@@ -160,6 +161,13 @@ const normalizeDeliveryOrders = (payload: DeliveryOrdersResponse): DeliveryOrder
   return []
 }
 
+const resolveNextBrandingLogo = (incoming: string | null | undefined, fallback: string) => {
+  if (incoming === undefined) {
+    return fallback
+  }
+  return incoming || ''
+}
+
 const RouteErrorBoundary: React.FC = () => {
   const error = useRouteError()
 
@@ -255,6 +263,10 @@ const Layout: React.FC = () => {
   }, [logoUrl, storeName, theme])
 
   useEffect(() => {
+    prepareNotificationSound()
+  }, [])
+
+  useEffect(() => {
     const handler = (event: Event) => {
       const custom = event as CustomEvent<string>
       const nextTheme = normalizeTheme(custom.detail)
@@ -269,14 +281,14 @@ const Layout: React.FC = () => {
     const handler = (event: Event) => {
       const custom = event as CustomEvent<BrandingDetail>
       const nextStoreName = custom.detail?.store_name || 'Sorveteria POS'
-      const nextLogoUrl = custom.detail?.logo_url || ''
+      const nextLogoUrl = resolveNextBrandingLogo(custom.detail?.logo_url, logoUrl)
       setStoreName(nextStoreName)
       setLogoUrl(nextLogoUrl)
       writeBrandingCache({ store_name: nextStoreName, logo_url: nextLogoUrl, theme })
     }
     window.addEventListener('sorveteria:branding', handler as EventListener)
     return () => window.removeEventListener('sorveteria:branding', handler as EventListener)
-  }, [theme])
+  }, [logoUrl, theme])
 
   useEffect(() => {
     const handler = () => {
@@ -301,8 +313,7 @@ const Layout: React.FC = () => {
     }
 
     const playDeliveryAlertSound = () => {
-      const audio = new Audio('/notification.mp3')
-      audio.play().catch(() => undefined)
+      playNotificationSound()
     }
 
     const pushDeliveryAlerts = (orders: DeliveryOrderPayload[]) => {
