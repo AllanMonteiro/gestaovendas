@@ -88,6 +88,20 @@ Evite a porta `5432` do pooler em session mode quando o app usa mais de um proce
 
 Se a senha tiver caracteres especiais, use URL encoding.
 
+### Endurecimento de seguranca no Supabase
+
+Se o Supabase alertar `rls_disabled_in_public` ou `sensitive_columns_exposed`, aplique imediatamente o SQL de `supabase/lockdown_public_schema.sql` no `SQL Editor`.
+
+O que esse script faz:
+
+- revoga acesso das roles `anon` e `authenticated` a tabelas e sequences do schema `public`
+- habilita Row-Level Security em todas as tabelas `public`
+- endurece os privilegios padrao para tabelas novas criadas no schema `public`
+
+Depois disso, faca um deploy do backend para aplicar tambem a migration `0005_harden_public_schema_for_supabase` via `python manage.py migrate`.
+
+Se a `DATABASE_URL` real ja apareceu em repositorio, commit ou screenshot, rotacione a senha do banco no Supabase e atualize a variavel no Render antes do proximo deploy.
+
 ## Backend no Render
 
 ### Opcao 1: via `render.yaml`
@@ -97,6 +111,8 @@ Se a senha tiver caracteres especiais, use URL encoding.
 3. Aponte para o repositorio.
 4. O serviço `sorveteria-pos-backend` sera criado.
 5. Preencha as variaveis obrigatorias.
+
+Observacao: o `render.yaml` nao guarda mais a `DATABASE_URL` real. Preencha essa variavel manualmente no Render como secret.
 
 ### Opcao 2: criar manualmente
 
