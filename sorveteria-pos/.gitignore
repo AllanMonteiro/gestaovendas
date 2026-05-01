@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtualenvs
+.venv/
+venv/
+backend/.venv/
+agent/.venv/
+
+# Node
+node_modules/
+frontend/node_modules/
+
+# Build artifacts
+dist/
+frontend/dist/
+staticfiles/
+backend/staticfiles/
+
+# Env files
+.env
+.env.*
+!.env.example
+!.env.prod.example
+!backend/.env.example
+!backend/.env.production.example
+!frontend/.env.example
+
+# Logs / OS / IDE
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# SQLite and local data
+*.sqlite3

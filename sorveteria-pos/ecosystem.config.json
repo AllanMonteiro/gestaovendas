@@ -1,0 +1,13 @@
+{
+  "apps": [
+    {
+      "name": "sorveteria-pos-backend",
+      "script": "gunicorn",
+      "args": "config.asgi:application -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000 -w 2",
+      "cwd": "backend",
+      "env": {
+        "DJANGO_DEBUG": "0"
+      }
+    }
+  ]
+}

@@ -1,8 +1,14 @@
+import base64
+import binascii
+import uuid
 from decimal import Decimal, ROUND_HALF_UP, ROUND_FLOOR
+from pathlib import Path
 from django.db import transaction, models
 from django.contrib.auth import get_user_model
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
 from django.utils import timezone
-from apps.catalog.models import ProductPrice
+from apps.catalog.models import Product, ProductPrice
 from apps.sales.models import Order, OrderItem, Payment, CashSession, CashMove, StoreConfig
 from apps.kitchen.models import KitchenTicket
 from apps.audit.utils import log_audit
@@ -32,6 +38,53 @@ def resolve_effective_user(user):
     )
 
 
+def _save_data_url_asset(data_url: str, prefix: str) -> str:
+    if not isinstance(data_url, str) or not data_url.startswith('data:image/'):
+        return data_url
+    try:
+        header, encoded = data_url.split(',', 1)
+    except ValueError:
+        return data_url
+    extension = 'png'
+    if ';base64' in header:
+        mime_type = header.split(';', 1)[0]
+        extension = mime_type.split('/', 1)[-1] or extension
+    try:
+        binary = base64.b64decode(encoded)
+    except (ValueError, binascii.Error):
+        return data_url
+    safe_extension = Path(f'image.{extension}').suffix or '.png'
+    filename = f'store-config/{prefix}-{uuid.uuid4().hex}{safe_extension}'
+    saved_name = default_storage.save(filename, ContentFile(binary))
+    return default_storage.url(saved_name)
+
+
+def normalize_store_config_assets(config: StoreConfig) -> StoreConfig:
+    changed_fields: list[str] = []
+
+    if config.logo_url and isinstance(config.logo_url, str) and config.logo_url.startswith('data:image/'):
+        config.logo_url = _save_data_url_asset(config.logo_url, 'logo')
+        changed_fields.append('logo_url')
+
+    if isinstance(config.category_images, dict):
+        normalized_images = {}
+        changed = False
+        for key, value in config.category_images.items():
+            if isinstance(value, str) and value.startswith('data:image/'):
+                normalized_images[key] = _save_data_url_asset(value, f'category-{key}')
+                changed = True
+            else:
+                normalized_images[key] = value
+        if changed:
+            config.category_images = normalized_images
+            changed_fields.append('category_images')
+
+    if changed_fields:
+        config.save(update_fields=changed_fields)
+
+    return config
+
+
 def get_store_config() -> StoreConfig:
     config, _ = StoreConfig.objects.get_or_create(id=1, defaults={
         'printer': {},
@@ -39,8 +92,10 @@ def get_store_config() -> StoreConfig:
         'category_images': {},
         'receipt_header_lines': [],
         'receipt_footer_lines': [],
+        'delivery_fee_default': Decimal('10.00'),
+        'delivery_fee_rules': StoreConfig._meta.get_field('delivery_fee_rules').get_default(),
     })
-    return config
+    return normalize_store_config_assets(config)
 
 
 def ensure_open_cash_session() -> CashSession:
@@ -50,13 +105,7 @@ def ensure_open_cash_session() -> CashSession:
     return session
 
 
-@transaction.atomic
-def create_order_idempotent(*, order_type: str, table_label: str | None, customer=None, client_request_id=None) -> Order:
-    if client_request_id:
-        existing = Order.objects.filter(client_request_id=client_request_id).first()
-        if existing:
-            return existing
-    ensure_open_cash_session()
+def allocate_order_sequence() -> tuple:
     business_date = timezone.localdate()
     current_max = (
         Order.objects.select_for_update()
@@ -64,9 +113,20 @@ def create_order_idempotent(*, order_type: str, table_label: str | None, custome
         .aggregate(max_daily_number=models.Max('daily_number'))['max_daily_number']
         or 0
     )
+    return business_date, current_max + 1
+
+
+@transaction.atomic
+def create_order_idempotent(*, order_type: str, table_label: str | None, customer=None, client_request_id=None) -> Order:
+    if client_request_id:
+        existing = Order.objects.filter(client_request_id=client_request_id).first()
+        if existing:
+            return existing
+    ensure_open_cash_session()
+    business_date, daily_number = allocate_order_sequence()
     order = Order.objects.create(
         business_date=business_date,
-        daily_number=current_max + 1,
+        daily_number=daily_number,
         type=order_type,
         table_label=table_label,
         customer=customer,
@@ -76,16 +136,37 @@ def create_order_idempotent(*, order_type: str, table_label: str | None, custome
 
 
 @transaction.atomic
-def add_item(*, order: Order, product_id: int, qty: Decimal, weight_grams: int | None, notes: str | None) -> OrderItem:
+def add_item(
+    *,
+    order: Order,
+    product_id: int,
+    qty: Decimal,
+    weight_grams: int | None,
+    notes: str | None,
+    client_request_id=None,
+) -> OrderItem:
+    if client_request_id:
+        existing = OrderItem.objects.select_related('product').filter(client_request_id=client_request_id).first()
+        if existing:
+            return existing
     ensure_open_cash_session()
     if qty <= 0:
         raise ValueError('qty must be > 0')
     if order.status in [Order.STATUS_PAID, Order.STATUS_CANCELED]:
         raise ValueError('Order is already finalized')
-    price = ProductPrice.objects.filter(product_id=product_id).first()
-    if not price:
-        raise ValueError('Price not found')
-    unit_price = price.price
+    product_name = None
+    price = ProductPrice.objects.select_related('product').only('price', 'product__id', 'product__name').filter(product_id=product_id).first()
+    if price:
+        unit_price = price.price
+        if getattr(price, 'product', None) is not None:
+            product_name = price.product.name
+    else:
+        product = Product.objects.select_related('category').only('id', 'name', 'category__price').get(id=product_id)
+        product_name = product.name
+        if product.category.price:
+            unit_price = product.category.price
+        else:
+            raise ValueError('Preço não encontrado para este produto ou sua categoria.')
     total = q2(Decimal(qty) * unit_price)
     item = OrderItem.objects.create(
         order=order,
@@ -95,8 +176,11 @@ def add_item(*, order: Order, product_id: int, qty: Decimal, weight_grams: int |
         unit_price=unit_price,
         total=total,
         notes=notes,
+        client_request_id=client_request_id,
     )
-    recalc_order_totals(order)
+    increment_order_totals(order, subtotal_delta=total)
+    if product_name:
+        item.product = Product(id=product_id, name=product_name)
     return item
 
 
@@ -106,6 +190,17 @@ def recalc_order_totals(order: Order) -> None:
     order.subtotal = q2(subtotal)
     order.total = q2(order.subtotal - order.discount)
     order.save(update_fields=['subtotal', 'total'])
+
+
+def increment_order_totals(order: Order, *, subtotal_delta: Decimal, total_delta: Decimal | None = None) -> None:
+    subtotal_delta = q2(Decimal(subtotal_delta))
+    total_delta = subtotal_delta if total_delta is None else q2(Decimal(total_delta))
+    Order.objects.filter(pk=order.pk).update(
+        subtotal=models.F('subtotal') + subtotal_delta,
+        total=models.F('total') + total_delta,
+    )
+    order.subtotal = q2((order.subtotal or Decimal('0')) + subtotal_delta)
+    order.total = q2((order.total or Decimal('0')) + total_delta)
 
 
 @transaction.atomic
@@ -215,6 +310,12 @@ def close_order(
         if amount <= 0:
             continue
         Payment.objects.create(order=order, method=pay['method'], amount=amount, meta=pay.get('meta'))
+        
+    for item in order.items.select_related('product'):
+        if hasattr(item.product, 'stock') and item.product.stock is not None:
+            item.product.stock -= Decimal(str(item.qty))
+            item.product.save(update_fields=['stock'])
+
     log_audit(user=user, action='order.close', entity='order', entity_id=order.id, after={'total': str(order.total)})
 
     if loyalty_points_used > 0 and loyalty_account is not None:
@@ -251,6 +352,77 @@ def close_order(
                     order=order,
                 )
 
+    return order
+
+
+def _build_adjusted_payment(method_code: str, amount: Decimal) -> dict:
+    if method_code == 'CARD_CREDIT':
+        return {'method': Payment.METHOD_CARD, 'amount': amount, 'meta': {'card_type': 'CREDIT'}}
+    if method_code == 'CARD_DEBIT':
+        return {'method': Payment.METHOD_CARD, 'amount': amount, 'meta': {'card_type': 'DEBIT'}}
+    if method_code == Payment.METHOD_CASH:
+        return {'method': Payment.METHOD_CASH, 'amount': amount, 'meta': None}
+    if method_code == Payment.METHOD_PIX:
+        return {'method': Payment.METHOD_PIX, 'amount': amount, 'meta': None}
+    raise ValueError('Invalid payment method')
+
+
+@transaction.atomic
+def adjust_finalized_sale(*, order: Order, total: Decimal, payment_method: str, closed_at=None, user=None):
+    if order.status != Order.STATUS_PAID or order.closed_at is None:
+        raise ValueError('Only paid orders can be adjusted')
+
+    adjusted_total = q2(Decimal(total))
+    if adjusted_total < 0:
+        raise ValueError('Total cannot be negative')
+    if adjusted_total > order.subtotal:
+        raise ValueError('Total cannot be greater than subtotal')
+
+    previous_total = order.total
+    previous_discount = order.discount
+    previous_payments = list(
+        Payment.objects.filter(order=order).values('method', 'amount', 'meta')
+    )
+
+    order.total = adjusted_total
+    order.discount = q2(order.subtotal - adjusted_total)
+    
+    update_fields = ['total', 'discount']
+    
+    if closed_at is not None:
+        order.closed_at = closed_at
+        order.created_at = closed_at
+        order.business_date = timezone.localdate(closed_at)
+        update_fields.extend(['closed_at', 'created_at', 'business_date'])
+        
+    order.save(update_fields=update_fields)
+
+    Payment.objects.filter(order=order).delete()
+    if adjusted_total > 0:
+        payment_payload = _build_adjusted_payment(payment_method, adjusted_total)
+        Payment.objects.create(
+            order=order,
+            method=payment_payload['method'],
+            amount=payment_payload['amount'],
+            meta=payment_payload['meta'],
+        )
+
+    log_audit(
+        user=user,
+        action='order.adjust_finalized_sale',
+        entity='order',
+        entity_id=order.id,
+        before={
+            'total': str(previous_total),
+            'discount': str(previous_discount),
+            'payments': previous_payments,
+        },
+        after={
+            'total': str(order.total),
+            'discount': str(order.discount),
+            'payments': list(Payment.objects.filter(order=order).values('method', 'amount', 'meta')),
+        },
+    )
     return order
 
 
@@ -312,35 +484,137 @@ def cash_move(*, user, move_type: str, amount: Decimal, reason: str) -> CashMove
 
 
 @transaction.atomic
-def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_card: Decimal):
+def delete_cash_move(*, move: CashMove, user=None) -> None:
+    effective_user = resolve_effective_user(user)
+    if move.type not in {CashMove.TYPE_REFORCO, CashMove.TYPE_SANGRIA}:
+        raise ValueError('Tipo de movimentacao nao pode ser excluido.')
+    if move.session.status != CashSession.STATUS_OPEN:
+        raise ValueError('Somente movimentacoes da sessao aberta podem ser excluidas.')
+
+    current_session = CashSession.objects.filter(status=CashSession.STATUS_OPEN).first()
+    if current_session is None or move.session_id != current_session.id:
+        raise ValueError('Somente movimentacoes da sessao aberta podem ser excluidas.')
+
+    move_id = move.id
+    before = {
+        'move_id': move.id,
+        'type': move.type,
+        'amount': str(move.amount),
+        'reason': move.reason,
+        'user_id': move.user_id,
+    }
+    move.delete()
+    log_audit(
+        user=effective_user,
+        action='cash.move.delete',
+        entity='cash_session',
+        entity_id=current_session.id,
+        before=before,
+        after={'deleted_move_id': move_id},
+    )
+
+
+@transaction.atomic
+def close_cash(
+    *,
+    user,
+    counted_cash: Decimal,
+    counted_pix: Decimal,
+    counted_card: Decimal | None = None,
+    counted_card_credit: Decimal | None = None,
+    counted_card_debit: Decimal | None = None,
+):
     effective_user = resolve_effective_user(user)
     session = CashSession.objects.filter(status=CashSession.STATUS_OPEN).first()
     if not session:
         raise ValueError('No open session')
     has_open_orders = Order.objects.filter(
-        status__in=[Order.STATUS_OPEN, Order.STATUS_SENT, Order.STATUS_READY]
+        status__in=[Order.STATUS_OPEN, Order.STATUS_SENT, Order.STATUS_READY],
     ).exists()
     if has_open_orders:
         raise ValueError('Existem pedidos em aberto. Feche/cancele todos antes de fechar o caixa.')
     session.status = CashSession.STATUS_CLOSED
     session.closed_at = timezone.now()
-    session.save(update_fields=['status', 'closed_at'])
-    totals = Payment.objects.filter(order__status=Order.STATUS_PAID).aggregate(
+    session.closed_by = effective_user
+    session.save(update_fields=['status', 'closed_at', 'closed_by'])
+    totals = Payment.objects.filter(
+        order__status=Order.STATUS_PAID,
+        order__closed_at__gte=session.opened_at,
+        order__closed_at__lte=session.closed_at,
+    ).aggregate(
         cash=models.Sum('amount', filter=models.Q(method=Payment.METHOD_CASH)),
         pix=models.Sum('amount', filter=models.Q(method=Payment.METHOD_PIX)),
+        card_credit=models.Sum(
+            'amount',
+            filter=models.Q(method=Payment.METHOD_CARD, meta__card_type='CREDIT'),
+        ),
+        card_debit=models.Sum(
+            'amount',
+            filter=models.Q(method=Payment.METHOD_CARD, meta__card_type='DEBIT'),
+        ),
         card=models.Sum(
             'amount',
             filter=models.Q(method=Payment.METHOD_CARD),
         ),
     )
-    expected_cash = totals['cash'] or Decimal('0')
+    cash_moves = CashMove.objects.filter(session=session).aggregate(
+        reforco=models.Sum('amount', filter=models.Q(type=CashMove.TYPE_REFORCO)),
+        sangria=models.Sum('amount', filter=models.Q(type=CashMove.TYPE_SANGRIA)),
+    )
+    cash_sales = totals['cash'] or Decimal('0')
+    reforco = cash_moves['reforco'] or Decimal('0')
+    sangria = cash_moves['sangria'] or Decimal('0')
+    expected_cash = q2(session.initial_float + cash_sales + reforco - sangria)
     expected_pix = totals['pix'] or Decimal('0')
+    expected_card_credit = totals['card_credit'] or Decimal('0')
+    expected_card_debit = totals['card_debit'] or Decimal('0')
     expected_card = totals['card'] or Decimal('0')
+    normalized_counted_card_credit = None if counted_card_credit is None else q2(Decimal(counted_card_credit))
+    normalized_counted_card_debit = None if counted_card_debit is None else q2(Decimal(counted_card_debit))
+    if counted_card is None:
+        counted_card_total = q2((normalized_counted_card_credit or Decimal('0')) + (normalized_counted_card_debit or Decimal('0')))
+    else:
+        counted_card_total = q2(Decimal(counted_card))
     divergence = {
         'cash': q2(Decimal(counted_cash) - expected_cash),
         'pix': q2(Decimal(counted_pix) - expected_pix),
-        'card': q2(Decimal(counted_card) - expected_card),
+        'card': q2(counted_card_total - expected_card),
+        'card_credit': None if normalized_counted_card_credit is None else q2(normalized_counted_card_credit - expected_card_credit),
+        'card_debit': None if normalized_counted_card_debit is None else q2(normalized_counted_card_debit - expected_card_debit),
     }
+
+    reconciliation_data = {
+        'expected': {
+            'cash': float(expected_cash),
+            'pix': float(expected_pix),
+            'card_credit': float(expected_card_credit),
+            'card_debit': float(expected_card_debit),
+            'card': float(expected_card),
+        },
+        'breakdown': {
+            'initial_float': float(session.initial_float),
+            'cash_sales': float(cash_sales),
+            'reforco': float(reforco),
+            'sangria': float(sangria),
+        },
+        'counted': {
+            'cash': float(counted_cash),
+            'pix': float(counted_pix),
+            'card_credit': None if normalized_counted_card_credit is None else float(normalized_counted_card_credit),
+            'card_debit': None if normalized_counted_card_debit is None else float(normalized_counted_card_debit),
+            'card': float(counted_card_total),
+        },
+        'divergence': {
+            'cash': float(divergence['cash']),
+            'pix': float(divergence['pix']),
+            'card_credit': None if divergence['card_credit'] is None else float(divergence['card_credit']),
+            'card_debit': None if divergence['card_debit'] is None else float(divergence['card_debit']),
+            'card': float(divergence['card']),
+        },
+    }
+    session.reconciliation_data = reconciliation_data
+    session.save(update_fields=['reconciliation_data'])
+
     log_audit(
         user=effective_user,
         action='cash.close',
@@ -348,16 +622,42 @@ def close_cash(*, user, counted_cash: Decimal, counted_pix: Decimal, counted_car
         entity_id=session.id,
         after={'divergence': {key: str(value) for key, value in divergence.items()}},
     )
-    return {
-        'expected': {
-            'cash': expected_cash,
-            'pix': expected_pix,
-            'card': expected_card,
-        },
-        'counted': {
-            'cash': counted_cash,
-            'pix': counted_pix,
-            'card': counted_card,
-        },
-        'divergence': divergence,
-    }
+    return reconciliation_data
+
+
+@transaction.atomic
+def reset_sales(*, user):
+    from apps.loyalty.models import LoyaltyMove, LoyaltyAccount
+    from apps.audit.models import AuditLog
+
+    stock_restore_rows = (
+        OrderItem.objects.filter(order__status=Order.STATUS_PAID)
+        .values('product_id')
+        .annotate(total_qty=models.Sum('qty'))
+    )
+    for row in stock_restore_rows:
+        product_id = row.get('product_id')
+        total_qty = row.get('total_qty')
+        if product_id and total_qty:
+            Product.objects.filter(id=product_id).update(stock=models.F('stock') + total_qty)
+
+    # Deleting Order triggers CASCADE for OrderItem, Payment and KitchenTicket.
+    Order.objects.all().delete()
+    CashMove.objects.all().delete()
+    CashSession.objects.all().delete()
+    LoyaltyMove.objects.all().delete()
+    LoyaltyAccount.objects.all().update(points_balance=0)
+    AuditLog.objects.filter(
+        models.Q(entity='order')
+        | models.Q(entity='cash_session')
+        | models.Q(action='system.reset_sales')
+    ).delete()
+
+    log_audit(
+        user=resolve_effective_user(user),
+        action='system.reset_sales',
+        entity='system',
+        entity_id='1',
+        after={'status': 'cleared'}
+    )
+    return True

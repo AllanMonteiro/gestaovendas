@@ -1,0 +1,868 @@
+﻿diff --git a/backend/apps/sales/serializers.py b/backend/apps/sales/serializers.py
+index f870344..7a49782 100644
+--- a/backend/apps/sales/serializers.py
++++ b/backend/apps/sales/serializers.py
+@@ -21,6 +21,30 @@ class PaymentSerializer(serializers.ModelSerializer):
+         fields = ['id', 'order', 'method', 'amount', 'meta', 'created_at']
+ 
+ 
++def _get_payment_display_label(payment):
++    if payment.method == Payment.METHOD_CARD_CREDIT or (payment.method == Payment.METHOD_CARD and (payment.meta or {}).get('card_type') == 'CREDIT'):
++        return 'Cartao credito'
++    if payment.method == Payment.METHOD_CARD_DEBIT or (payment.method == Payment.METHOD_CARD and (payment.meta or {}).get('card_type') == 'DEBIT'):
++        return 'Cartao debito'
++    if payment.method == Payment.METHOD_PIX:
++        return 'PIX'
++    if payment.method == Payment.METHOD_CASH:
++        return 'Dinheiro'
++    return 'Cartao'
++
++
++def _format_order_payment_summary(payments):
++    if not payments:
++        return 'Nao informado'
++
++    labels = []
++    for payment in payments:
++        label = _get_payment_display_label(payment)
++        if label not in labels:
++            labels.append(label)
++    return ' + '.join(labels)
++
++
+ class OrderSerializer(serializers.ModelSerializer):
+     customer = serializers.IntegerField(source='customer_id', allow_null=True, read_only=True)
+     customer_name = serializers.SerializerMethodField()
+@@ -56,6 +80,7 @@ class OrderSummarySerializer(serializers.ModelSerializer):
+     customer_name = serializers.SerializerMethodField()
+     customer_phone = serializers.CharField(source='customer.phone', allow_null=True, read_only=True)
+     display_number = serializers.SerializerMethodField()
++    payment_label = serializers.SerializerMethodField()
+ 
+     def get_customer_name(self, obj):
+         if not obj.customer_id:
+@@ -70,12 +95,15 @@ class OrderSummarySerializer(serializers.ModelSerializer):
+             return f'{obj.daily_number:03d}'
+         return str(obj.id)[:8]
+ 
++    def get_payment_label(self, obj):
++        return _format_order_payment_summary(list(obj.payments.all()))
++
+     class Meta:
+         model = Order
+         fields = [
+             'id', 'status', 'type', 'customer', 'table_label', 'subtotal',
+             'discount', 'total', 'created_at', 'closed_at', 'canceled_reason',
+-            'client_request_id', 'customer_name', 'customer_phone', 'display_number',
++            'client_request_id', 'customer_name', 'customer_phone', 'display_number', 'payment_label',
+         ]
+ 
+ 
+diff --git a/backend/apps/sales/tests.py b/backend/apps/sales/tests.py
+index f384785..2f830ba 100644
+--- a/backend/apps/sales/tests.py
++++ b/backend/apps/sales/tests.py
+@@ -657,6 +657,14 @@ class OrdersHistoryLimitTests(TestCase):
+         self.assertEqual(response.status_code, 200)
+         self.assertGreaterEqual(len(response.data), 1)
+ 
++    def test_closed_orders_include_payment_label_in_summary(self):
++        self._create_paid_order()
++
++        response = self.client.get('/api/orders/closed?include_items=0&limit=1')
++
++        self.assertEqual(response.status_code, 200)
++        self.assertEqual(response.data[0]['payment_label'], 'PIX')
++
+     def test_canceled_orders_without_limit_do_not_error(self):
+         self._create_canceled_order()
+ 
+diff --git a/backend/apps/sales/views.py b/backend/apps/sales/views.py
+index 1845d76..5cad6ca 100644
+--- a/backend/apps/sales/views.py
++++ b/backend/apps/sales/views.py
+@@ -477,6 +477,8 @@ class OrdersClosedView(APIView):
+         qs = _orders_with_customer(include_items=include_items).filter(status=Order.STATUS_PAID)
+         qs = qs.filter(closed_at__isnull=False)
+         qs = _apply_range_filter_for_field(qs, 'closed_at', from_date, to_date)
++        if not include_items:
++            qs = qs.prefetch_related(_order_payments_prefetch())
+         qs = qs.order_by('-closed_at')
+         if limit is not None:
+             qs = qs[:limit]
+@@ -491,6 +493,8 @@ class OrdersCanceledView(APIView):
+         limit = _get_positive_int_param(request, 'limit', None, maximum=500)
+         qs = _orders_with_customer(include_items=include_items).filter(status=Order.STATUS_CANCELED)
+         qs = _apply_range_filter(qs, from_date, to_date)
++        if not include_items:
++            qs = qs.prefetch_related(_order_payments_prefetch())
+         qs = qs.order_by('-created_at')
+         if limit is not None:
+             qs = qs[:limit]
+@@ -682,7 +686,7 @@ class CashDashboardView(APIView):
+         orders_qs = Order.objects.filter(
+             status=Order.STATUS_PAID,
+             closed_at__isnull=False,
+-        ).select_related('customer')
++        ).select_related('customer').prefetch_related(_order_payments_prefetch())
+         orders_qs = _apply_range_filter_for_field(orders_qs, 'closed_at', from_date, to_date).order_by('-closed_at')[:orders_limit]
+         moves_qs = CashMove.objects.select_related('session', 'user').order_by('-created_at')
+         moves_qs = _apply_range_filter(moves_qs, from_date, to_date)[:moves_limit]
+diff --git a/frontend/src/features/sales/types.ts b/frontend/src/features/sales/types.ts
+index ee3e7cf..6738fbc 100644
+--- a/frontend/src/features/sales/types.ts
++++ b/frontend/src/features/sales/types.ts
+@@ -1,6 +1,7 @@
+ export type CashOrder = {
+   id: string
+   display_number?: string
++  payment_label?: string | null
+   status: string
+   type?: string
+   customer_name?: string | null
+diff --git a/frontend/src/pages/Caixa.tsx b/frontend/src/pages/Caixa.tsx
+index ef52d3f..6999023 100644
+--- a/frontend/src/pages/Caixa.tsx
++++ b/frontend/src/pages/Caixa.tsx
+@@ -3,7 +3,6 @@ import { useQueryClient } from '@tanstack/react-query'
+ import { openThermalReceiptPdf, type ThermalReceiptPayload } from '../app/thermalReceipt'
+ import { useSocket } from '../hooks/useSocket'
+ import { useCashDashboard } from '../features/sales/hooks/useCashDashboard'
+-import { api } from '../api/client'
+ import { ChartCard, ChartEmptyState, ChartLegend, ChartPill } from '../components/ChartCard'
+ import {
+   useCloseCashSessionMutation,
+@@ -38,6 +37,7 @@ import {
+ type Order = {
+   id: string
+   display_number?: string
++  payment_label?: string | null
+   status: string
+   type?: string
+   customer_name?: string | null
+@@ -47,18 +47,6 @@ type Order = {
+   closed_at?: string | null
+ }
+ 
+-type OrderPayment = {
+-  method: 'CASH' | 'PIX' | 'CARD' | 'CARD_CREDIT' | 'CARD_DEBIT'
+-  amount: string
+-  meta?: {
+-    card_type?: 'CREDIT' | 'DEBIT'
+-  } | null
+-}
+-
+-type OrderDetailResponse = {
+-  payments?: OrderPayment[]
+-}
+-
+ type CashStatusResponse = {
+   open: boolean
+   session?: {
+@@ -219,38 +207,6 @@ const getApiErrorText = (error: unknown, fallback: string) => {
+   return fallback
+ }
+ 
+-const getPaymentDisplayLabel = (payment: OrderPayment) => {
+-  if (payment.method === 'CARD_CREDIT' || (payment.method === 'CARD' && payment.meta?.card_type === 'CREDIT')) {
+-    return 'Cartao credito'
+-  }
+-  if (payment.method === 'CARD_DEBIT' || (payment.method === 'CARD' && payment.meta?.card_type === 'DEBIT')) {
+-    return 'Cartao debito'
+-  }
+-  if (payment.method === 'PIX') {
+-    return 'PIX'
+-  }
+-  if (payment.method === 'CASH') {
+-    return 'Dinheiro'
+-  }
+-  return 'Cartao'
+-}
+-
+-const formatOrderPaymentSummary = (payments?: OrderPayment[]) => {
+-  if (!payments || payments.length === 0) {
+-    return 'Nao informado'
+-  }
+-
+-  const labels: string[] = []
+-  payments.forEach((payment) => {
+-    const label = getPaymentDisplayLabel(payment)
+-    if (!labels.includes(label)) {
+-      labels.push(label)
+-    }
+-  })
+-
+-  return labels.join(' + ')
+-}
+-
+ const todayISO = () => {
+   const now = new Date()
+   const y = now.getFullYear()
+@@ -283,7 +239,6 @@ const Caixa: React.FC = () => {
+   const closeCashMutation = useCloseCashSessionMutation()
+   const [cashStatus, setCashStatus] = useState<CashStatusResponse>({ open: false })
+   const [orders, setOrders] = useState<Order[]>([])
+-  const [orderPaymentLabels, setOrderPaymentLabels] = useState<Record<string, string>>({})
+   const [openOrders, setOpenOrders] = useState<Order[]>([])
+   const [cashMoves, setCashMoves] = useState<CashMove[]>([])
+   const [cashHistory, setCashHistory] = useState<CashHistoryEntry[]>([])
+@@ -402,44 +357,6 @@ const Caixa: React.FC = () => {
+     setFeedback((current) => (current === 'Alguns dados do caixa falharam ao atualizar. Tente novamente.' ? '' : current))
+   }, [dashboardQuery.data])
+ 
+-  useEffect(() => {
+-    let cancelled = false
+-    const missingOrders = orders.filter((order) => !(order.id in orderPaymentLabels))
+-
+-    if (!missingOrders.length) {
+-      return
+-    }
+-
+-    void (async () => {
+-      const results = await Promise.all(
+-        missingOrders.map(async (order) => {
+-          try {
+-            const response = await api.get<OrderDetailResponse>(`/api/orders/${order.id}/detail`)
+-            return [order.id, formatOrderPaymentSummary(response.data.payments)] as const
+-          } catch {
+-            return [order.id, 'Nao informado'] as const
+-          }
+-        })
+-      )
+-
+-      if (cancelled) {
+-        return
+-      }
+-
+-      setOrderPaymentLabels((current) => {
+-        const next = { ...current }
+-        results.forEach(([orderId, paymentLabel]) => {
+-          next[orderId] = paymentLabel
+-        })
+-        return next
+-      })
+-    })()
+-
+-    return () => {
+-      cancelled = true
+-    }
+-  }, [orderPaymentLabels, orders])
+-
+   const applyDateFilter = () => {
+     setAppliedFromDate(fromDate)
+     setAppliedToDate(toDate)
+@@ -539,7 +456,7 @@ const Caixa: React.FC = () => {
+       description: `Comanda #${getOrderDisplayNumber(order)} finalizada`,
+       input: Number(order.total || 0),
+       output: 0,
+-      paymentLabel: orderPaymentLabels[order.id] || 'Carregando...',
++      paymentLabel: order.payment_label || 'Nao informado',
+     }))
+     const moveEntries: FlowEntry[] = cashMoves.map((move) => ({
+       id: `move-${move.id}`,
+@@ -557,7 +474,7 @@ const Caixa: React.FC = () => {
+     }))
+ 
+     return [...salesEntries, ...moveEntries].sort((a, b) => (a.at < b.at ? 1 : -1))
+-  }, [orders, cashMoves, orderPaymentLabels, cashStatus.open, cashStatus.session?.id])
++  }, [orders, cashMoves, cashStatus.open, cashStatus.session?.id])
+ 
+   const cashHistorySangriaBySession = useMemo(() => {
+     const grouped: Record<number, SessionCashReason[]> = {}
+diff --git a/frontend/src/pages/PDV.tsx b/frontend/src/pages/PDV.tsx
+index 41b684f..0fb9df7 100644
+--- a/frontend/src/pages/PDV.tsx
++++ b/frontend/src/pages/PDV.tsx
+@@ -16,6 +16,7 @@ import { connectWS } from '../api/ws'
+ type Category = {
+   id: number
+   name: string
++  price?: string | number
+ }
+ 
+ type Product = {
+@@ -24,6 +25,7 @@ type Product = {
+   category: number
+   sold_by_weight?: boolean
+   active?: boolean
++  price?: string | number
+ }
+ 
+ type OrderItem = {
+@@ -239,6 +241,7 @@ const buildCatalogSnapshot = (
+       product.name,
+       product.sold_by_weight ? 1 : 0,
+       product.active === false ? 0 : 1,
++      String(product.price ?? ''),
+     ]),
+     config: {
+       store_name: config?.store_name ?? '',
+@@ -261,6 +264,59 @@ const addItemToOrder = (order: Order, item: OrderItem): Order => ({
+   total: moneyString(Number(order.total || 0) + Number(item.total || 0)),
+ })
+ 
++const syncOrderWithAddedItem = (order: Order, clientRequestId: string, item: OrderItem): Order => {
++  const existingIndex = order.items.findIndex((current) => current.client_request_id === clientRequestId)
++  const items =
++    existingIndex === -1
++      ? [...order.items, item]
++      : order.items.map((current, index) => (index === existingIndex ? item : current))
++  const nextSubtotal = items.reduce((sum, current) => sum + Number(current.total || 0), 0)
++  return {
++    ...order,
++    items,
++    subtotal: moneyString(nextSubtotal),
++    total: moneyString(nextSubtotal - Number(order.discount || 0)),
++  }
++}
++
++const removePendingItemFromOrder = (order: Order, clientRequestId: string): Order => ({
++  ...order,
++  items: order.items.filter((item) => item.client_request_id !== clientRequestId),
++  subtotal: moneyString(
++    order.items
++      .filter((item) => item.client_request_id !== clientRequestId)
++      .reduce((sum, item) => sum + Number(item.total || 0), 0)
++  ),
++  total: moneyString(
++    order.items
++      .filter((item) => item.client_request_id !== clientRequestId)
++      .reduce((sum, item) => sum + Number(item.total || 0), 0) - Number(order.discount || 0)
++  ),
++})
++
++const buildOptimisticOrderItem = (
++  product: Product,
++  options: {
++    qty: number
++    clientRequestId: string
++    weightGrams?: number
++  }
++): OrderItem => {
++  const { qty, clientRequestId, weightGrams } = options
++  const unitPrice = Number(product.price || 0)
++  const total = moneyString(unitPrice * qty)
++  return {
++    id: -Math.floor(Math.random() * 1000000),
++    product: product.id,
++    product_name: product.name,
++    qty,
++    unit_price: unitPrice,
++    total,
++    weight_grams: weightGrams ?? null,
++    client_request_id: clientRequestId,
++  }
++}
++
+ const updateItemInOrder = (order: Order, itemId: number, changes: { qty: number; notes?: string | null }) => {
+   const items = order.items.map((item) => {
+     if (item.id !== itemId) {
+@@ -340,10 +396,6 @@ const PDV: React.FC = () => {
+   const [showPaymentModal, setShowPaymentModal] = useState(false)
+   const [closingSale, setClosingSale] = useState(false)
+   const [feedback, setFeedback] = useState<Feedback | null>(null)
+-  const [showQtyModal, setShowQtyModal] = useState(false)
+-  const [qtyProduct, setQtyProduct] = useState<Product | null>(null)
+-  const [qtyInput, setQtyInput] = useState('1')
+-  const [addingQtyItem, setAddingQtyItem] = useState(false)
+   const [addingScaleItem, setAddingScaleItem] = useState(false)
+   const [cashOpen, setCashOpen] = useState(false)
+   const [loyaltyBalance, setLoyaltyBalance] = useState(0)
+@@ -369,7 +421,6 @@ const PDV: React.FC = () => {
+   const [pendingSyncOrderKeys, setPendingSyncOrderKeys] = useState<Set<string>>(new Set())
+   const wsRefreshTimerRef = useRef<number | null>(null)
+   const lastCashValidationAtRef = useRef(0)
+-  const addingQtyItemRef = useRef(false)
+   const addingScaleItemRef = useRef(false)
+   const selectedOrderIdRef = useRef<string | null>(null)
+   const selectedOrderRef = useRef<Order | null>(null)
+@@ -590,7 +641,17 @@ const PDV: React.FC = () => {
+       }
+       
+       const cats = categoriesResp.data
+-      const prods = productsResp.data.filter((item) => item.active !== false)
++      const rawProducts = productsResp.data.filter((item) => item.active !== false)
++      const categoryPriceById = new Map<number, string | number>()
++      cats.forEach((category) => {
++        if (category.price != null) {
++          categoryPriceById.set(category.id, category.price)
++        }
++      })
++      const prods = rawProducts.map((product) => ({
++        ...product,
++        price: categoryPriceById.get(product.category),
++      }))
+       const conf = configResp.data
+       const snapshot = buildCatalogSnapshot(cats, prods, conf)
+ 
+@@ -1048,94 +1109,61 @@ const PDV: React.FC = () => {
+     await createOrder({ includeProfile: true })
+   }
+ 
+-  const handleConfirmAddProduct = async () => {
+-    if (addingQtyItemRef.current) {
++  const submitProductAdd = useCallback(async (product: Product, options: { qty: number; weightGrams?: number }) => {
++    if (!(await ensureCashOpen())) {
+       return
+     }
+-    addingQtyItemRef.current = true
+-    setAddingQtyItem(true)
++    const orderId = selectedOrderIdRef.current
++    if (!orderId) {
++      setFeedback({ type: 'error', text: 'Crie ou selecione um pedido antes de adicionar itens.' })
++      return
++    }
++
++    const clientRequestId = crypto.randomUUID()
++    const payload = {
++      product_id: product.id,
++      qty: options.qty,
++      weight_grams: options.weightGrams,
++      client_request_id: clientRequestId,
++    }
++    const currentOrder = selectedOrderRef.current
++    if (currentOrder && currentOrder.id === orderId) {
++      applyOrderSnapshot(syncOrderWithAddedItem(currentOrder, clientRequestId, buildOptimisticOrderItem(product, {
++        qty: options.qty,
++        weightGrams: options.weightGrams,
++        clientRequestId,
++      })))
++    }
++
+     try {
+-      if (!qtyProduct) {
+-        return
+-      }
+-      if (!(await ensureCashOpen())) {
+-        return
+-      }
+-      const qty = Number(qtyInput.replace(',', '.'))
+-      if (!Number.isFinite(qty) || qty <= 0) {
+-        setFeedback({ type: 'error', text: 'Quantidade invalida.' })
+-        return
++      const response = await api.post<OrderItem>(`/api/orders/${orderId}/items`, payload)
++      const latestOrder = selectedOrderRef.current
++      if (latestOrder && latestOrder.id === orderId) {
++        applyOrderSnapshot(syncOrderWithAddedItem(latestOrder, clientRequestId, response.data))
+       }
+-
+-      const orderId = selectedOrderId
+-      if (!orderId) {
+-        setShowQtyModal(false)
+-        setQtyProduct(null)
+-        setQtyInput('1')
+-        setFeedback({ type: 'error', text: 'Crie/selecione um pedido antes de adicionar itens.' })
++      setIsOnline(true)
++    } catch (error: any) {
++      if (error.enqueued) {
++        setFeedback({ type: 'ok', text: 'Modo Offline: Item adicionado localmente.' })
++        setIsOnline(false)
+         return
+       }
+-
+-      const payload = {
+-        product_id: qtyProduct.id,
+-        qty,
+-        client_request_id: crypto.randomUUID()
+-      }
+-      try {
+-        const response = await api.post<OrderItem>(`/api/orders/${orderId}/items`, payload)
+-        if (selectedOrder && selectedOrder.id === orderId) {
+-          applyOrderSnapshot(addItemToOrder(selectedOrder, response.data))
+-        }
+-        setFeedback({ type: 'ok', text: 'Item adicionado ao pedido.' })
+-        setShowQtyModal(false)
+-        setQtyProduct(null)
+-        setQtyInput('1')
+-        setIsOnline(true)
+-      } catch (error: any) {
+-        if (error.enqueued) {
+-          if (selectedOrder && selectedOrder.id === orderId) {
+-            applyOrderSnapshot(
+-              addItemToOrder(selectedOrder, {
+-                id: Math.floor(Math.random() * 1000000),
+-                product: qtyProduct.id,
+-                qty,
+-                client_request_id: payload.client_request_id,
+-                total: 0,
+-              })
+-            )
+-          }
+-          setFeedback({ type: 'ok', text: 'Modo Offline: Item adicionado localmente.' })
+-          setShowQtyModal(false)
+-          setQtyProduct(null)
+-          setQtyInput('1')
+-          setIsOnline(false)
+-          return
+-        }
+-        setFeedback({ type: 'error', text: getApiErrorText(error, 'Nao foi possivel adicionar o item no pedido.') })
++      const latestOrder = selectedOrderRef.current
++      if (latestOrder && latestOrder.id === orderId) {
++        applyOrderSnapshot(removePendingItemFromOrder(latestOrder, clientRequestId))
+       }
+-    } finally {
+-      addingQtyItemRef.current = false
+-      setAddingQtyItem(false)
++      setFeedback({ type: 'error', text: getApiErrorText(error, 'Nao foi possivel adicionar o item no pedido.') })
+     }
+-  }
++  }, [applyOrderSnapshot, ensureCashOpen])
+ 
+   const handleAddProduct = useCallback(async (product: Product) => {
+-    if (!(await ensureCashOpen())) {
+-      return
+-    }
+-    if (!selectedOrderId) {
+-      setFeedback({ type: 'error', text: 'Crie ou selecione um pedido antes de adicionar itens.' })
+-      return
+-    }
+     if (product.sold_by_weight) {
+       setScaleProduct(product)
+       setShowScaleModal(true)
+       return
+     }
+-    setQtyProduct(product)
+-    setQtyInput('1')
+-    setShowQtyModal(true)
+-  }, [ensureCashOpen, selectedOrderId])
++    await submitProductAdd(product, { qty: 1 })
++  }, [submitProductAdd])
+ 
+   const handleOpenNewOrder = useCallback(() => {
+     void openNewOrderModal()
+@@ -1149,12 +1177,6 @@ const PDV: React.FC = () => {
+     setShowNewOrderModal(false)
+   }, [])
+ 
+-  const handleCancelQtyModal = useCallback(() => {
+-    setShowQtyModal(false)
+-    setQtyProduct(null)
+-    setQtyInput('1')
+-  }, [])
+-
+   const handleCancelScaleModal = useCallback(() => {
+     setShowScaleModal(false)
+     setScaleProduct(null)
+@@ -1164,7 +1186,7 @@ const PDV: React.FC = () => {
+     setShowPaymentModal(false)
+   }, [])
+ 
+-  const handleConfirmScaleProduct = async (weightGrams: number) => {
++  const handleConfirmScaleProduct = useCallback(async (weightGrams: number) => {
+     if (addingScaleItemRef.current) {
+       return
+     }
+@@ -1174,61 +1196,17 @@ const PDV: React.FC = () => {
+       if (!scaleProduct) {
+         return
+       }
+-      if (!(await ensureCashOpen())) {
+-        return
+-      }
+-
+-      const orderId = selectedOrderId
+-      if (!orderId) {
+-        setShowScaleModal(false)
+-        setScaleProduct(null)
+-        setFeedback({ type: 'error', text: 'Crie/selecione um pedido antes de adicionar itens.' })
+-        return
+-      }
+-
+-      const payload = {
+-        product_id: scaleProduct.id,
++      await submitProductAdd(scaleProduct, {
+         qty: round3(weightGrams / 1000),
+-        weight_grams: weightGrams,
+-        client_request_id: crypto.randomUUID()
+-      }
+-
+-      try {
+-        const response = await api.post<OrderItem>(`/api/orders/${orderId}/items`, payload)
+-        if (selectedOrder && selectedOrder.id === orderId) {
+-          applyOrderSnapshot(addItemToOrder(selectedOrder, response.data))
+-        }
+-        setFeedback({ type: 'ok', text: 'Item adicionado ao pedido.' })
+-        setShowScaleModal(false)
+-        setScaleProduct(null)
+-        setIsOnline(true)
+-      } catch (error: any) {
+-        if (error.enqueued) {
+-          if (selectedOrder && selectedOrder.id === orderId) {
+-            applyOrderSnapshot(
+-              addItemToOrder(selectedOrder, {
+-                id: Math.floor(Math.random() * 1000000),
+-                product: scaleProduct.id,
+-                qty: payload.qty,
+-                client_request_id: payload.client_request_id,
+-                weight_grams: weightGrams,
+-                total: 0,
+-              })
+-            )
+-          }
+-          setFeedback({ type: 'ok', text: 'Modo Offline: Item de balanca adicionado localmente.' })
+-          setShowScaleModal(false)
+-          setScaleProduct(null)
+-          setIsOnline(false)
+-          return
+-        }
+-        setFeedback({ type: 'error', text: getApiErrorText(error, 'Nao foi possivel adicionar o item no pedido.') })
+-      }
++        weightGrams,
++      })
++      setShowScaleModal(false)
++      setScaleProduct(null)
+     } finally {
+       addingScaleItemRef.current = false
+       setAddingScaleItem(false)
+     }
+-  }
++  }, [submitProductAdd, scaleProduct])
+ 
+   const handleSendKitchen = async () => {
+     if (!selectedOrder) {
+@@ -1735,7 +1713,7 @@ const PDV: React.FC = () => {
+           </div>
+         </Card>
+ 
+-      <div className="grid grid-cols-1 gap-4 md:gap-4 lg:grid-cols-[250px_minmax(0,1.1fr)_minmax(300px,0.95fr)] xl:grid-cols-[270px_minmax(0,1.08fr)_minmax(320px,0.98fr)]">
++      <div className="grid grid-cols-1 gap-3 md:gap-3 lg:grid-cols-[230px_minmax(0,1.18fr)_minmax(320px,0.92fr)] xl:grid-cols-[250px_minmax(0,1.22fr)_minmax(330px,0.9fr)]">
+         <aside className="order-3 space-y-3 rounded-2xl lg:order-3 xl:order-1">
+           <OpenOrdersPanel
+             openOrders={openOrders}
+@@ -1751,7 +1729,34 @@ const PDV: React.FC = () => {
+           />
+         </aside>
+ 
+-        <section className="order-1 min-w-0 space-y-3 lg:order-1 xl:order-2">
++        <aside className="order-1 min-w-0 lg:order-2 xl:order-2">
++          <Card className="p-3.5 sm:p-4">
++          <SectionHeader
++            title="Catalogo"
++            description="Categorias e produtos para adicionar ao pedido."
++            actions={
++              <Button
++                onClick={handleRefreshCatalog}
++                variant="secondary"
++                size="sm"
++              >
++                Atualizar
++              </Button>
++            }
++          />
++          <ProductGrid
++            categories={categories}
++            selectedCategoryId={selectedCategoryId}
++            products={visibleProducts}
++            allProducts={products}
++            categoryImages={categoryImages}
++            onSelectCategory={setSelectedCategoryId}
++            onAddProduct={handleAddProductClick}
++          />
++          </Card>
++        </aside>
++
++        <section className="order-2 min-w-0 space-y-3 lg:order-1 xl:order-3">
+           <Card className="p-4 sm:p-5">
+             <SectionHeader
+               title="Pedido atual"
+@@ -1816,33 +1821,6 @@ const PDV: React.FC = () => {
+           </Card>
+ 
+         </section>
+-
+-        <aside className="order-2 min-w-0 lg:order-2 xl:order-3">
+-          <Card className="p-3.5 sm:p-4">
+-          <SectionHeader
+-            title="Catalogo"
+-            description="Categorias e produtos para adicionar ao pedido."
+-            actions={
+-              <Button
+-                onClick={handleRefreshCatalog}
+-                variant="secondary"
+-                size="sm"
+-              >
+-                Atualizar
+-              </Button>
+-            }
+-          />
+-          <ProductGrid
+-            categories={categories}
+-            selectedCategoryId={selectedCategoryId}
+-            products={visibleProducts}
+-            allProducts={products}
+-            categoryImages={categoryImages}
+-            onSelectCategory={setSelectedCategoryId}
+-            onAddProduct={handleAddProductClick}
+-          />
+-          </Card>
+-        </aside>
+       </div>
+       </div>
+ 
+@@ -1938,39 +1916,6 @@ const PDV: React.FC = () => {
+         loading={closingSale}
+       />
+ 
+-      <Modal
+-        open={showQtyModal && qtyProduct !== null}
+-        onClose={handleCancelQtyModal}
+-        title="Adicionar item"
+-        description={qtyProduct?.name}
+-        size="sm"
+-        footer={
+-          <>
+-            <Button onClick={handleCancelQtyModal} variant="secondary">
+-              Cancelar
+-            </Button>
+-            <Button
+-              onClick={() => void handleConfirmAddProduct()}
+-              disabled={addingQtyItem}
+-              variant="primary"
+-            >
+-              {addingQtyItem ? 'Adicionando...' : 'Confirmar'}
+-            </Button>
+-          </>
+-        }
+-      >
+-        {qtyProduct ? (
+-          <Input
+-            value={qtyInput}
+-            onChange={(event) => setQtyInput(event.target.value)}
+-            autoFocus
+-            inputMode="decimal"
+-            placeholder="Ex.: 1"
+-            label="Quantidade"
+-          />
+-        ) : null}
+-      </Modal>
+-
+       {showScaleModal ? (
+         <ScaleProductModal
+           product={scaleProduct}
+diff --git a/frontend/src/pages/PublicMenu.tsx b/frontend/src/pages/PublicMenu.tsx
+index 6faf609..6e20e05 100644
+--- a/frontend/src/pages/PublicMenu.tsx
++++ b/frontend/src/pages/PublicMenu.tsx
+@@ -9,6 +9,7 @@ type Product = {
+   description?: string
+   image_url?: string | null
+   category: number
++  price?: string | number
+   active?: boolean
+   sold_by_weight?: boolean
+ }
+@@ -16,11 +17,7 @@ type Product = {
+ type Category = {
+   id: number
+   name: string
+-}
+-
+-type ProductPrice = {
+-  product: number
+-  price: string
++  price?: string | number | null
+ }
+ 
+ type DeliveryFeeRule = {
+@@ -128,7 +125,6 @@ const resolveEstimatedDeliveryFee = (
+ const PublicMenu: React.FC = () => {
+   const [categories, setCategories] = useState<Category[]>([])
+   const [products, setProducts] = useState<Product[]>([])
+-  const [pricesByProductId, setPricesByProductId] = useState<Record<number, string>>({})
+   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null)
+   const [productSearchTerm, setProductSearchTerm] = useState('')
+   const [cart, setCart] = useState<CartItem[]>([])
+@@ -162,25 +158,26 @@ const PublicMenu: React.FC = () => {
+           api.get<StoreConfig>('/api/config/public-menu')
+         ])
+ 
++        const categoryPriceById = new Map<number, string | number>()
++        cats.data.forEach((category) => {
++          if (category.price != null) {
++            categoryPriceById.set(category.id, category.price)
++          }
++        })
++
+         const activeProducts = prods.data.filter((product) => product.active !== false)
+-        const productIds = activeProducts.map((product) => product.id).join(',')
+-        const pricesResp = productIds
+-          ? await api.get<ProductPrice[]>(`/api/products/prices?product_ids=${productIds}`)
+-          : { data: [] as ProductPrice[] }
+-
+-        const nextPrices: Record<number, string> = {}
+-        for (const entry of pricesResp.data) {
+-          nextPrices[entry.product] = entry.price
+-        }
++        const pricedProducts = activeProducts.map((product) => ({
++          ...product,
++          price: categoryPriceById.get(product.category),
++        }))
+ 
+         setCategories(cats.data)
+-        setProducts(activeProducts)
++        setProducts(pricedProducts)
+         setStoreName(config.data.store_name || 'Nossa Sorveteria')
+         setStoreWhatsAppNumber(normalizeWhatsAppNumber(config.data.whatsapp_number))
+         setStoreLogoUrl(config.data.logo_url || '')
+         setDeliveryFeeDefault(String(config.data.delivery_fee_default ?? '10.00'))
+         setDeliveryFeeRules(Array.isArray(config.data.delivery_fee_rules) ? config.data.delivery_fee_rules : [])
+-        setPricesByProductId(nextPrices)
+         if (cats.data.length > 0) {
+           startTransition(() => {
+             setSelectedCategoryId(cats.data[0].id)
+@@ -194,7 +191,7 @@ const PublicMenu: React.FC = () => {
+     void load()
+   }, [])
+ 
+-  const getProductPrice = (productId: number) => Number(pricesByProductId[productId] || 0)
++  const getProductPrice = (product: Product) => Number(product.price || 0)
+ 
+   const filteredProducts = useMemo(() => {
+     const normalizedSearch = deferredProductSearchTerm.trim().toLocaleLowerCase('pt-BR')
+@@ -218,8 +215,8 @@ const PublicMenu: React.FC = () => {
+   }, [deferredProductSearchTerm, products, selectedCategoryId])
+ 
+   const subtotal = useMemo(
+-    () => cart.reduce((sum, item) => sum + getProductPrice(item.product.id) * item.qty, 0),
+-    [cart, pricesByProductId]
++    () => cart.reduce((sum, item) => sum + getProductPrice(item.product) * item.qty, 0),
++    [cart]
+   )
+ 
+   const deliveryFeeEstimate = useMemo(
+@@ -376,7 +373,7 @@ const PublicMenu: React.FC = () => {
+       })
+       const orderLabel = response.data.id.slice(0, 8)
+       const orderItemsSummary = cart
+-        .map((item) => `- ${item.product.name}: ${formatCartItemQuantity(item)} (${formatBRL(getProductPrice(item.product.id) * item.qty)})`)
++        .map((item) => `- ${item.product.name}: ${formatCartItemQuantity(item)} (${formatBRL(getProductPrice(item.product) * item.qty)})`)
+         .join('\n')
+       const whatsappMessage = [
+         `Ola! Acabei de fazer o pedido ${orderLabel} no cardapio online da ${storeName}.`,
+@@ -542,7 +539,7 @@ const PublicMenu: React.FC = () => {
+                   </div>
+                   <div className="mt-4 flex items-center justify-between">
+                     <div>
+-                      <span className="font-semibold text-slate-900">{formatBRL(getProductPrice(product.id))}</span>
++                      <span className="font-semibold text-slate-900">{formatBRL(getProductPrice(product))}</span>
+                       <span className="ml-2 text-xs font-semibold uppercase tracking-[0.14em] text-brand-600">{priceUnitLabel(product)}</span>
+                     </div>
+                     <button
+@@ -583,7 +580,7 @@ const PublicMenu: React.FC = () => {
+                     <div className="flex items-start justify-between gap-3">
+                       <div className="min-w-0">
+                         <p className="truncate font-semibold text-slate-800">{item.product.name}</p>
+-                        <p className="text-sm text-slate-500">{formatBRL(getProductPrice(item.product.id))} {cartUnitLabel(item.product)}</p>
++                        <p className="text-sm text-slate-500">{formatBRL(getProductPrice(item.product))} {cartUnitLabel(item.product)}</p>
+                         {item.weightGrams ? (
+                           <p className="text-xs text-slate-500">Peso informado: {formatWeight(item.weightGrams)}</p>
+                         ) : null}
+@@ -611,7 +608,7 @@ const PublicMenu: React.FC = () => {
+                           </button>
+                         </div>
+                       )}
+-                      <span className="font-bold text-slate-800">{formatBRL(getProductPrice(item.product.id) * item.qty)}</span>
++                      <span className="font-bold text-slate-800">{formatBRL(getProductPrice(item.product) * item.qty)}</span>
+                     </div>
+                   </div>
+                 ))

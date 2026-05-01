@@ -1,0 +1,6 @@
+from .base import *
+
+DEBUG = False
+SECURE_SSL_REDIRECT = get_bool_env('SECURE_SSL_REDIRECT', 'DJANGO_SECURE_SSL_REDIRECT', default=True)
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
