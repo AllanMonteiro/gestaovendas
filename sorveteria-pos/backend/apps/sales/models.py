@@ -134,6 +134,8 @@ class Payment(models.Model):
     METHOD_CASH = 'CASH'
     METHOD_PIX = 'PIX'
     METHOD_CARD = 'CARD'
+    METHOD_CARD_CREDIT = 'CARD_CREDIT'
+    METHOD_CARD_DEBIT = 'CARD_DEBIT'
     METHOD_CHOICES = [
         (METHOD_CASH, 'Cash'),
         (METHOD_PIX, 'Pix'),
