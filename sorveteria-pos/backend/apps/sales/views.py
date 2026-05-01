@@ -784,6 +784,7 @@ class CashDashboardView(APIView):
             }
             return Response(payload)
         except Exception as e:
+            logger.exception('CashDashboardView failed')
             return Response({'error': str(e)}, status=500)
 
 
