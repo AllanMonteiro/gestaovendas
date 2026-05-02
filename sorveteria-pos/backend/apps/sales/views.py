@@ -266,6 +266,10 @@ class OrdersCreateView(APIView):
             )
         except ValueError as exc:
             return Response({'detail': str(exc)}, status=400)
+        try:
+            broadcast_pdv_event('order_created', {'order_id': str(order.id)})
+        except Exception:
+            logger.exception('Failed to broadcast order_created event')
         return Response(OrderSerializer(order).data)
 
 
