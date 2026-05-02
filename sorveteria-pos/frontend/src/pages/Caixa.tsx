@@ -273,6 +273,11 @@ const Caixa: React.FC = () => {
     total: number
     reasons: SessionCashReason[]
   } | null>(null)
+  const [showOpenCashModal, setShowOpenCashModal] = useState(false)
+  const [openCashFloat, setOpenCashFloat] = useState('0')
+  const [showCloseCashModal, setShowCloseCashModal] = useState(false)
+  const [closeCashCounted, setCloseCashCounted] = useState({ cash: '0', pix: '0', cardCredit: '0', cardDebit: '0' })
+  const [deletingMoveEntry, setDeletingMoveEntry] = useState<FlowEntry | null>(null)
   const [agentUrl, setAgentUrl] = useState('')
   const [printerName, setPrinterName] = useState('auto')
   const [storeLabel, setStoreLabel] = useState('Sorveteria POS')
@@ -583,17 +588,18 @@ const Caixa: React.FC = () => {
   const countedTotal = reconciliationDisplayRows.reduce((total, row) => total + (row.counted ?? 0), 0)
   const divergenceTotal = reconciliationDisplayRows.reduce((total, row) => total + (row.divergence ?? 0), 0)
 
-  const handleOpenCash = async () => {
+  const handleOpenCash = () => {
     if (cashStatus.open) {
       setFeedback('Caixa ja esta aberto.')
       return
     }
-    const initialFloat = window.prompt('Fundo inicial do caixa (R$):', '0')
-    if (!initialFloat) {
-      return
-    }
+    setOpenCashFloat('0')
+    setShowOpenCashModal(true)
+  }
+
+  const handleOpenCashSubmit = async () => {
     try {
-      const normalizedInitialFloat = initialFloat.replace(',', '.')
+      const normalizedInitialFloat = openCashFloat.replace(',', '.')
       const response = await openCashMutation.mutateAsync(normalizedInitialFloat)
       setCashStatus({
         open: true,
@@ -630,6 +636,7 @@ const Caixa: React.FC = () => {
     } catch (error: unknown) {
       setFeedback(getApiErrorText(error, 'Falha ao abrir caixa.'))
     }
+    setShowOpenCashModal(false)
   }
 
   const openCashMoveModal = (type: 'SANGRIA' | 'REFORCO') => {
@@ -725,64 +732,48 @@ const Caixa: React.FC = () => {
     }
   }
 
-  const handleDeleteCashMove = async (entry: FlowEntry) => {
-    if (!entry.moveId || !entry.canDelete) {
-      return
-    }
-    const confirmed = window.confirm(
-      `Excluir ${entry.kind === 'REFORCO' ? 'este reforco' : 'esta sangria'} do caixa?`
-    )
-    if (!confirmed) {
-      return
-    }
+  const handleDeleteCashMove = (entry: FlowEntry) => {
+    if (!entry.moveId || !entry.canDelete) return
+    setDeletingMoveEntry(entry)
+  }
 
+  const handleConfirmDeleteMove = async () => {
+    if (!deletingMoveEntry?.moveId) return
     try {
-      await deleteCashMoveMutation.mutateAsync(entry.moveId)
-      setFeedback(entry.kind === 'REFORCO' ? 'Reforco excluido.' : 'Sangria excluida.')
+      await deleteCashMoveMutation.mutateAsync(deletingMoveEntry.moveId)
+      setFeedback(deletingMoveEntry.kind === 'REFORCO' ? 'Reforco excluido.' : 'Sangria excluida.')
     } catch (error: unknown) {
       setFeedback(getApiErrorText(error, 'Falha ao excluir movimentacao.'))
     }
+    setDeletingMoveEntry(null)
   }
 
-  const handleCloseCash = async () => {
+  const handleCloseCash = () => {
     if (!cashStatus.open) {
       setFeedback('Nao ha caixa aberto para fechar.')
       return
     }
-    const countedCash = window.prompt('Contagem dinheiro (R$):', String(totalsByMethod.CASH))
-    if (!countedCash) {
-      return
-    }
-    const countedPix = window.prompt('Contagem PIX (R$):', String(totalsByMethod.PIX))
-    if (!countedPix) {
-      return
-    }
-    const countedCardCredit = window.prompt('Contagem cartao credito (R$):', String(totalsByMethod.CARD_CREDIT))
-    if (!countedCardCredit) {
-      return
-    }
-    const countedCardDebit = window.prompt('Contagem cartao debito (R$):', String(totalsByMethod.CARD_DEBIT))
-    if (!countedCardDebit) {
-      return
-    }
-    const countedCardOther = totalsByMethod.CARD > 0
-      ? window.prompt('Contagem cartao sem classificacao (R$):', String(totalsByMethod.CARD))
-      : null
-    if (totalsByMethod.CARD > 0 && !countedCardOther) {
-      return
-    }
+    setCloseCashCounted({
+      cash: String(totalsByMethod.CASH),
+      pix: String(totalsByMethod.PIX),
+      cardCredit: String(totalsByMethod.CARD_CREDIT),
+      cardDebit: String(totalsByMethod.CARD_DEBIT),
+    })
+    setShowCloseCashModal(true)
+  }
+
+  const handleCloseCashSubmit = async () => {
     const countedCardCombined = (
-      Number(countedCardCredit.replace(',', '.')) +
-      Number(countedCardDebit.replace(',', '.')) +
-      Number((countedCardOther || '0').replace(',', '.'))
+      Number(closeCashCounted.cardCredit.replace(',', '.')) +
+      Number(closeCashCounted.cardDebit.replace(',', '.'))
     ).toFixed(2)
 
     try {
       const response = await closeCashMutation.mutateAsync({
-        counted_cash: countedCash.replace(',', '.'),
-        counted_pix: countedPix.replace(',', '.'),
-        counted_card_credit: countedCardCredit.replace(',', '.'),
-        counted_card_debit: countedCardDebit.replace(',', '.'),
+        counted_cash: closeCashCounted.cash.replace(',', '.'),
+        counted_pix: closeCashCounted.pix.replace(',', '.'),
+        counted_card_credit: closeCashCounted.cardCredit.replace(',', '.'),
+        counted_card_debit: closeCashCounted.cardDebit.replace(',', '.'),
         counted_card: countedCardCombined
       })
       setReconciliation(response.data)
@@ -824,6 +815,7 @@ const Caixa: React.FC = () => {
     } catch (error: unknown) {
       setFeedback(getApiErrorText(error, 'Falha ao fechar caixa.'))
     }
+    setShowCloseCashModal(false)
   }
 
   return (
@@ -1369,6 +1361,62 @@ const Caixa: React.FC = () => {
           </TableElement>
         </Table>
       </Card>
+
+      <Modal
+        open={showOpenCashModal}
+        onClose={() => setShowOpenCashModal(false)}
+        title="Abrir caixa"
+        description="Informe o fundo inicial disponivel para o caixa."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowOpenCashModal(false)}>Cancelar</Button>
+            <Button variant="success" onClick={() => void handleOpenCashSubmit()}>Abrir caixa</Button>
+          </>
+        }
+      >
+        <Input
+          label="Fundo inicial (R$)"
+          inputMode="decimal"
+          placeholder="0,00"
+          value={openCashFloat}
+          onChange={(e) => setOpenCashFloat(e.target.value)}
+        />
+      </Modal>
+
+      <Modal
+        open={showCloseCashModal}
+        onClose={() => setShowCloseCashModal(false)}
+        title="Fechar e conciliar caixa"
+        description="Informe os valores contados fisicamente para calcular as divergencias."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setShowCloseCashModal(false)}>Cancelar</Button>
+            <Button variant="danger" onClick={() => void handleCloseCashSubmit()}>Confirmar fechamento</Button>
+          </>
+        }
+      >
+        <div className="space-y-3">
+          <Input label="Dinheiro contado (R$)" inputMode="decimal" placeholder="0,00" value={closeCashCounted.cash} onChange={(e) => setCloseCashCounted((p) => ({ ...p, cash: e.target.value }))} />
+          <Input label="PIX contado (R$)" inputMode="decimal" placeholder="0,00" value={closeCashCounted.pix} onChange={(e) => setCloseCashCounted((p) => ({ ...p, pix: e.target.value }))} />
+          <Input label="Cartao credito contado (R$)" inputMode="decimal" placeholder="0,00" value={closeCashCounted.cardCredit} onChange={(e) => setCloseCashCounted((p) => ({ ...p, cardCredit: e.target.value }))} />
+          <Input label="Cartao debito contado (R$)" inputMode="decimal" placeholder="0,00" value={closeCashCounted.cardDebit} onChange={(e) => setCloseCashCounted((p) => ({ ...p, cardDebit: e.target.value }))} />
+        </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(deletingMoveEntry)}
+        onClose={() => setDeletingMoveEntry(null)}
+        title="Confirmar exclusao"
+        description={deletingMoveEntry ? `Excluir ${deletingMoveEntry.kind === 'REFORCO' ? 'este reforco' : 'esta sangria'} de ${formatBRL(deletingMoveEntry.output || deletingMoveEntry.input)} do caixa? Esta acao nao pode ser desfeita.` : undefined}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setDeletingMoveEntry(null)}>Cancelar</Button>
+            <Button variant="danger" onClick={() => void handleConfirmDeleteMove()}>Excluir</Button>
+          </>
+        }
+      >
+        {null}
+      </Modal>
 
       <Modal
         open={Boolean(historyReasonSession)}

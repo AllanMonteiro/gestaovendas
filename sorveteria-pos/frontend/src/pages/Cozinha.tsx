@@ -19,6 +19,7 @@ import {
   CardTitle,
   EmptyState,
   LoadingState,
+  Modal,
   PageHeader,
   SectionHeader,
   StatCard,
@@ -61,6 +62,7 @@ const Cozinha: React.FC = () => {
   const moveBackToPrepMutation = useMoveKitchenOrderBackToPrepMutation()
   const queueKitchenPrintMutation = useQueueKitchenOrderPrintMutation()
   const [feedback, setFeedback] = useState('')
+  const [confirmOrderId, setConfirmOrderId] = useState<string | null>(null)
   const [agentUrl, setAgentUrl] = useState('')
   const [storeLabel, setStoreLabel] = useState('Sorveteria POS')
   const [storeAddress, setStoreAddress] = useState('')
@@ -247,7 +249,7 @@ const Cozinha: React.FC = () => {
               </Card>
 
               <div className="grid grid-cols-3 gap-2">
-                <Button onClick={() => void handleReady(order.id)} variant="success" size="sm">Pronto</Button>
+                <Button onClick={() => setConfirmOrderId(order.id)} variant="success" size="sm">Pronto</Button>
                 <Button onClick={() => void handleBackToPrep(order.id)} variant="warning" size="sm">Voltar</Button>
                 <Button onClick={() => void handlePrint(order.id)} variant="secondary" size="sm">Imprimir</Button>
               </div>
@@ -263,6 +265,35 @@ const Cozinha: React.FC = () => {
           description="Assim que um pedido entrar em preparo, ele aparecera aqui."
         />
       ) : null}
+
+      <Modal
+        open={Boolean(confirmOrderId)}
+        onClose={() => setConfirmOrderId(null)}
+        title="Confirmar pedido pronto"
+        description={
+          confirmOrderId
+            ? `Marcar pedido #${getOrderDisplayNumber(orders.find((o) => o.id === confirmOrderId) ?? { id: confirmOrderId, display_number: undefined })} como pronto para retirada?`
+            : undefined
+        }
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConfirmOrderId(null)}>Cancelar</Button>
+            <Button
+              variant="success"
+              onClick={() => {
+                if (confirmOrderId) {
+                  void handleReady(confirmOrderId)
+                  setConfirmOrderId(null)
+                }
+              }}
+            >
+              Confirmar pronto
+            </Button>
+          </>
+        }
+      >
+        {null}
+      </Modal>
     </div>
   )
 }
