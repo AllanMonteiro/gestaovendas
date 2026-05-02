@@ -16,9 +16,6 @@ import {
   Badge,
   Button,
   Card,
-  CardDescription,
-  CardHeader,
-  CardTitle,
   FilterBar,
   Input,
   Modal,
@@ -39,6 +36,7 @@ type Order = {
   id: string
   display_number?: string
   payment_label?: string | null
+  payment_method?: string
   status: string
   type?: string
   customer_name?: string | null
@@ -61,12 +59,6 @@ type CashStatusResponse = {
     sangria: string
     current_cash_estimated: string
   }
-}
-
-type CashSessionOpenResponse = {
-  id: number
-  opened_at: string
-  initial_float: string
 }
 
 type PaymentAgg = {
@@ -139,6 +131,8 @@ type FlowEntry = {
   paymentLabel?: string
   moveId?: number
   canDelete?: boolean
+  canEdit?: boolean
+  originalId?: string
 }
 
 type Summary = {
@@ -456,13 +450,14 @@ const Caixa: React.FC = () => {
 
     const total = rows.reduce((sum, row) => sum + row.value, 0)
 
+    const items = rows.map((row) => ({
+      ...row,
+      percentage: total > 0 ? Math.round((row.value / total) * 100) : 0,
+    }))
     return {
       total,
-      top: rows[0] ?? null,
-      items: rows.map((row) => ({
-        ...row,
-        percentage: total > 0 ? Math.round((row.value / total) * 100) : 0,
-      })),
+      top: items[0] ?? null,
+      items,
     }
   }, [totalsByMethod])
 
@@ -604,15 +599,15 @@ const Caixa: React.FC = () => {
       setCashStatus({
         open: true,
         session: {
-          id: response.data.id,
-          opened_at: response.data.opened_at,
-          initial_float: response.data.initial_float,
+          id: response.id,
+          opened_at: response.opened_at,
+          initial_float: response.initial_float,
         },
         totals: {
           cash_sales: '0',
           reforco: '0',
           sangria: '0',
-          current_cash_estimated: response.data.initial_float,
+          current_cash_estimated: response.initial_float,
         }
       })
       const slipPayload = buildCashSlipPayload('ABERTURA DE CAIXA', [
@@ -776,27 +771,27 @@ const Caixa: React.FC = () => {
         counted_card_debit: closeCashCounted.cardDebit.replace(',', '.'),
         counted_card: countedCardCombined
       })
-      setReconciliation(response.data)
+      setReconciliation(response)
       const slipPayload = buildCashSlipPayload('FECHAMENTO DE CAIXA', [
-        { label: 'Fundo inicial', value: formatBRL(response.data.breakdown?.initial_float ?? cashStatus.session?.initial_float ?? 0) },
-        { label: 'Entradas em dinheiro', value: formatBRL(response.data.breakdown?.cash_sales ?? 0) },
-        { label: 'Reforcos', value: formatBRL(response.data.breakdown?.reforco ?? 0) },
-        { label: 'Sangrias', value: formatBRL(response.data.breakdown?.sangria ?? 0) },
-        { label: 'Dinheiro esperado', value: formatBRL(response.data.expected.cash) },
-        { label: 'PIX esperado', value: formatBRL(response.data.expected.pix) },
-        { label: 'Credito esperado', value: formatBRL(response.data.expected.card_credit ?? 0) },
-        { label: 'Debito esperado', value: formatBRL(response.data.expected.card_debit ?? 0) },
-        { label: 'Cartao total esperado', value: formatBRL(response.data.expected.card) },
-        { label: 'Dinheiro contado', value: formatBRL(response.data.counted.cash) },
-        { label: 'PIX contado', value: formatBRL(response.data.counted.pix) },
-        { label: 'Credito contado', value: formatBRL(response.data.counted.card_credit ?? 0) },
-        { label: 'Debito contado', value: formatBRL(response.data.counted.card_debit ?? 0) },
-        { label: 'Cartao total contado', value: formatBRL(response.data.counted.card) },
-        { label: 'Divergencia dinheiro', value: formatSignedBRL(response.data.divergence.cash) },
-        { label: 'Divergencia PIX', value: formatSignedBRL(response.data.divergence.pix) },
-        { label: 'Divergencia credito', value: formatSignedBRL(response.data.divergence.card_credit ?? 0) },
-        { label: 'Divergencia debito', value: formatSignedBRL(response.data.divergence.card_debit ?? 0) },
-        { label: 'Divergencia cartao total', value: formatSignedBRL(response.data.divergence.card) }
+        { label: 'Fundo inicial', value: formatBRL(response.breakdown?.initial_float ?? cashStatus.session?.initial_float ?? 0) },
+        { label: 'Entradas em dinheiro', value: formatBRL(response.breakdown?.cash_sales ?? 0) },
+        { label: 'Reforcos', value: formatBRL(response.breakdown?.reforco ?? 0) },
+        { label: 'Sangrias', value: formatBRL(response.breakdown?.sangria ?? 0) },
+        { label: 'Dinheiro esperado', value: formatBRL(response.expected.cash) },
+        { label: 'PIX esperado', value: formatBRL(response.expected.pix) },
+        { label: 'Credito esperado', value: formatBRL(response.expected.card_credit ?? 0) },
+        { label: 'Debito esperado', value: formatBRL(response.expected.card_debit ?? 0) },
+        { label: 'Cartao total esperado', value: formatBRL(response.expected.card) },
+        { label: 'Dinheiro contado', value: formatBRL(response.counted.cash) },
+        { label: 'PIX contado', value: formatBRL(response.counted.pix) },
+        { label: 'Credito contado', value: formatBRL(response.counted.card_credit ?? 0) },
+        { label: 'Debito contado', value: formatBRL(response.counted.card_debit ?? 0) },
+        { label: 'Cartao total contado', value: formatBRL(response.counted.card) },
+        { label: 'Divergencia dinheiro', value: formatSignedBRL(response.divergence.cash) },
+        { label: 'Divergencia PIX', value: formatSignedBRL(response.divergence.pix) },
+        { label: 'Divergencia credito', value: formatSignedBRL(response.divergence.card_credit ?? 0) },
+        { label: 'Divergencia debito', value: formatSignedBRL(response.divergence.card_debit ?? 0) },
+        { label: 'Divergencia cartao total', value: formatSignedBRL(response.divergence.card) }
       ])
       let printed = false
       try {
@@ -1229,7 +1224,7 @@ const Caixa: React.FC = () => {
                           type="button"
                           size="sm"
                           variant="secondary"
-                          onClick={() => openEditOrderModal(entry.originalId)}
+                          onClick={() => openEditOrderModal(entry.originalId ?? '')}
                         >
                           Editar
                         </Button>

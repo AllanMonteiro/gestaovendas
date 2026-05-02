@@ -233,7 +233,7 @@ const Configuracoes: React.FC = () => {
       setDeliveryFeeDefault(String(cfg.delivery_fee_default ?? '10.00'))
       setDeliveryFeeRules(normalizeDeliveryFeeRules(cfg.delivery_fee_rules))
       setDeliveryIntegrationEnabled(Boolean(cfg.delivery_integration?.enabled ?? false))
-      setDeliveryIntegrationToken(cfg.delivery_integration?.integration_token || cfg.delivery_integration?.auth_token || '')
+      setDeliveryIntegrationToken(cfg.delivery_integration?.integration_token || '')
       setDeliveryIntegrationMerchantId(cfg.delivery_integration?.merchant_id || '')
       setDeliveryIntegrationPickupLocation(cfg.delivery_integration?.pickup_location || '')
       setDeliveryIntegrationDefaultPaymentMethod(cfg.delivery_integration?.default_payment_method || '')

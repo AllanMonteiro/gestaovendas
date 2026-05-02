@@ -102,6 +102,7 @@ export type StoreConfigResponse = {
   address?: string | null
   printer?: {
     agent_url?: string
+    printer_name?: string
   }
 }
 

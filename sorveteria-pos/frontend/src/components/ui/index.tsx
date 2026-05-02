@@ -5,7 +5,7 @@ type ClassValue = string | false | null | undefined
 const cn = (...values: ClassValue[]) => values.filter(Boolean).join(' ')
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'success' | 'warning'
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'success' | 'warning' | 'brand'
   size?: 'sm' | 'md' | 'lg'
   fullWidth?: boolean
 }
@@ -17,6 +17,7 @@ const buttonVariantClass: Record<NonNullable<ButtonProps['variant']>, string> = 
   danger: 'ui-button-danger',
   success: 'ui-button-success',
   warning: 'ui-button-warning',
+  brand: 'ui-button-brand',
 }
 
 const buttonSizeClass: Record<NonNullable<ButtonProps['size']>, string> = {
@@ -169,9 +170,9 @@ const cardToneClass: Record<NonNullable<CardProps['tone']>, string> = {
   danger: 'ui-card-danger',
 }
 
-export const Card = ({ as = 'section', className, tone = 'default', ...props }: CardProps) => {
-  const Component = as
-  return <Component className={cn('ui-card', cardToneClass[tone], className)} {...props} />
+export const Card = ({ as: Component = 'section', className, tone = 'default', ...props }: CardProps) => {
+  const El = Component as React.ElementType
+  return <El className={cn('ui-card', cardToneClass[tone], className)} {...props} />
 }
 
 export const CardHeader: React.FC<React.HTMLAttributes<HTMLDivElement>> = ({ className, ...props }) => (
