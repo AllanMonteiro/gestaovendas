@@ -758,7 +758,7 @@ class CashDashboardView(APIView):
         moves_limit = _get_positive_int_param(request, 'moves_limit', 100, maximum=500)
         history_limit = _get_positive_int_param(request, 'history_limit', 20, maximum=100)
 
-        orders_qs = _orders_with_customer(include_items=False).filter(status=Order.STATUS_PAID)
+        orders_qs = _orders_with_customer(include_items=False).prefetch_related(_order_payments_prefetch()).filter(status=Order.STATUS_PAID)
         orders_qs = _apply_range_filter_for_field(orders_qs, 'closed_at', from_date, to_date)
         orders_qs = orders_qs.order_by('-closed_at')[:orders_limit]
 

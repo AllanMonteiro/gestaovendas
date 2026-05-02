@@ -161,7 +161,10 @@ def add_item(
         if getattr(price, 'product', None) is not None:
             product_name = price.product.name
     else:
-        product = Product.objects.select_related('category').only('id', 'name', 'category__price').get(id=product_id)
+        try:
+            product = Product.objects.select_related('category').only('id', 'name', 'category__price').get(id=product_id)
+        except Product.DoesNotExist:
+            raise ValueError(f'Produto {product_id} não encontrado.')
         product_name = product.name
         if product.category.price:
             unit_price = product.category.price
@@ -311,10 +314,12 @@ def close_order(
             continue
         Payment.objects.create(order=order, method=pay['method'], amount=amount, meta=pay.get('meta'))
         
-    for item in order.items.select_related('product'):
-        if hasattr(item.product, 'stock') and item.product.stock is not None:
-            item.product.stock -= Decimal(str(item.qty))
-            item.product.save(update_fields=['stock'])
+    from apps.catalog.models import Product as CatalogProduct
+    from django.db.models import F as DbF
+    for item in order.items.all():
+        CatalogProduct.objects.filter(id=item.product_id, stock__isnull=False).update(
+            stock=DbF('stock') - Decimal(str(item.qty))
+        )
 
     log_audit(user=user, action='order.close', entity='order', entity_id=order.id, after={'total': str(order.total)})
 
@@ -323,8 +328,8 @@ def close_order(
 
         existing_redeem = LoyaltyMove.objects.filter(order=order, type=LoyaltyMove.TYPE_REDEEM).first()
         if not existing_redeem:
-            loyalty_account.points_balance -= loyalty_points_used
-            loyalty_account.save(update_fields=['points_balance'])
+            from apps.loyalty.models import LoyaltyAccount as _LA
+            _LA.objects.filter(id=loyalty_account.id).update(points_balance=DbF('points_balance') - loyalty_points_used)
             LoyaltyMove.objects.create(
                 customer=order.customer,
                 points=-loyalty_points_used,
@@ -342,8 +347,7 @@ def close_order(
             existing_move = LoyaltyMove.objects.filter(order=order, type=LoyaltyMove.TYPE_EARN).first()
             if not existing_move:
                 account, _ = LoyaltyAccount.objects.get_or_create(customer=order.customer)
-                account.points_balance += earned_points
-                account.save(update_fields=['points_balance'])
+                LoyaltyAccount.objects.filter(id=account.id).update(points_balance=DbF('points_balance') + earned_points)
                 LoyaltyMove.objects.create(
                     customer=order.customer,
                     points=earned_points,

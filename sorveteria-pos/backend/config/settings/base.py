@@ -36,6 +36,8 @@ def get_list_env(*names: str) -> list[str]:
 
 
 SECRET_KEY = get_env('SECRET_KEY', 'DJANGO_SECRET_KEY', default='dev-secret')
+if not DEBUG and SECRET_KEY == 'dev-secret':
+    raise ValueError('SECRET_KEY must be configured in production')
 DEBUG = get_bool_env('DJANGO_DEBUG', 'DEBUG', default=True)
 REQUIRE_AUTH = get_bool_env('REQUIRE_AUTH', 'DJANGO_REQUIRE_AUTH', default=True)
 
